@@ -2,8 +2,9 @@
 
 Living document: project context, decisions, plan and progress. **Update it at every step.**
 
-Source of truth for the plan: `plan.md` (approved plan, Turkish; its final section "Onaylanan
-düzeltme ve eklemeler" overrides the rest). Everything relevant from it is reflected here.
+Sources (Turkish): `PROMPT.md` = the user's project brief (requirements); `plan.md` = the approved
+plan (its final section "Onaylanan düzeltme ve eklemeler" overrides the rest). Everything relevant
+from both is reflected here.
 
 ## What LiveSubs is
 
@@ -13,6 +14,8 @@ and shows the translation in a movable overlay. Portfolio project (GitHub + Link
 structure and README must be professional.
 
 **Latency is the top priority.** Capture, OCR and translation never run on the UI thread/process.
+It must be a real app: double-click the .exe, no terminal. The app itself stays light (the game may
+share the PC).
 
 ## Environment
 
@@ -103,7 +106,8 @@ Designed from the start for three source kinds; video device lands in phase 2.
 - Orchestrator: **GPU lane** (one in flight, newest-wins pending slot). **CPU quality lane**
   (default off): after the GPU result, if the subtitle is still on screen, run the quality model
   with `num_gpu: 0` (default `qwen3:30b-a3b`) and replace the text; cancel when the subtitle changes.
-  When disabled the CPU model is never loaded (unload with `keep_alive: 0`).
+  When disabled the CPU model is never loaded (unload with `keep_alive: 0`). CPU model and its
+  `num_gpu` are chosen in Settings; GPU lane `num_gpu` optional (None = Ollama decides).
 - Prompt: slang/swearing -> natural Turkish, don't translate names/places, output only the
   translation; per-profile extra context + glossary; last N lines (default 3) as context.
 - Every result carries model, lane (GPU/CPU), OCR ms and translation ms for the live feed.
@@ -139,7 +143,16 @@ Frameless, always-on-top, translucent `QWidget`; click-through via `WS_EX_LAYERE
 WS_EX_TRANSPARENT | WS_EX_NOACTIVATE` (off in calibration mode). Excluded from capture with
 `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` — also applied to the RegionFrame and Inspector.
 Text drawn with `QPainterPath` (outline/shadow). Styles incl. "Vice" (pink/cyan outline);
-readability first. Optional small English original underneath.
+readability first. Optional small English original underneath. Adjustable: position, size, font,
+font size, text color, outline/shadow, background opacity, max lines shown.
+
+### Main window
+
+Source + profile pick, Ollama status (connected, model loaded), names of the models in use, big
+Start/Stop. Live feed: English line, Turkish line, model, lane, OCR ms + translation ms. Tabs:
+Live / Models / Profiles / Settings (fps, thresholds, language, theme, port, hotkeys -> config).
+Models tab shows what to do when Ollama is missing/not running; pull shows progress, downloaded /
+remaining size, cancel. Minimizes to tray.
 
 - **Recording mode** (setting, default off): disables `WDA_EXCLUDEFROMCAPTURE` so OBS/screenshots
   see the overlay (README GIF, LinkedIn video). When on, warn if the overlay rectangle intersects the
@@ -156,7 +169,9 @@ readability first. Optional small English original underneath.
 - Startup checks: Ollama installed/running, models present, en-US OCR (button runs
   `Add-WindowsCapability -Online -Name Language.OCR~~~en-US~0.0.1.0` elevated).
 - Theme: `ui/theme/base.qss` template + token files (`vice.json` default, `dark.json`).
-  Fonts (OFL, Google Fonts): Monoton or Neonderthaw (logo), Audiowide (headings), Inter (body).
+  Fonts (OFL, Google Fonts): Monoton or Neonderthaw (logo), Audiowide (headings), Inter (body);
+  font licenses listed in the README. Palette: dark purple/night-blue base; neon pink/magenta,
+  cyan, sunset orange accents; pink -> orange -> purple gradients. Animations light.
   Own SVG icon/header (palms + sunset). No Rockstar/GTA logos, fonts, art or names.
   Glow (`QGraphicsDropShadowEffect`) only on logo and Start button — it is expensive.
 - Packaging: PyInstaller **onedir** zipped for GitHub Releases (onefile unpacks on every start).
@@ -168,7 +183,7 @@ readability first. Optional small English original underneath.
 assets/        icon.svg, header.svg, fonts/ (+ OFL licenses)
 src/livesubs/
   app.py, __main__.py, i18n/
-  core/        config.py, profiles.py, paths.py, messages.py
+  core/        config.py, profiles.py, paths.py, jsonio.py, geometry.py, messages.py
   engine/      process.py, pipeline.py
     capture/   base.py, wgc.py, mss_fallback.py, video_device.py (phase 2)
     vision/    preprocess.py, change.py
@@ -188,7 +203,7 @@ scripts/       build_exe.ps1, livesubs.spec, bench_pipeline.py
 
 Phase 1 — working core (source -> region -> OCR -> GPU translation -> overlay)
 - [x] 1. Skeleton: pyproject, ruff/pytest, LICENSE, CLAUDE.md, README stubs, CI
-- [ ] 2. Platform + config: Win32 helpers (window list, DPI, affinity, click-through), config/profile models
+- [x] 2. Platform + config: Win32 helpers (window list, DPI, affinity, click-through), config/profile models
 - [ ] 3. Capture: `FrameSource` abstraction (all three kinds designed), WGC window + monitor, bench script
 - [ ] 4. Vision: preprocessing + text-mask change detection + tests
 - [ ] 5. OCR: WinRT wrapper + language check + tests
@@ -226,3 +241,12 @@ Phase 3 — release
   abstraction designed now).
 - 2026-10-21: `opencv-python` (not headless) because `windows-capture` depends on it.
 - 2026-10-21: `PySide6-Essentials` instead of `PySide6` to keep the build small.
+- 2026-10-21 (step 2): `SourceKind` + source specs live in `core/profiles.py` (capture imports
+  them). Window sources are re-found by exe name first, title second (`best_window_match`).
+  "Game runs on this PC" is inferred (video device / streaming-client exe such as
+  `RemotePlay.exe` -> no) and overridable; the VRAM reserve defaults from it (2.0 / 0.5 GB).
+  Settings models validate on assignment; files carry `schema_version`, newer versions are refused,
+  unknown fields ignored, a corrupt `config.json` is kept as `config.json.bad`. `LIVESUBS_HOME`
+  redirects all app files (tests / portable). Click-through only adds `WS_EX_LAYERED` (+ alpha)
+  when missing — Qt's own layered windows use `UpdateLayeredWindow`, which
+  `SetLayeredWindowAttributes` would break.
