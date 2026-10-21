@@ -33,11 +33,17 @@ share the PC).
   `\\.\DISPLAY2` laptop panel 2560x1440 @ 150 %, at (1920, -164).
   Only the RTX 4070 is active (no Intel iGPU listed; MUX in dGPU mode), so both displays are on
   the same adapter — no cross-adapter capture copies.
-- **User's primary scenario:** game (borderless windowed), subtitle region and overlay on the
-  1080p monitor; main window (live feed, latency, model status) on the laptop panel. Benchmarks
-  run on DISPLAY1 only. In calibration mode the Inspector opens by default on a monitor *other*
-  than the game's; window positions are remembered. Hotkeys are global, so the user never has to
-  click the laptop panel mid-game (some games pause or drop FPS on focus loss).
+- **User's primary scenario (updated 2026-10-21):** the game runs on a **console (PS5), not on
+  this PC**; its picture reaches the PC through a **capture card** (+ HDMI splitter, or the card's
+  passthrough). The PC only runs Windows + LiveSubs, so all of it goes to translation (see
+  decision log). Where the user watches the game and the translation is **undecided**; all three
+  must work: (1) game watched on the PC through a low-latency fullscreen preview of the capture
+  card with the overlay on top — needs a preview window of our own (open item; OBS / the card's
+  app as a *window* source meanwhile); (2) game on TV/monitor via splitter, translation on a PC
+  screen next to it (overlay display target); (3) translation on a phone (web output).
+  Earlier assumption, still valid for window/monitor sources: main window on the laptop panel,
+  Inspector by default on a monitor other than the game's, window positions remembered, global
+  hotkeys. Benchmarks run on DISPLAY1.
 - **Python 3.13** (3.15 breaks winrt/numpy builds). `py` defaults to 3.15 — always use the venv:
   `.\.venv\Scripts\python.exe`.
 - Ollama installed at `%LOCALAPPDATA%\Programs\Ollama`, API `http://127.0.0.1:11434`.
@@ -313,6 +319,8 @@ Phase 1 — working core (source -> region -> OCR -> GPU translation -> overlay)
 - [ ] 7. Translation: Ollama backend, prompt, cache, orchestrator (GPU lane) + mocked-HTTP tests
 - [ ] 8. Engine process + IPC
 - [ ] 9. Minimal UI: source pick, drag-select region, Start/Stop, live feed, overlay  => core done
+- [ ] 9b. **= step 15, moved up** (capture card is the user's main source): video device source,
+  then a low-latency fullscreen preview window for it
 
 Phase 2 — features
 - [ ] 10. Calibration mode (F8): movable region frame, Inspector, overlay move/resize; hotkeys
@@ -320,7 +328,7 @@ Phase 2 — features
 - [ ] 12. Models tab (list, VRAM labels vs active profile, pull/cancel, delete, recommended, test/compare)
 - [ ] 13. CPU quality mode
 - [ ] 14. Settings tab (incl. recording mode + overlap warning), startup checks, tray, fullscreen warning
-- [ ] 15. Video device source (capture card): enumerate, resolution/fps, busy/HDCP errors, inspector region pick
+- [ ] 15. Video device source (capture card): enumerate, resolution/fps, busy/HDCP errors, inspector region pick (done as 9b)
 - [ ] 16. Vice theme, fonts, SVG icon/header, overlay styles
 - [ ] 17. Web output + QR (+ Screen Wake Lock)
 
@@ -393,3 +401,7 @@ Phase 3 — release
   qwen3:8b on the samples: fast (median 460 ms, fully on GPU) but weak Turkish ("dog" -> "köpek",
   "hugger" -> "öpücüklüyüm", swearing dropped); few-shot examples fix slang words but not the
   grammar. Prompt decision (few-shot, temperature) waits for gemma4:12b results.
+- 2026-10-21: User: the game will not run on this PC — PS5 via capture card (+ splitter considered;
+  most cards have passthrough, so a splitter may be unnecessary; PS5 HDCP must be off). Viewing
+  setup undecided (see "User's primary scenario"). Video device source moved up to 9b, plus an
+  own low-latency preview window. Default VRAM reserve for this profile kind is already 0.5 GB.
