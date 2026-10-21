@@ -1,8 +1,9 @@
 """Windows OCR via WinRT ``OcrEngine``.
 
 Measured on the samples: 5-13 ms per preprocessed subtitle region (2x upscaled), after a
-one-off warm-up of ~20 ms. ``recognize_async(...).get()`` blocks the calling thread, which is
-exactly what the engine's OCR thread wants; no asyncio loop is involved.
+one-off warm-up of ~20 ms. ``recognize`` blocks the calling thread, which is exactly what the
+engine's pipeline thread wants; no asyncio loop is involved. It works on any thread, including
+single-threaded apartments (see ``_wait``).
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ from dataclasses import dataclass
 
 import cv2
 import numpy as np
+from winrt.windows.foundation import AsyncStatus
 from winrt.windows.globalization import Language
 from winrt.windows.graphics.imaging import BitmapPixelFormat, SoftwareBitmap
 from winrt.windows.media.ocr import OcrEngine
@@ -77,7 +79,7 @@ class WinRtOcr:
         scale = self.max_dimension / max(gray.shape)
         if scale < 1:  # OCR rejects larger images; boxes are reported in the original pixels
             gray = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
-        result = self._engine.recognize_async(to_software_bitmap(gray)).get()
+        result = _wait(self._engine.recognize_async(to_software_bitmap(gray)))
         lines = tuple(
             OcrLine(line.text, _unscale(_line_box(line), min(scale, 1.0)))
             for line in result.lines
@@ -87,6 +89,21 @@ class WinRtOcr:
 
 
 _TO_GRAY = {3: cv2.COLOR_BGR2GRAY, 4: cv2.COLOR_BGRA2GRAY}
+_POLL_S = 0.001
+
+
+def _wait(operation: object) -> object:
+    """Block until a WinRT async operation finishes and return its result.
+
+    ``get()`` refuses to block a single-threaded apartment (a thread where Qt created windows),
+    so there the operation is polled instead; it completes on the WinRT thread pool either way.
+    """
+    try:
+        return operation.get()
+    except RuntimeError:
+        while operation.status == AsyncStatus.STARTED:
+            time.sleep(_POLL_S)
+        return operation.get_results()
 
 
 def _unscale(box: Rect, scale: float) -> Rect:

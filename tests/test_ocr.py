@@ -4,6 +4,7 @@ import cv2
 import numpy as np
 import pytest
 from rapidfuzz import fuzz
+from winrt.runtime import ApartmentType, init_apartment, uninit_apartment
 
 from livesubs.engine.ocr import language
 from livesubs.engine.ocr.winrt_ocr import OcrUnavailableError, WinRtOcr
@@ -97,6 +98,25 @@ def test_color_input_and_oversized_image(ocr: WinRtOcr) -> None:
     result = ocr.recognize(wide)
     assert result.text == "HELLO"
     assert result.lines[0].box.x < 60  # box mapped back to the original pixels
+
+
+@pytest.mark.ocr
+def test_works_on_a_single_threaded_apartment(ocr: WinRtOcr) -> None:
+    """Regression: on a thread where Qt had created windows (an STA), WinRT refused the
+    blocking get() ("Cannot call blocking method from single-threaded apartment")."""
+    out: list[str] = []
+
+    def sta_worker() -> None:
+        init_apartment(ApartmentType.SINGLE_THREADED)
+        try:
+            out.append(ocr.recognize(rendered("HELLO")).text)
+        finally:
+            uninit_apartment()
+
+    worker = threading.Thread(target=sta_worker)
+    worker.start()
+    worker.join(timeout=10)
+    assert out == ["HELLO"]
 
 
 @pytest.mark.ocr

@@ -61,6 +61,8 @@ share the PC).
   CI runs `pytest -m "not ocr and not ollama and not capture"`. Capture tests target
   `tests/helpers/flicker_window.py` (a window in a *separate* process; see WGC pitfalls).
 - Scratch scripts never get stdlib module names (a `bisect.py` once shadowed the stdlib).
+- Gate commits on the full suite with `set -o pipefail` (or no pipe): `pytest | tail` returns
+  tail's exit code — a commit once went in with 24 failing OCR tests that way.
 - `cv2.imread`/`imwrite` fail on non-ASCII paths on Windows (e.g. "Ekran görüntüsü"): use
   `np.fromfile` + `cv2.imdecode` / `cv2.imencode(...)[1].tofile(...)` everywhere.
 - Sample screenshots (`tests/samples/*.png`) are game footage: git-ignored, never published;
@@ -465,3 +467,7 @@ Phase 3 — release
   blank out while the model worked, ~1-1.5 s), and a translation stays **3.5 s** after its
   subtitle disappears (`clear_delay_ms` default 800 -> 3500; the user's saved profile updated too);
   a new line within that time cancels the clear. Supersedes the step-9 overlay rule above.
+- 2026-10-21: WinRT refuses a blocking `.get()` on a single-threaded apartment ("Cannot call
+  blocking method from single-threaded apartment"); a thread becomes STA once Qt creates windows
+  on it (in tests: any Qt test before the OCR tests). `WinRtOcr` now polls the async operation
+  there instead (`_wait`). The engine's pipeline thread is unaffected, but OCR now works anywhere.
