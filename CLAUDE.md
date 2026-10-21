@@ -349,7 +349,9 @@ Phase 2 — features
 - [ ] 17. Web output + QR (+ Screen Wake Lock)
 
 Phase 3 — release
-- [ ] 18. PyInstaller onedir build script (+ earlier smoke build) — smoke build done 2026-10-21 (see log)
+- [ ] 18. PyInstaller onedir build script (+ earlier smoke build) — smoke build done 2026-10-21 (see log);
+  **code signing** needed (Smart App Control blocks unsigned builds): SignPath (free for OSS) or
+  Azure Trusted Signing
 - [ ] 19. README (architecture diagram, install, GIF slot), screenshots
 
 ## Known risks
@@ -483,3 +485,10 @@ Phase 3 — release
   filter verdict (`DebugFrame`, only while `SetDebug`, ≤5 fps, ≤720 px wide), and edits text
   colors (white / yellow / custom), color tolerance and local contrast live (`SetVision`).
   Default overlay font "Segoe UI" until Inter is bundled (step 16).
+- 2026-10-21: **Smart App Control** is on (enforced, `VerifiedAndReputablePolicyState` = 1) on the
+  dev machine and blocked a fresh `LiveSubs.exe` ("Uygulama Denetimi ilkesi bu dosyayı engelledi",
+  CodeIntegrity events 3033/3077); earlier builds happened to pass the cloud reputation check.
+  Every build is a new unknown binary. User chose a **desktop shortcut** that runs
+  `.venv\Scripts\pythonw.exe -m livesubs` (signed interpreter, no console; code changes apply
+  without a build) — `scripts/create_shortcut.ps1`. Turning SAC off was rejected (cannot be turned
+  back on without resetting Windows). Releases need code signing (step 18); README must mention SAC.
