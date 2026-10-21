@@ -9,9 +9,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
+import numpy as np
+
 from livesubs.core.config import OllamaSettings
 from livesubs.core.geometry import NormRect
-from livesubs.core.profiles import Profile
+from livesubs.core.profiles import Profile, VisionSettings
 
 # --- Commands (UI -> engine) ---------------------------------------------------------------------
 
@@ -39,11 +41,25 @@ class SetPaused:
 
 
 @dataclass(frozen=True, slots=True)
+class SetDebug:
+    """Calibration: send DebugFrame events (at most DEBUG_FPS) while enabled."""
+
+    enabled: bool
+
+
+@dataclass(frozen=True, slots=True)
+class SetVision:
+    """New preprocessing settings, applied from the next frame (calibration)."""
+
+    vision: VisionSettings
+
+
+@dataclass(frozen=True, slots=True)
 class Shutdown:
     pass
 
 
-Command = StartPipeline | StopPipeline | SetRegion | SetPaused | Shutdown
+Command = StartPipeline | StopPipeline | SetRegion | SetPaused | SetDebug | SetVision | Shutdown
 
 # --- Events (engine -> UI) -----------------------------------------------------------------------
 
@@ -117,4 +133,28 @@ class FrameInfo:
     screen_rect: tuple[int, int, int, int] | None  # x, y, w, h on the desktop; None for devices
 
 
-Event = StateChanged | EngineError | SubtitleRead | SubtitleTranslated | SubtitleCleared | FrameInfo
+DEBUG_FPS = 5
+DEBUG_MAX_WIDTH = 720  # debug images are shrunk to this width before crossing processes
+
+
+@dataclass(frozen=True, slots=True)
+class DebugFrame:
+    """What the pipeline sees, for the calibration Inspector (only while ``SetDebug`` is on)."""
+
+    region: np.ndarray  # the subtitle region as captured, BGR, at most DEBUG_MAX_WIDTH wide
+    ocr_input: np.ndarray  # after preprocessing, gray (black text on white)
+    text_fraction: float  # share of the region that looks like subtitle text
+    change: str  # the change detector's last verdict
+    last_read: str  # the last OCR result, cleaned
+    rejected: str  # why the filters dropped ``last_read``; "" when it passed
+
+
+Event = (
+    StateChanged
+    | EngineError
+    | SubtitleRead
+    | SubtitleTranslated
+    | SubtitleCleared
+    | FrameInfo
+    | DebugFrame
+)

@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import numpy as np
 import pytest
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QGuiApplication
@@ -9,13 +10,16 @@ from livesubs.core.config import AppConfig
 from livesubs.core.geometry import NormRect, Rect
 from livesubs.core.messages import (
     Command,
+    DebugFrame,
     EngineError,
     EngineState,
     ErrorKind,
     Event,
     FrameInfo,
+    SetDebug,
     SetPaused,
     SetRegion,
+    SetVision,
     StartPipeline,
     StateChanged,
     StopPipeline,
@@ -23,9 +27,16 @@ from livesubs.core.messages import (
     SubtitleRead,
     SubtitleTranslated,
 )
-from livesubs.core.profiles import MonitorSource, OverlayPlacement, ProfileStore, WindowSource
+from livesubs.core.profiles import (
+    MonitorSource,
+    OverlayPlacement,
+    ProfileStore,
+    VisionSettings,
+    WindowSource,
+)
 from livesubs.platform import win32
 from livesubs.platform.win32 import MonitorInfo, WindowInfo
+from livesubs.ui.inspector import Inspector
 from livesubs.ui.main_window import PROFILE_ID, MainWindow
 from livesubs.ui.overlay import Overlay, wrap
 from livesubs.ui.pick import resolve
@@ -452,3 +463,68 @@ def test_toggle_overlay_keeps_text_hidden(window: MainWindow) -> None:
     window.on_hotkey("toggle_overlay")
     assert window._overlay.isVisible()
     assert window._overlay.text == "Sen kimsin?"
+
+
+# --- Inspector ------------------------------------------------------------------------------------
+
+
+def _debug_frame(**changes: object) -> DebugFrame:
+    values = {
+        "region": np.full((40, 300, 3), 30, np.uint8),
+        "ocr_input": np.full((80, 600), 255, np.uint8),
+        "text_fraction": 0.05,
+        "change": "same",
+        "last_read": "Get in the car.",
+        "rejected": "",
+    }
+    return DebugFrame(**{**values, **changes})
+
+
+def test_inspector_shows_what_the_pipeline_sees(qtbot: QtBot) -> None:
+    inspector = Inspector(VisionSettings())
+    qtbot.addWidget(inspector)
+    inspector.show()
+    inspector.show_frame(_debug_frame())
+    assert not inspector.region_image.pixmap().isNull()
+    assert not inspector.ocr_image.pixmap().isNull()
+    assert "5.0%" in inspector.stats.text() and "aynı satır" in inspector.stats.text()
+    assert "Get in the car." in inspector.last_read.text() and "geçti" in inspector.last_read.text()
+    inspector.show_frame(_debug_frame(last_read="||||", rejected="repeated_junk"))
+    assert "elendi" in inspector.last_read.text()
+
+
+def test_inspector_edits_vision_settings(qtbot: QtBot) -> None:
+    vision = VisionSettings(text_colors=["#FFFFFF"])
+    inspector = Inspector(vision)
+    qtbot.addWidget(inspector)
+    with qtbot.waitSignal(inspector.vision_changed):
+        inspector.tolerance.slider.setValue(90)
+    assert vision.color_tolerance == 90
+    inspector.yellow.setChecked(True)
+    assert vision.text_colors == ["#FFFFFF", "#FFFF00"]
+    inspector.white.setChecked(False)
+    inspector.yellow.setChecked(False)  # never zero colors: white comes back
+    assert inspector.white.isChecked()
+    assert vision.text_colors == ["#FFFFFF"]
+    inspector.contrast.setChecked(False)
+    assert vision.local_contrast is False
+
+
+def test_calibration_drives_debug_frames_and_vision(window: MainWindow) -> None:
+    engine = engine_of(window)
+    _with_monitor_source(window)
+    engine.queue = [StateChanged(EngineState.RUNNING)]
+    window._poll()
+    window.set_calibration(True)
+    assert engine.sent[-1] == SetDebug(True)
+    assert window._inspector.isVisible()
+    engine.queue = [_debug_frame()]
+    window._poll()
+    assert "Get in the car." in window._inspector.last_read.text()
+
+    window._inspector.tolerance.slider.setValue(100)
+    assert isinstance(engine.sent[-1], SetVision)
+    assert engine.sent[-1].vision.color_tolerance == 100
+    window.set_calibration(False)
+    assert SetDebug(False) in engine.sent
+    assert not window._inspector.isVisible()

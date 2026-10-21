@@ -20,9 +20,13 @@ from collections.abc import Callable
 from pathlib import Path
 
 import cv2
+import numpy as np
 
 from livesubs.core.geometry import NormRect
 from livesubs.core.messages import (
+    DEBUG_FPS,
+    DEBUG_MAX_WIDTH,
+    DebugFrame,
     EngineError,
     EngineState,
     ErrorKind,
@@ -34,11 +38,13 @@ from livesubs.core.messages import (
     SubtitleRead,
     SubtitleTranslated,
 )
-from livesubs.core.profiles import Source
+from livesubs.core.profiles import Source, VisionSettings
 from livesubs.engine.capture import FrameSource, SourceLostError, SourceUnavailableError
 from livesubs.engine.capture import open_source as default_open_source
 from livesubs.engine.ocr.language import english_ocr_language
 from livesubs.engine.ocr.winrt_ocr import WinRtOcr
+from livesubs.engine.text import filters
+from livesubs.engine.text.normalize import clean
 from livesubs.engine.text.stabilizer import (
     Event as LineEvent,
 )
@@ -63,7 +69,7 @@ from livesubs.engine.translate.orchestrator import (
     TranslationOrchestrator,
 )
 from livesubs.engine.vision.change import Change, ChangeDetector
-from livesubs.engine.vision.preprocess import preprocess
+from livesubs.engine.vision.preprocess import Preprocessed, preprocess
 
 log = logging.getLogger(__name__)
 
@@ -118,6 +124,12 @@ class Pipeline:
         self._region = start.profile.region or NormRect(x=0.1, y=0.75, width=0.8, height=0.2)
         self._region_changed = False
         self._paused = False
+        self._vision = start.profile.vision
+        # Calibration: what the Inspector shows.
+        self._debug = False
+        self._last_debug = 0.0
+        self._last_read = ""
+        self._last_rejected = ""
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name="pipeline", daemon=True)
         self._line_id = 0
@@ -142,6 +154,15 @@ class Pipeline:
     def set_paused(self, paused: bool) -> None:
         """Keep the source open but read and translate nothing (hotkey while not needed)."""
         self._paused = paused
+
+    def set_debug(self, enabled: bool) -> None:
+        """Calibration: emit DebugFrame events (at most DEBUG_FPS)."""
+        self._debug = enabled
+
+    def set_vision(self, vision: VisionSettings) -> None:
+        """New preprocessing settings: the mask means something else now, so start over."""
+        self._vision = vision
+        self._region_changed = True
 
     @property
     def running(self) -> bool:
@@ -257,6 +278,7 @@ class Pipeline:
                 self._region_changed = True  # start over either way: forget the current line
             if self._region_changed:
                 self._region_changed = False
+                last_timestamp = -1.0  # process the current frame again, with the new settings
                 detector.reset()  # a new region: whatever was read before is gone
                 event = stabilizer.update(Change.CLEARED, 0, time.monotonic()).event
                 if event is not None:
@@ -271,18 +293,39 @@ class Pipeline:
             last_timestamp = frame.timestamp
 
             r = self._region.to_pixels(frame.width, frame.height)
-            processed = preprocess(frame.image[r.y : r.bottom, r.x : r.right], profile.vision)
+            region = frame.image[r.y : r.bottom, r.x : r.right]
+            processed = preprocess(region, self._vision)
             change = detector.update(processed.mask)
             now = time.monotonic()
+            if self._debug and now - self._last_debug >= 1 / DEBUG_FPS:
+                self._last_debug = now
+                self._emit(self._debug_frame(region, processed, change))
             decision = stabilizer.update(change, cv2.countNonZero(processed.mask), now)
             if decision.event is not None:
                 self._on_line(decision.event, 0.0)
             if not decision.read:
                 continue
             read = ocr.recognize(processed.ocr_image)
+            self._last_read = clean(read.text)
+            reason = filters.check(self._last_read).reason
+            self._last_rejected = str(reason) if reason else ""
             event = stabilizer.on_read(read.text, time.monotonic())
             if event is not None:
                 self._on_line(event, read.elapsed_ms)
+
+    def _debug_frame(
+        self, region: np.ndarray, processed: Preprocessed, change: Change
+    ) -> DebugFrame:
+        if region.ndim == 3 and region.shape[2] == 4:
+            region = cv2.cvtColor(region, cv2.COLOR_BGRA2BGR)
+        return DebugFrame(
+            region=_shrink(region),
+            ocr_input=_shrink(processed.ocr_image),
+            text_fraction=processed.text_fraction,
+            change=str(change),
+            last_read=self._last_read,
+            rejected=self._last_rejected,
+        )
 
     def _on_line(self, event: LineEvent, ocr_ms: float) -> None:
         match event:
@@ -326,3 +369,11 @@ class Pipeline:
 
     def _fatal(self, kind: ErrorKind, message: str) -> None:
         self._emit(EngineError(kind, message, fatal=True))
+
+
+def _shrink(image: np.ndarray) -> np.ndarray:
+    """A small, contiguous copy for the Inspector (it crosses the process boundary)."""
+    if image.shape[1] <= DEBUG_MAX_WIDTH:
+        return np.ascontiguousarray(image)
+    scale = DEBUG_MAX_WIDTH / image.shape[1]
+    return cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)

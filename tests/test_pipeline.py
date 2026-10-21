@@ -10,6 +10,8 @@ import pytest
 from livesubs.core.config import OllamaSettings
 from livesubs.core.geometry import Rect
 from livesubs.core.messages import (
+    DEBUG_MAX_WIDTH,
+    DebugFrame,
     EngineError,
     EngineState,
     ErrorKind,
@@ -21,7 +23,7 @@ from livesubs.core.messages import (
     SubtitleRead,
     SubtitleTranslated,
 )
-from livesubs.core.profiles import MonitorSource, Profile
+from livesubs.core.profiles import MonitorSource, Profile, VisionSettings
 from livesubs.engine.capture.base import (
     BaseFrameSource,
     Frame,
@@ -275,3 +277,34 @@ def test_pause_reads_nothing_until_resumed(
     assert EngineState.PAUSED in states
     assert states.index(EngineState.PAUSED) < len(states) - 1
     assert len([e for e in recorder.of(SubtitleRead) if not e.upgrade]) == 1  # only the second
+
+
+def test_debug_frames_and_live_vision_changes(
+    two_lines_and_a_gap: tuple[list[Sample], list[tuple[np.ndarray, float]]],
+) -> None:
+    (a, _), scenes = two_lines_and_a_gap
+    source, recorder = ScriptedSource([scenes[0]] * 3), Recorder()  # line A for ~3 s
+    pipeline = Pipeline(
+        start_command(a),
+        recorder,
+        open_source=lambda spec: (source.open(), source)[1],
+        backend_factory=None,
+    )
+    pipeline.start()
+    time.sleep(0.6)
+    assert recorder.of(DebugFrame) == []  # nothing unless calibration asks for it
+    pipeline.set_debug(True)
+    time.sleep(1.0)
+    frames = recorder.of(DebugFrame)
+    assert 2 <= len(frames) <= 7  # throttled to ~5 per second
+    frame = frames[-1]
+    assert frame.region.ndim == 3 and frame.region.shape[2] == 3
+    assert frame.region.shape[1] <= DEBUG_MAX_WIDTH and frame.ocr_input.ndim == 2
+    assert frame.text_fraction > 0.01
+    assert frame.last_read and frame.rejected == ""
+
+    # Calibration: subtitles are not red, so with only red selected nothing looks like text.
+    pipeline.set_vision(VisionSettings(text_colors=["#FF0000"]))
+    time.sleep(0.8)
+    assert recorder.of(DebugFrame)[-1].text_fraction < 0.001
+    pipeline.stop()

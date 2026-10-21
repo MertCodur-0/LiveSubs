@@ -21,8 +21,10 @@ from livesubs.core.messages import (
     EngineState,
     ErrorKind,
     Event,
+    SetDebug,
     SetPaused,
     SetRegion,
+    SetVision,
     Shutdown,
     StartPipeline,
     StateChanged,
@@ -71,6 +73,12 @@ def engine_main(commands: Queue, events: Queue) -> None:
                 case SetPaused(paused=paused):
                     if pipeline is not None:
                         pipeline.set_paused(paused)
+                case SetDebug(enabled=enabled):
+                    if pipeline is not None:
+                        pipeline.set_debug(enabled)
+                case SetVision(vision=vision):
+                    if pipeline is not None:
+                        pipeline.set_vision(vision)
                 case Shutdown():
                     if pipeline is not None:
                         pipeline.stop()

@@ -339,7 +339,7 @@ Phase 1 — working core (source -> region -> OCR -> GPU translation -> overlay)
   then a low-latency fullscreen preview window for it
 
 Phase 2 — features
-- [ ] 10. Calibration mode (F8): movable region frame, Inspector, overlay move/resize; hotkeys
+- [x] 10. Calibration mode (F8): movable region frame, Inspector, overlay move/resize; hotkeys (+ appearance tab, user request)
 - [ ] 11. Profiles (incl. per-profile VRAM reserve, overlay display target)
 - [ ] 12. Models tab (list, VRAM labels vs active profile, pull/cancel, delete, recommended, test/compare)
 - [ ] 13. CPU quality mode
@@ -471,3 +471,15 @@ Phase 3 — release
   blocking method from single-threaded apartment"); a thread becomes STA once Qt creates windows
   on it (in tests: any Qt test before the OCR tests). `WinRtOcr` now polls the async operation
   there instead (`_wait`). The engine's pipeline thread is unaffected, but OCR now works anywhere.
+- 2026-10-21 (step 10 + user request): **"Görünüm" tab** — placement above / over / below the
+  subtitle or custom (moved in calibration; `rect` on `monitor_device`), black box on/off +
+  opacity, font, size, colors, outline, shadow, max lines, English original underneath, clear
+  delay, preview; overlay re-placed every 300 ms from the live source area (follows moved
+  windows). **Hotkeys** via `RegisterHotKey` + Qt native filter: F8 calibration, F9 show/hide the
+  translation, F10 pause (`SetPaused`, state PAUSED). **Calibration**: overlay and an on-screen
+  region frame are draggable/resizable (`ui/movable.py`), all calibration windows hidden from
+  capture; **Inspector** (`ui/inspector.py`, opens on a monitor other than the game's) shows the
+  captured region, the OCR input, text-pixel share, change verdict and the last read with the
+  filter verdict (`DebugFrame`, only while `SetDebug`, ≤5 fps, ≤720 px wide), and edits text
+  colors (white / yellow / custom), color tolerance and local contrast live (`SetVision`).
+  Default overlay font "Segoe UI" until Inter is bundled (step 16).

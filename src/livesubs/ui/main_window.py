@@ -35,12 +35,15 @@ from livesubs.core.config import AppConfig, load_config, save_config
 from livesubs.core.geometry import NormRect, Rect
 from livesubs.core.messages import (
     Command,
+    DebugFrame,
     EngineError,
     EngineState,
     Event,
     FrameInfo,
+    SetDebug,
     SetPaused,
     SetRegion,
+    SetVision,
     StartPipeline,
     StateChanged,
     StopPipeline,
@@ -62,6 +65,7 @@ from livesubs.ollama.client import DEFAULT_URL, InstalledModel, list_models, sta
 from livesubs.platform import win32
 from livesubs.ui import screens
 from livesubs.ui.hotkeys import HotkeyManager
+from livesubs.ui.inspector import Inspector
 from livesubs.ui.overlay import Overlay
 from livesubs.ui.pick import resolve
 from livesubs.ui.placement import custom_geometry, monitor_at, overlay_geometry
@@ -166,6 +170,8 @@ class MainWindow(QMainWindow):
         self._overlay.edited.connect(self._on_overlay_edited)
         self._region_frame = RegionFrame()
         self._region_frame.edited.connect(self._on_region_edited)
+        self._inspector = Inspector(self._profile.vision)
+        self._inspector.vision_changed.connect(self._on_vision_changed)
         self._previewing = False
         self._calibrating = False
         self._paused = False
@@ -416,6 +422,8 @@ class MainWindow(QMainWindow):
                 profile_id=PROFILE_ID,
             )
         )
+        if self._calibrating:
+            self._engine.send(SetDebug(True))
         self.start_button.setText(t("stop"))
 
     # --- engine events ---------------------------------------------------------------------------
@@ -439,6 +447,9 @@ class MainWindow(QMainWindow):
                 self._on_translated(event)
             case SubtitleCleared():
                 self._schedule_clear()
+            case DebugFrame():
+                if self._inspector.isVisible():
+                    self._inspector.show_frame(event)
 
     def _set_state(self, state: EngineState, detail: str) -> None:
         self._state = state
@@ -480,17 +491,41 @@ class MainWindow(QMainWindow):
         self.calibrate_button.setChecked(on)
         self._overlay.suppressed = False
         self._overlay.set_editable(on)
+        if self._state in ACTIVE_STATES:
+            self._engine.send(SetDebug(on))
         if on:
             self._place_region_frame()
             self._region_frame.show()
             self._place_overlay()
+            self._place_inspector()
+            self._inspector.show()
             self.statusBar().showMessage(t("calibration.on"))
         else:
             self._region_frame.hide()
+            self._inspector.hide()
             self._save_timer.start()
             if self._state not in ACTIVE_STATES and not self._previewing:
                 self._overlay.hide()
             self.statusBar().showMessage(t("calibration.off"), 4000)
+
+    def _place_inspector(self) -> None:
+        """Open the Inspector on a monitor other than the game's, so it never covers the game."""
+        monitors = win32.list_monitors()
+        area = self._source_area()
+        game = (
+            monitor_at(monitors, area.x + area.width / 2, area.y + area.height / 2)
+            if area is not None
+            else next(m for m in monitors if m.is_primary)
+        )
+        target = next((m for m in monitors if m.device_name != game.device_name), game)
+        corner = Rect(target.work_rect.x + 40, target.work_rect.y + 40, 1, 1)
+        logical = screens.to_logical(corner, screens.current_screens())
+        self._inspector.move(logical.x, logical.y)
+
+    def _on_vision_changed(self) -> None:
+        self._save_timer.start()
+        if self._state in ACTIVE_STATES:
+            self._engine.send(SetVision(self._profile.vision.model_copy(deep=True)))
 
     def _place_region_frame(self) -> None:
         area, region = self._source_area(), self._profile.region
@@ -655,6 +690,7 @@ class MainWindow(QMainWindow):
         if self._hotkeys is not None:
             self._hotkeys.close()
         self._region_frame.close()
+        self._inspector.close()
         self._overlay.close()
         self._engine.shutdown()
         super().closeEvent(event)
