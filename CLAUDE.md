@@ -492,3 +492,15 @@ Phase 3 — release
   `.venv\Scripts\pythonw.exe -m livesubs` (signed interpreter, no console; code changes apply
   without a build) — `scripts/create_shortcut.ps1`. Turning SAC off was rejected (cannot be turned
   back on without resetting Windows). Releases need code signing (step 18); README must mention SAC.
+- 2026-10-21: **gemma4:26b-a4b-it-qat measured** (15.9 GB; Ollama keeps all 31 layers' attention
+  on the GPU = 5.2 GB VRAM, experts in RAM). Cold load + warm-up 27 s. Per line 1.18-1.59 s vs
+  12b 0.97-1.63 s (median 1.33 vs 1.20 s). Breakdown (Ollama timings): 26b generates at **33 tok/s**
+  (12b: 19) as the bandwidth math predicted, but its prompt processing costs a near-fixed
+  **~0.8 s per request** (12b: ~0.45 s for ~300 tokens): the prompt is not cached between requests
+  (Gemma 4's sliding-window attention) and a MoE prompt batch touches most experts in RAM, so
+  dropping the few-shot examples saved only ~90 ms. num_thread default/8/16: no difference.
+  Quality: 26b clearly closer to the user's references (e.g. "tuttuğumuz yeni koruma ekibinden",
+  "teslimat için geldik" for "pick up", keeps "kanka"/"lan"); without few-shot it loses slang
+  ("dostum", wrong "pick up") -> keep the 5 examples. User accepts 1.5-2 s on screen ->
+  **recommended GPU-lane model on this dedicated PC: gemma4:26b-a4b-it-qat** (12b stays the code
+  default: it needs far less RAM). Model choice is per user in the UI's model combo.
