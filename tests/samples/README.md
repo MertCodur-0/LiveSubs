@@ -12,7 +12,7 @@ put the screenshots listed in `samples.json` into this folder.
 {
   "defaults": {
     "region": [0.12, 0.86, 0.76, 0.135],
-    "vision": {"text_colors": ["#FFFFFF"], "outline_support": true}
+    "vision": {"text_colors": ["#FFFFFF", "#FFFF00"]}
   },
   "samples": [
     {
@@ -27,7 +27,8 @@ put the screenshots listed in `samples.json` into this folder.
 
 - `region`: subtitle area as `[x, y, width, height]`, normalized 0–1 to the image (like a profile).
 - `vision`: `VisionSettings` overrides (a profile's vision settings).
-- Each sample may override `region` and `vision`.
+- Each sample may override `region` and `vision`, and `component_ratio` (allowed mask
+  components per glyph, default `[0.9, 1.25]`; widen only for documented hard samples).
 - `expected`: the subtitle exactly as shown (`""` = no subtitle: the frame must yield no text).
 - `reference_tr`: a human Turkish translation, used to compare models.
 

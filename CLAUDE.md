@@ -89,13 +89,17 @@ UI process (PySide6)                                  Engine process (multiproce
 - Region stored **normalized (0–1) to the source's frame space** (window client area / monitor /
   video frame), converted to physical pixels with DPI awareness.
 - Capture FPS configurable, default 10. WGC yellow border disabled where Windows 11 allows it.
-- Preprocessing (`engine/vision/preprocess.py`): color mask at native resolution (per-channel
-  distance to the subtitle colors, `cv2.inRange`; Otsu when off) -> optional outline support (text
-  pixels need a pixel <= `outline_dark_level` within `outline_radius_px`; never required by
-  default) -> 2x upscale of the mask (linear + threshold) -> 2x2 opening -> connected-component
-  filter (area between `min_component_px` and `max_component_fraction` of the region) -> OCR image
-  = inverted mask (black on white). Every step can be toggled, every threshold is tunable.
-  Cost: ~3 ms for a 1066x106 region, p50 5.4 ms / p95 8.7 ms for 1536x216 at 1080p.
+- Preprocessing (`engine/vision/preprocess.py`), all at native resolution until the upscale:
+  per subtitle color a *closeness* map (255 - max per-channel distance) -> text = closeness within
+  `color_tolerance` AND **local contrast** (white top-hat of the closeness map >=
+  `min_local_contrast`, kernel `local_contrast_kernel_px`; Otsu on gray when color mask is off)
+  -> connected-component filter (area between `min_component_px` and `max_component_fraction`)
+  -> 2x upscale of the mask (linear + threshold) -> 2x2 opening -> OCR image = inverted mask.
+  Local contrast replaced the first "outline support" (a dark pixel nearby): it failed on faint
+  caption boxes over bright ground, while top-hat needs no dark edge at all — only that strokes
+  are thinner than the kernel and stand out from their surroundings. Every step can be toggled,
+  every threshold is tunable. Cost: 1.1–2.2 ms for a 1066x106 sample region; live 1536x216 at
+  1080p p50 5.0 ms / p95 5.8 ms.
 - Change detection (`engine/vision/change.py`) compares only the **text mask**: shrunk to a
   96-px-wide thumbnail, IoU >= 0.75 = same line; coverage < 0.1 % = empty. Background motion never
   triggers. Empty mask = subtitle gone (`CLEARED`); the overlay clears after a configurable delay.
@@ -312,3 +316,10 @@ Phase 3 — release
   frame (bright skin), so tests assert 0.9-1.25x. A few small junk marks remain near some captions
   (an edge line, a bracket next to "man."); left for OCR + text filters, revisit in step 5.
   **Still needed:** screenshots of real in-game subtitles (no box, outline only).
+- 2026-10-21 (step 4, second batch): 6 more samples (same video source) with a *faint* caption box,
+  white and **yellow** (#FFFF00) text, over bright road/grass/rooftops. Absolute-dark outline
+  support dropped whole words there -> replaced by local contrast on color closeness (kernel 15,
+  contrast 60; 40/50 let road texture in). Sample defaults now `text_colors` white + yellow.
+  Known limits, documented in samples.json: 200236 keeps some road-texture junk next to
+  "What should" (via the white color; ratio bound widened to 1.6), and in 200302 "You" on
+  near-white asphalt is lost. Component filter moved before the upscale: same results, ~40 % faster.

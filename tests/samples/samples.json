@@ -1,9 +1,16 @@
 {
   "defaults": {
-    "region": [0.12, 0.86, 0.76, 0.135],
+    "region": [
+      0.12,
+      0.86,
+      0.76,
+      0.135
+    ],
     "vision": {
-      "text_colors": ["#FFFFFF"],
-      "outline_support": true
+      "text_colors": [
+        "#FFFFFF",
+        "#FFFF00"
+      ]
     }
   },
   "samples": [
@@ -78,6 +85,46 @@
       "expected": "",
       "reference_tr": "",
       "notes": "no subtitle; hard negative: bright skin inside the region"
+    },
+    {
+      "file": "Ekran görüntüsü 2026-10-21 200236.png",
+      "expected": "What should I tell you, to put it in your calendar?",
+      "reference_tr": "Ne yapayım, takvimine mi yazayım?",
+      "notes": "hard: yellow text on a nearly transparent box over a bright road and grass; road texture next to \"What should\" leaks in through the white color",
+      "component_ratio": [
+        0.9,
+        1.6
+      ]
+    },
+    {
+      "file": "Ekran görüntüsü 2026-10-21 200244.png",
+      "expected": "Sorry guys, I’m a hugger. I’m a hugger, come in here, get in here!",
+      "reference_tr": "Kusura bakmayın millet, ben sarılmayı severim. Sarılmadan olmaz, gelin buraya, gelin!",
+      "notes": "yellow text, faint box, dark scene"
+    },
+    {
+      "file": "Ekran görüntüsü 2026-10-21 200302.png",
+      "expected": "Who is this guy? You know, besides Brian’s old cellmate.",
+      "reference_tr": "Bu adam kim? Yani, Brian’ın eski koğuş arkadaşı olması dışında.",
+      "notes": "two lines, faint box over a bright road; \"You\" sits on near-white asphalt and is lost (no contrast left)"
+    },
+    {
+      "file": "Ekran görüntüsü 2026-10-21 200314.png",
+      "expected": "Can’t you fucking handle a bunch of street pushers?",
+      "reference_tr": "Birkaç sokak torbacısıyla başa çıkamıyor musun lan?",
+      "notes": "faint box, dark scene"
+    },
+    {
+      "file": "Ekran görüntüsü 2026-10-21 200320.png",
+      "expected": "Yo, we’re here to pick up. For Boobie.",
+      "reference_tr": "Selam, malı almaya geldik. Boobie için.",
+      "notes": "faint box, muted green/brown background"
+    },
+    {
+      "file": "Ekran görüntüsü 2026-10-21 200345.png",
+      "expected": "I never get to smoke these in front of Lori.",
+      "reference_tr": "Bunları Lori’nin yanında hiç içemiyorum.",
+      "notes": "faint box over a busy, bright rooftop texture"
     }
   ]
 }

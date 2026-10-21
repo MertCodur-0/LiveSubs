@@ -4,7 +4,10 @@ Steps, each switchable in ``VisionSettings``:
 
 1. color mask: pixels within ``color_tolerance`` (per channel) of a subtitle color;
    without it, an Otsu threshold of the brightness
-2. outline support: keep text pixels that have something dark nearby (outline or caption box)
+2. local contrast: keep only thin structures that stand out from their surroundings in
+   closeness to the subtitle color (a white top-hat of the closeness map). Wide areas of the
+   subtitle color (sky, a white road, skin) vanish; text on a faint caption box or no box at all
+   stays, because it never needs a *dark* edge — only to differ from what is around it.
 3. 2x upscale: OCR reads small game fonts far better at twice the size
 4. morphology: an opening that removes sub-pixel speckle
 5. component filter: drop specks and large blobs of the subtitle color (sky, skin, lights)
@@ -43,22 +46,36 @@ def hex_to_bgr(color: str) -> tuple[int, int, int]:
     return value & 0xFF, (value >> 8) & 0xFF, (value >> 16) & 0xFF
 
 
-def color_mask(bgr: np.ndarray, colors: Sequence[str], tolerance: int) -> np.ndarray:
-    """255 where a pixel is within ``tolerance`` of any color on every channel."""
+def closeness(bgr: np.ndarray, color: str) -> np.ndarray:
+    """255 minus the largest per-channel difference to ``color``: 255 = exactly that color."""
+    b, g, r = cv2.split(cv2.absdiff(bgr, (*hex_to_bgr(color), 0)))
+    return cv2.bitwise_not(cv2.max(cv2.max(b, g), r))
+
+
+def local_contrast(image: np.ndarray, min_contrast: int, kernel_px: int) -> np.ndarray:
+    """255 where ``image`` exceeds its neighborhood by ``min_contrast``, in structures thinner
+    than ``kernel_px`` (white top-hat). Glyph strokes qualify; wide bright areas never do."""
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_px, kernel_px))
+    return cv2.compare(cv2.morphologyEx(image, cv2.MORPH_TOPHAT, kernel), min_contrast, cv2.CMP_GE)
+
+
+def color_mask(
+    bgr: np.ndarray,
+    colors: Sequence[str],
+    tolerance: int,
+    min_contrast: int | None = None,
+    kernel_px: int = 15,
+) -> np.ndarray:
+    """255 where a pixel is within ``tolerance`` of any color on every channel and, with
+    ``min_contrast``, also stands out locally in closeness to that color."""
     mask = np.zeros(bgr.shape[:2], np.uint8)
     for color in colors:
-        target = np.array(hex_to_bgr(color), np.int16)
-        lower = np.clip(target - tolerance, 0, 255).astype(np.uint8)
-        upper = np.clip(target + tolerance, 0, 255).astype(np.uint8)
-        mask |= cv2.inRange(bgr, lower, upper)
+        near = closeness(bgr, color)
+        match = cv2.compare(near, 255 - tolerance, cv2.CMP_GE)
+        if min_contrast is not None:
+            match &= local_contrast(near, min_contrast, kernel_px)
+        mask |= match
     return mask
-
-
-def outline_filter(mask: np.ndarray, gray: np.ndarray, dark_level: int, radius: int) -> np.ndarray:
-    """Keep mask pixels within ``radius`` of a pixel no brighter than ``dark_level``."""
-    dark = cv2.compare(gray, dark_level, cv2.CMP_LE)
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * radius + 1, 2 * radius + 1))
-    return mask & cv2.dilate(dark, kernel)
 
 
 def filter_components(mask: np.ndarray, min_area: int, max_area: int) -> np.ndarray:
@@ -76,14 +93,24 @@ def preprocess(region: np.ndarray, settings: VisionSettings) -> Preprocessed:
         bgr = cv2.cvtColor(region, cv2.COLOR_BGRA2BGR)  # also makes it contiguous
     else:
         bgr = np.ascontiguousarray(region)
-    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+    contrast = settings.min_local_contrast if settings.local_contrast else None
+    kernel_px = settings.local_contrast_kernel_px
 
     if settings.color_mask:
-        mask = color_mask(bgr, settings.text_colors, settings.color_tolerance)
+        mask = color_mask(bgr, settings.text_colors, settings.color_tolerance, contrast, kernel_px)
     else:
+        gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
         _, mask = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
-    if settings.outline_support:
-        mask = outline_filter(mask, gray, settings.outline_dark_level, settings.outline_radius_px)
+        if contrast is not None:
+            mask &= local_contrast(gray, contrast, kernel_px)
+
+    if settings.component_filter:
+        # At native resolution: a quarter of the pixels to label compared with after upscaling.
+        mask = filter_components(
+            mask,
+            min_area=settings.min_component_px,
+            max_area=max(1, int(settings.max_component_fraction * mask.size)),
+        )
 
     scale = UPSCALE_FACTOR if settings.upscale else 1
     if scale > 1:
@@ -93,12 +120,5 @@ def preprocess(region: np.ndarray, settings: VisionSettings) -> Preprocessed:
         _, mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
     if settings.morphology:
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, _OPEN_KERNEL)
-    if settings.component_filter:
-        area_scale = scale * scale
-        mask = filter_components(
-            mask,
-            min_area=settings.min_component_px * area_scale,
-            max_area=max(1, int(settings.max_component_fraction * mask.size)),
-        )
 
     return Preprocessed(mask=mask, ocr_image=cv2.bitwise_not(mask), scale=scale)

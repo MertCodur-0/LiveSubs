@@ -77,11 +77,12 @@ class VisionSettings(SettingsModel):
     color_tolerance: int = Field(75, ge=0, le=255)
     upscale: bool = True
     color_mask: bool = True
-    # Keep only text pixels with something dark nearby (an outline or a caption box). Rejects
-    # bright scenery of the subtitle's color; off for subtitles drawn without any edge.
-    outline_support: bool = False
-    outline_dark_level: int = Field(90, ge=0, le=255)
-    outline_radius_px: int = Field(3, ge=1, le=10)
+    # Keep only thin structures that stand out from their surroundings (white top-hat of the
+    # closeness to the subtitle color): rejects wide bright scenery, needs no dark outline/box.
+    local_contrast: bool = True
+    min_local_contrast: int = Field(60, ge=1, le=255)
+    # Strokes thinner than this survive; raise it for very large or bold subtitle fonts.
+    local_contrast_kernel_px: int = Field(15, ge=3, le=99)
     morphology: bool = True
     component_filter: bool = True
     # Component limits at native resolution: specks below, scenery blobs above.

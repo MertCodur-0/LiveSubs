@@ -23,6 +23,8 @@ class Sample:
     vision: VisionSettings
     expected: str
     reference_tr: str
+    # Allowed mask components per glyph; widened only for documented hard samples.
+    component_ratio: tuple[float, float] = (0.9, 1.25)
 
     @property
     def name(self) -> str:
@@ -59,6 +61,7 @@ def load_samples() -> list[Sample]:
                 vision=VisionSettings(**vision),
                 expected=entry["expected"],
                 reference_tr=entry.get("reference_tr", ""),
+                component_ratio=tuple(entry.get("component_ratio", (0.9, 1.25))),
             )
         )
     return samples

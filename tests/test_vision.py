@@ -89,14 +89,29 @@ def test_large_blob_of_text_color_is_dropped() -> None:
     assert components(result.mask) >= 4
 
 
-def test_outline_support_rejects_text_colored_scenery() -> None:
-    plain = np.full((80, 600, 3), 150, np.uint8)  # mid-gray, nothing dark anywhere
-    scenery = caption("Hello", background=plain, box=False)
-    assert components(preprocess(scenery, VisionSettings(outline_support=False)).mask) > 0
-    assert components(preprocess(scenery, VisionSettings(outline_support=True)).mask) == 0
-    # A caption box provides the dark surroundings.
-    boxed = caption("Hello", background=plain, box=True)
-    assert components(preprocess(boxed, VisionSettings(outline_support=True)).mask) > 0
+def test_local_contrast_rejects_wide_patches_of_text_color() -> None:
+    # White tiles bigger than the contrast kernel but small enough to pass the component filter:
+    # windows, signs, lit pavement.
+    scene = np.full((80, 600, 3), 60, np.uint8)
+    for x in range(20, 580, 60):
+        scene[20:44, x : x + 24] = 255
+    assert components(preprocess(scene, VisionSettings(local_contrast=False)).mask) > 0
+    assert components(preprocess(scene, VisionSettings(local_contrast=True)).mask) == 0
+
+
+def test_text_needs_no_dark_box_or_outline() -> None:
+    # White text straight on a light-gray road: no box, no outline, still readable.
+    road = np.full((80, 600, 3), 175, np.uint8)
+    result = preprocess(caption("Hello there", background=road, box=False), VisionSettings())
+    assert components(result.mask) >= 8
+
+
+def test_yellow_text_on_a_bright_neutral_background() -> None:
+    # Brightness alone barely separates yellow from light gray; closeness to yellow does.
+    road = np.full((80, 600, 3), 210, np.uint8)
+    settings = VisionSettings(text_colors=["#FFFF00"])
+    result = preprocess(caption("Hello", color=(0, 255, 255), background=road, box=False), settings)
+    assert components(result.mask) >= 4
 
 
 def test_yellow_subtitles() -> None:
@@ -158,7 +173,8 @@ def test_sample_subtitle_yields_one_component_per_glyph(sample: Sample) -> None:
     result = preprocess(sample.load_region(), sample.vision)
     glyphs = sum(not c.isspace() for c in sample.expected)
     # i/j dots, apostrophes and accents add a few components; scenery junk would add many.
-    assert 0.9 * glyphs <= components(result.mask) <= 1.25 * glyphs
+    low, high = sample.component_ratio
+    assert low * glyphs <= components(result.mask) <= high * glyphs
     assert ChangeDetector().has_text(result.mask)
 
 
