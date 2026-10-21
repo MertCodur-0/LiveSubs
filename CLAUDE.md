@@ -2,6 +2,9 @@
 
 Living document: project context, decisions, plan and progress. **Update it at every step.**
 
+Source of truth for the plan: `plan.md` (approved plan, Turkish; its final section "Onaylanan
+düzeltme ve eklemeler" overrides the rest). Everything relevant from it is reflected here.
+
 ## What LiveSubs is
 
 A Windows desktop app that reads English subtitles from any game on screen (PC games, PS5 Remote
@@ -56,7 +59,16 @@ UI process (PySide6)                                  Engine process (multiproce
   Debug frames (raw/preprocessed) are only sent while calibration mode is on, throttled to ~5 fps.
 - Region stored **normalized (0–1) to the source's frame space** (window client area / monitor /
   video frame), converted to physical pixels with DPI awareness.
-- Change detection compares only the **text mask**, never raw pixels. Empty mask = subtitle gone.
+- Capture FPS configurable, default 10. WGC yellow border disabled where Windows 11 allows it.
+- Preprocessing: crop -> 2x upscale (`INTER_CUBIC`) -> HSV/color-distance mask for the configured
+  subtitle colors -> optional outline support (never *require* a dark text edge) -> morphological
+  cleanup -> connected-component filter (size/aspect) -> black text on white. Every step can be
+  toggled, every threshold is tunable.
+- Change detection compares only the **text mask** (downscaled; pixel diff / IoU), never raw
+  pixels, so background motion never triggers. Empty mask = subtitle gone; the overlay clears after
+  a configurable delay.
+- Filters: letter ratio, minimum length, vowel presence, repeated junk characters; a repeat of the
+  last sent line is dropped.
 - Stabilizer: same normalized text (rapidfuzz >= 0.9) in 2 consecutive reads before translating; on
   change a fast re-read is scheduled (~50 ms) instead of waiting for the next tick.
 - Cache: in-memory LRU + SQLite, key = (model, profile, normalized text); context not in key.
@@ -109,7 +121,7 @@ Designed from the start for three source kinds; video device lands in phase 2.
 - Test/compare: fixed set of sample game lines through two models side by side with ms.
 - Two models loaded at once needs `OLLAMA_MAX_LOADED_MODELS >= 2` — check and explain.
 
-### Profiles (per game) — `%APPDATA%\LiveSubs\profiles\*.json`
+### Config and profiles — `%APPDATA%\LiveSubs\config.json` + `profiles\*.json`
 
 Source (kind + identifier), subtitle region, color/threshold settings, overlay position & style,
 overlay display target, translation context/glossary, **game VRAM reserve**. Last used profile is
@@ -138,7 +150,9 @@ readability first. Optional small English original underneath.
 
 - Global hotkeys via Win32 `RegisterHotKey` + Qt native event filter (no low-level hooks:
   anti-cheat friendly, no admin). Defaults: F8 calibration, overlay show/hide, pause/resume.
-- Web output: stdlib `ThreadingHTTPServer` + Server-Sent Events, QR via `qrcode`; firewall note.
+- Web output: stdlib `ThreadingHTTPServer` + Server-Sent Events, QR via `qrcode`; firewall note
+  in the UI. Page uses the Screen Wake Lock API so the phone screen stays on; if unsupported, show a
+  "disable screen timeout" hint. Vice-themed, large readable text, works in portrait and landscape.
 - Startup checks: Ollama installed/running, models present, en-US OCR (button runs
   `Add-WindowsCapability -Online -Name Language.OCR~~~en-US~0.0.1.0` elevated).
 - Theme: `ui/theme/base.qss` template + token files (`vice.json` default, `dark.json`).
@@ -151,6 +165,7 @@ readability first. Optional small English original underneath.
 ## Project layout (target)
 
 ```
+assets/        icon.svg, header.svg, fonts/ (+ OFL licenses)
 src/livesubs/
   app.py, __main__.py, i18n/
   core/        config.py, profiles.py, paths.py, messages.py
@@ -190,11 +205,19 @@ Phase 2 — features
 - [ ] 14. Settings tab (incl. recording mode + overlap warning), startup checks, tray, fullscreen warning
 - [ ] 15. Video device source (capture card): enumerate, resolution/fps, busy/HDCP errors, inspector region pick
 - [ ] 16. Vice theme, fonts, SVG icon/header, overlay styles
-- [ ] 17. Web output + QR
+- [ ] 17. Web output + QR (+ Screen Wake Lock)
 
 Phase 3 — release
 - [ ] 18. PyInstaller onedir build script (+ earlier smoke build)
 - [ ] 19. README (architecture diagram, install, GIF slot), screenshots
+
+## Known risks
+
+- DPI scaling: Qt logical coordinates vs. physical capture pixels — handle from step 2, test it.
+- Two models loaded at once needs `OLLAMA_MAX_LOADED_MODELS >= 2` (app checks and explains).
+- CPU model RAM: `qwen3:30b-a3b` Q4 is ~18–19 GB; borderline on 32 GB next to a game — say so in
+  Settings.
+- PyInstaller + winrt / windows-capture native modules — early smoke build at the end of phase 1.
 
 ## Decision log
 
