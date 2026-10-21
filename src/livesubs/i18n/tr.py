@@ -27,6 +27,34 @@ STRINGS: dict[str, str] = {
     "feed.translate_ms": "Çeviri (ms)",
     "feed.pending": "…",
     "feed.cached": "önbellek",
+    # Overlay
+    "overlay.sample": "Örnek çeviri: Kıçını arabaya sok kanka, aynasızlar geliyor!",
+    "overlay.sample_original": "Get your ass in the car, bro. The cops are coming!",
+    # Appearance tab
+    "tab.live": "Canlı",
+    "tab.appearance": "Görünüm",
+    "appearance.placement": "Çevirinin yeri",
+    "appearance.placement.above": "Altyazının üstünde",
+    "appearance.placement.over": "Altyazının yerinde (İngilizcenin üstünü kaplar)",
+    "appearance.placement.below": "Altyazının altında",
+    "appearance.placement.custom": "Serbest (F8 ayar modunda taşıyıp boyutlandırın)",
+    "appearance.box": "Arka plan",
+    "appearance.background": "Siyah kutu",
+    "appearance.font": "Yazı tipi",
+    "appearance.colors": "Renkler",
+    "appearance.text_color": "Yazı",
+    "appearance.outline": "Kontur",
+    "appearance.shadow": "Gölge",
+    "appearance.pick_color": "Renk seçin",
+    "appearance.max_lines": "En fazla satır",
+    "appearance.show_original": "İngilizce aslını altında küçük göster",
+    "appearance.clear_delay": "Altyazı bitince ekranda kalma",
+    "appearance.preview": "Önizle",
+    "appearance.hint": (
+        "Değişiklikler hemen uygulanır ve kaydedilir. Önizle, örnek bir çeviriyi seçtiğiniz "
+        "bölgeye göre gösterir. Serbest konumda overlay'i F8 ile ayar moduna geçip fareyle "
+        "taşıyabilir ve kenarlarından boyutlandırabilirsiniz."
+    ),
     # Ollama
     "ollama.checking": "Ollama kontrol ediliyor…",
     "ollama.connected": "Ollama bağlı",

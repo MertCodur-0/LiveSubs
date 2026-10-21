@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QGuiApplication
 from pytestqt.qtbot import QtBot
 
@@ -21,13 +22,15 @@ from livesubs.core.messages import (
     SubtitleRead,
     SubtitleTranslated,
 )
-from livesubs.core.profiles import MonitorSource, ProfileStore, WindowSource
+from livesubs.core.profiles import MonitorSource, OverlayPlacement, ProfileStore, WindowSource
+from livesubs.platform import win32
 from livesubs.platform.win32 import MonitorInfo, WindowInfo
-from livesubs.ui.main_window import PROFILE_ID, MainWindow, overlay_area
+from livesubs.ui.main_window import PROFILE_ID, MainWindow
 from livesubs.ui.overlay import Overlay, wrap
 from livesubs.ui.pick import resolve
+from livesubs.ui.placement import GAP_PX, custom_geometry, monitor_at, overlay_geometry
 from livesubs.ui.region_select import RegionPicker
-from livesubs.ui.screens import ScreenMap, to_logical, to_physical
+from livesubs.ui.screens import ScreenMap, current_screens, from_qrect, to_logical, to_physical
 
 # The developer's desk: 1080p at 100 % and a 1440p laptop panel at 150 %, up and to the right.
 DESK = [
@@ -58,10 +61,35 @@ def test_rect_off_every_screen_uses_the_nearest() -> None:
 # --- overlay ------------------------------------------------------------------------------------
 
 
-def test_overlay_goes_above_the_region_or_below_when_no_room() -> None:
-    screen = Rect(0, 0, 1920, 1080)
-    assert overlay_area(Rect(200, 900, 1500, 120), screen) == Rect(200, 750, 1500, 144)
-    assert overlay_area(Rect(200, 20, 1500, 60), screen) == Rect(200, 86, 1500, 90)
+SCREEN = Rect(0, 0, 1920, 1080)
+SUBTITLE = Rect(200, 900, 1500, 120)
+
+
+@pytest.mark.parametrize(
+    ("placement", "expected"),
+    [
+        (OverlayPlacement.ABOVE, Rect(200, 900 - 100 - GAP_PX, 1500, 100)),
+        (OverlayPlacement.BELOW, Rect(200, 900 - 100 - GAP_PX, 1500, 100)),  # no room: flips up
+        (OverlayPlacement.OVER, Rect(200, 900, 1500, 120)),  # at least as tall as the subtitle
+    ],
+)
+def test_overlay_geometry(placement: OverlayPlacement, expected: Rect) -> None:
+    assert overlay_geometry(placement, SUBTITLE, SCREEN, 100) == expected
+
+
+def test_overlay_flips_when_there_is_no_room() -> None:
+    top = Rect(200, 20, 1500, 60)
+    assert overlay_geometry(OverlayPlacement.ABOVE, top, SCREEN, 90).y == 80 + GAP_PX
+    mid = Rect(200, 500, 1500, 60)
+    assert overlay_geometry(OverlayPlacement.BELOW, mid, SCREEN, 90).y == 560 + GAP_PX
+
+
+def test_custom_geometry_and_monitor_lookup() -> None:
+    laptop = MONITORS[1]
+    rect = NormRect(x=0.25, y=0.5, width=0.5, height=0.1)
+    assert custom_geometry(rect, laptop.rect) == Rect(1920 + 640, -164 + 720, 1280, 144)
+    assert monitor_at(MONITORS, 2500, 0) is laptop
+    assert monitor_at(MONITORS, -500, 500) is MONITORS[0]  # off-screen: the nearest
 
 
 def test_wrap() -> None:
@@ -90,7 +118,7 @@ def test_long_text_shrinks_to_fit(qtbot: QtBot) -> None:
     qtbot.addWidget(overlay)
     overlay.place(Rect(0, 0, 400, 100))
     overlay.show_text("çok " * 60)
-    font, lines = overlay._layout(380, 80)
+    font, lines = overlay._layout(overlay.text, 380, 80)
     assert len(lines) <= overlay.settings.max_lines
     assert font.pointSizeF() < overlay.settings.font_size_pt
 
@@ -294,3 +322,71 @@ def test_picker_covers_every_screen(qtbot: QtBot) -> None:
         assert layer.geometry() == layer.screen().geometry()
     picker.cancel()
     assert picker._layers == []
+
+
+# --- appearance and calibration editing ----------------------------------------------------------
+
+
+def test_appearance_edits_apply_to_the_profile(window: MainWindow, qtbot: QtBot) -> None:
+    tab = window.appearance
+    settings = window._profile.overlay
+    with qtbot.waitSignal(tab.changed):
+        tab.placement.setCurrentIndex(1)
+    assert settings.placement is OverlayPlacement.OVER
+    tab.background.setChecked(False)
+    assert settings.background is False
+    assert not tab.opacity.isEnabled()
+    tab.size.setValue(40)
+    tab.clear_delay.setValue(2.5)
+    tab.show_original.setChecked(True)
+    assert (settings.font_size_pt, settings.clear_delay_ms, settings.show_original) == (
+        40,
+        2500,
+        True,
+    )
+
+    # Saved shortly after (debounced).
+    def saved() -> None:
+        assert window._store.ids() == [PROFILE_ID]
+        assert window._store.load(PROFILE_ID).overlay.font_size_pt == 40
+
+    qtbot.waitUntil(saved, timeout=2000)
+
+
+def test_preview_shows_a_sample_and_hides_it_again(window: MainWindow) -> None:
+    window.appearance.preview.setChecked(True)
+    assert window._overlay.isVisible()
+    assert window._overlay.text
+    window.appearance.preview.setChecked(False)
+    assert window._overlay.text == ""
+    assert not window._overlay.isVisible()
+
+
+def test_moving_the_overlay_makes_its_place_custom(window: MainWindow) -> None:
+    primary = next(m for m in win32.list_monitors() if m.is_primary)
+    logical = to_logical(
+        Rect(primary.rect.x + 100, primary.rect.y + 200, 800, 120), current_screens()
+    )
+    window._on_overlay_edited(logical)
+    s = window._profile.overlay
+    assert s.placement is OverlayPlacement.CUSTOM
+    assert s.monitor_device == primary.device_name
+    assert s.rect.to_pixels(primary.rect.width, primary.rect.height) == Rect(100, 200, 800, 120)
+    assert window.appearance.placement.currentData() == OverlayPlacement.CUSTOM
+
+
+def test_overlay_edit_mode_drag_moves_it(qtbot: QtBot) -> None:
+    overlay = Overlay()
+    qtbot.addWidget(overlay)
+    overlay.place(Rect(100, 100, 600, 120))
+    overlay.set_editable(True)
+    assert overlay.isVisible() and overlay.editable
+    start = overlay.geometry()
+    with qtbot.waitSignal(overlay.edited) as moved:
+        qtbot.mousePress(overlay, Qt.MouseButton.LeftButton, pos=QPoint(300, 60))
+        qtbot.mouseMove(overlay, QPoint(340, 90))
+        qtbot.mouseRelease(overlay, Qt.MouseButton.LeftButton, pos=QPoint(340, 90))
+    assert overlay.geometry().size() == start.size()
+    assert moved.args[0] == from_qrect(overlay.geometry())
+    overlay.set_editable(False)
+    assert not overlay.editable

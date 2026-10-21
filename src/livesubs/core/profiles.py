@@ -102,19 +102,28 @@ class OverlayStyle(StrEnum):
     BOX = "box"
 
 
+class OverlayPlacement(StrEnum):
+    ABOVE = "above"  # right above the subtitle region
+    OVER = "over"  # on the original subtitle (hidden from capture, so OCR still reads it)
+    BELOW = "below"  # right below the subtitle region
+    CUSTOM = "custom"  # where the user put it in calibration mode: ``rect`` on ``monitor_device``
+
+
 class OverlaySettings(SettingsModel):
     display: OverlayDisplay = OverlayDisplay.AUTO
+    placement: OverlayPlacement = OverlayPlacement.ABOVE
     monitor_device: str | None = None
-    # Normalized to the target monitor; by default just above the usual subtitle area.
+    # CUSTOM placement (and video devices): normalized to ``monitor_device`` (else the primary).
     rect: NormRect = NormRect(x=0.1, y=0.62, width=0.8, height=0.14)
     style: OverlayStyle = OverlayStyle.CLASSIC
-    font_family: str = "Inter"
-    font_size_pt: int = Field(28, ge=8, le=96)
+    font_family: str = "Segoe UI"
+    font_size_pt: int = Field(26, ge=8, le=96)
     text_color: HexColor = "#FFFFFF"
     outline_color: HexColor = "#000000"
     outline_px: float = Field(3.0, ge=0, le=12)
     shadow: bool = True
-    background_opacity: float = Field(0.35, ge=0, le=1)
+    background: bool = True  # a dark box behind the text
+    background_opacity: float = Field(0.55, ge=0, le=1)
     max_lines: int = Field(2, ge=1, le=6)
     show_original: bool = False
     # How long a translation stays up after the subtitle disappears.

@@ -12,7 +12,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
-from PySide6.QtCore import QObject, QTimer, Signal
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QCloseEvent, QFont
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -47,6 +48,7 @@ from livesubs.core.messages import (
 )
 from livesubs.core.profiles import (
     MonitorSource,
+    OverlayPlacement,
     Profile,
     ProfileStore,
     Source,
@@ -59,11 +61,21 @@ from livesubs.platform import win32
 from livesubs.ui import screens
 from livesubs.ui.overlay import Overlay
 from livesubs.ui.pick import resolve
+from livesubs.ui.placement import custom_geometry, monitor_at, overlay_geometry
 from livesubs.ui.region_select import RegionPicker
+from livesubs.ui.tabs.appearance import AppearanceTab
 
 PROFILE_ID = "varsayilan"
 FEED_LIMIT = 200
 OLLAMA_CHECK_MS = 5000
+FOLLOW_MS = 300
+# Where the text block sits inside the overlay: next to the subtitle it accompanies.
+TEXT_ALIGN = {
+    OverlayPlacement.ABOVE: Qt.AlignmentFlag.AlignBottom,
+    OverlayPlacement.OVER: Qt.AlignmentFlag.AlignVCenter,
+    OverlayPlacement.BELOW: Qt.AlignmentFlag.AlignTop,
+    OverlayPlacement.CUSTOM: Qt.AlignmentFlag.AlignBottom,
+}
 # Games mostly use white subtitles, some speakers yellow.
 DEFAULT_TEXT_COLORS = ["#FFFFFF", "#FFFF00"]
 
@@ -116,15 +128,6 @@ def available_sources() -> list[SourceOption]:
     return options
 
 
-def overlay_area(region: Rect, screen: Rect) -> Rect:
-    """Physical rect for the overlay: right above the subtitle region, below it if no room."""
-    height = max(round(region.height * 1.2), 90)
-    y = region.y - height - 6
-    if y < screen.y:
-        y = region.bottom + 6
-    return Rect(region.x, y, region.width, height)
-
-
 class _Bridge(QObject):
     """Carries results from worker threads to the UI thread."""
 
@@ -150,6 +153,8 @@ class MainWindow(QMainWindow):
         self._clear_generation = 0
         self._reads = 0  # lines read since Start: tells "running" from "waiting for subtitles"
         self._overlay = Overlay(self._profile.overlay)
+        self._overlay.edited.connect(self._on_overlay_edited)
+        self._previewing = False
         self._bridge = _Bridge()
         self._bridge.models.connect(self._on_models)
 
@@ -159,6 +164,10 @@ class MainWindow(QMainWindow):
 
         self._poll_timer = QTimer(self, interval=30, timeout=self._poll)
         self._poll_timer.start()
+        # The overlay follows its source: windows move, a region can be edited.
+        self._follow_timer = QTimer(self, interval=FOLLOW_MS, timeout=self._place_overlay)
+        self._follow_timer.start()
+        self._save_timer = QTimer(self, interval=400, singleShot=True, timeout=self._save)
         self._ollama_timer = QTimer(self, interval=OLLAMA_CHECK_MS, timeout=self.check_ollama)
         self._ollama_timer.start()
         self.check_ollama()
@@ -167,8 +176,8 @@ class MainWindow(QMainWindow):
     # --- layout ----------------------------------------------------------------------------------
 
     def _build(self) -> None:
-        central = QWidget()
-        layout = QVBoxLayout(central)
+        live = QWidget()
+        layout = QVBoxLayout(live)
         grid = QGridLayout()
 
         self.source_combo = QComboBox()
@@ -228,7 +237,15 @@ class MainWindow(QMainWindow):
         self.feed.setWordWrap(True)
         self.feed.verticalHeader().hide()
         layout.addWidget(self.feed, 1)
-        self.setCentralWidget(central)
+
+        self.appearance = AppearanceTab(self._profile.overlay)
+        self.appearance.changed.connect(self._on_appearance_changed)
+        self.appearance.preview_toggled.connect(self._on_preview)
+
+        self.tabs = QTabWidget()
+        self.tabs.addTab(live, t("tab.live"))
+        self.tabs.addTab(self.appearance, t("tab.appearance"))
+        self.setCentralWidget(self.tabs)
 
     # --- profile ---------------------------------------------------------------------------------
 
@@ -407,19 +424,73 @@ class MainWindow(QMainWindow):
             self._overlay.clear()
             self._overlay.hide()
 
+    # --- overlay placement and appearance --------------------------------------------------------
+
+    def _source_area(self) -> Rect | None:
+        """Where the source's frame is on screen right now (physical); None for video devices."""
+        option = self.selected_source()
+        if option is not None and option.spec == self._profile.source:
+            return option.area()
+        if self._frame is not None and self._frame.screen_rect is not None:
+            return Rect(*self._frame.screen_rect)
+        return None
+
     def _place_overlay(self) -> None:
-        frame, region = self._frame, self._profile.region
-        if frame is None or region is None:
+        active = self._state in (EngineState.WARMING_UP, EngineState.RUNNING)
+        if not (active or self._previewing or self._overlay.editable):
             return
-        if frame.screen_rect is not None:
-            screen = Rect(*frame.screen_rect)
-            r = region.to_pixels(frame.width, frame.height)
-            physical = overlay_area(r.translated(screen.x, screen.y), screen)
-        else:  # a video device: no screen position, use the profile's overlay rect on the primary
-            primary = next(m for m in win32.list_monitors() if m.is_primary).rect
-            r = self._profile.overlay.rect.to_pixels(primary.width, primary.height)
-            physical = r.translated(primary.x, primary.y)
+        s = self._profile.overlay
+        monitors = win32.list_monitors()
+        area, region = self._source_area(), self._profile.region
+        if s.placement == OverlayPlacement.CUSTOM or area is None or region is None:
+            monitor = next(
+                (m for m in monitors if m.device_name == s.monitor_device),
+                next(m for m in monitors if m.is_primary),
+            )
+            physical = custom_geometry(s.rect, monitor.rect)
+        else:
+            subtitle = region.to_pixels(area.width, area.height).translated(area.x, area.y)
+            center = (subtitle.x + subtitle.width / 2, subtitle.y + subtitle.height / 2)
+            monitor = monitor_at(monitors, *center)
+            height = round(self._overlay.preferred_height() * monitor.scale)
+            physical = overlay_geometry(s.placement, subtitle, monitor.rect, height)
+        self._overlay.align = TEXT_ALIGN[s.placement]
         self._overlay.place(screens.to_logical(physical, screens.current_screens()))
+
+    def _on_appearance_changed(self) -> None:
+        self._overlay.update()
+        self._place_overlay()
+        self._save_timer.start()  # debounced: sliders send many changes
+
+    def _on_preview(self, on: bool) -> None:
+        self._previewing = on
+        if on:
+            if not self._overlay.text:
+                self._overlay.show_text(t("overlay.sample"), t("overlay.sample_original"))
+            self._place_overlay()
+        elif self._overlay.text == t("overlay.sample"):
+            self._overlay.clear()
+            if self._state not in (EngineState.WARMING_UP, EngineState.RUNNING):
+                self._overlay.hide()
+
+    def _on_overlay_edited(self, logical: Rect) -> None:
+        """Moved or resized in calibration mode: from now on it stays where the user put it."""
+        physical = screens.to_physical(logical, screens.current_screens())
+        monitor = monitor_at(
+            win32.list_monitors(),
+            physical.x + physical.width / 2,
+            physical.y + physical.height / 2,
+        )
+        s = self._profile.overlay
+        s.monitor_device = monitor.device_name
+        s.rect = NormRect.from_pixels(
+            physical.translated(-monitor.rect.x, -monitor.rect.y),
+            monitor.rect.width,
+            monitor.rect.height,
+        )
+        s.placement = OverlayPlacement.CUSTOM
+        self.appearance.refresh()
+        self._save_timer.start()
 
     def _row_for(self, line_id: int) -> int:
         if line_id in self._rows:
