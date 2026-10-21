@@ -2,9 +2,17 @@
 
 Living document: project context, decisions, plan and progress. **Update it at every step.**
 
-Sources (Turkish): `PROMPT.md` = the user's project brief (requirements); `plan.md` = the approved
-plan (its final section "Onaylanan düzeltme ve eklemeler" overrides the rest). Everything relevant
-from both is reflected here.
+**At the start of every session, read [PROMPT.md](PROMPT.md) and [PLAN.md](PLAN.md)** (both in
+Turkish), then this file's "Plan and progress" and "Decision log", and continue from the first
+unchecked step.
+
+- `PROMPT.md` — the user's original project brief (requirements).
+- `PLAN.md` — the architecture and plan approved by the user.
+- Precedence when they conflict: PLAN.md's final section "Onaylanan düzeltme ve eklemeler" >
+  rest of PLAN.md > PROMPT.md. Later decisions recorded in the decision log below refine all of
+  them (e.g. `opencv-python` instead of `-headless`).
+
+Everything relevant from both files is reflected below; keep it in sync.
 
 ## What LiveSubs is
 
