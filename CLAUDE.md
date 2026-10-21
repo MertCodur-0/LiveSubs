@@ -504,3 +504,10 @@ Phase 3 — release
   ("dostum", wrong "pick up") -> keep the 5 examples. User accepts 1.5-2 s on screen ->
   **recommended GPU-lane model on this dedicated PC: gemma4:26b-a4b-it-qat** (12b stays the code
   default: it needs far less RAM). Model choice is per user in the UI's model combo.
+- 2026-10-21: why "only 5.2 GB on the GPU" for gemma4:26b — the card is in fact nearly full
+  (nvidia-smi 7.5 / 8 GB): GPU weights 4.2 GB (attention + shared; experts 10.1 GB stay in pinned
+  RAM), KV 0.34 GB + compute 0.33 GB, the **unused vision encoder** (~0.8-1 GB incl. buffers),
+  other apps ~1.3 GB. Moving more experts to the GPU needs freed VRAM (dedicated setup ~0.8 GB,
+  a text-only model without the vision encoder ~0.8-1 GB) and would gain an estimated ~10-15 %
+  (1.33 -> ~1.2 s), if Ollama places partial experts at all. **Deferred to step 12** by the user:
+  try a text-only Modelfile (`FROM` the text GGUF blob) there.
