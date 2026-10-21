@@ -383,3 +383,13 @@ Phase 3 — release
   comparison. Ollama's GPU discovery took ~40 s at server start (requests 500 meanwhile): the
   startup check must wait/retry. `OLLAMA_MAX_LOADED_MODELS` is unset on this machine.
   Ruff `allowed-confusables` = ı ‘ ’ – (Turkish text and subtitle punctuation are normal content).
+- 2026-10-21: **User: the whole machine is for translation** — only Windows runs besides LiveSubs
+  (32 GB RAM, i7-14700HX 8P+12E, RTX 4070 8 GB). Plan: GPU lane `gemma4:12b-it-qat` (7.2 GB) fully
+  on the GPU; CPU quality lane in RAM with a MoE model — candidates `gemma4:26b-a4b-it-qat`
+  (16 GB) vs `qwen3:30b-a3b` (~18.5 GB) — likely **on by default** in this setup (step 13 decides);
+  try `num_thread` = P-cores only. Needs `OLLAMA_MAX_LOADED_MODELS >= 2` (unset here). User said not
+  to queue more downloads (aya-expanse:8b, gemma4:e4b-it-qat were suggested and declined for now).
+  Open question to the user: does the game then run elsewhere (PS5 Remote Play / capture card)?
+  qwen3:8b on the samples: fast (median 460 ms, fully on GPU) but weak Turkish ("dog" -> "köpek",
+  "hugger" -> "öpücüklüyüm", swearing dropped); few-shot examples fix slang words but not the
+  grammar. Prompt decision (few-shot, temperature) waits for gemma4:12b results.
