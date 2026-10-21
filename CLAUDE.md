@@ -465,7 +465,7 @@ Phase 3 — release
 - 2026-10-21 (user feedback after a successful test: "translations sometimes vanish early"):
   the overlay now **keeps the previous translation until the new line's own arrives** (it used to
   blank out while the model worked, ~1-1.5 s), and a translation stays **3.5 s** after its
-  subtitle disappears (`clear_delay_ms` default 800 -> 3500; the user's saved profile updated too);
+  subtitle disappears (`clear_delay_ms` default 800 -> 3500 -> **2000** after more feedback);
   a new line within that time cancels the clear. Supersedes the step-9 overlay rule above.
 - 2026-10-21: WinRT refuses a blocking `.get()` on a single-threaded apartment ("Cannot call
   blocking method from single-threaded apartment"); a thread becomes STA once Qt creates windows

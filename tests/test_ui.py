@@ -234,7 +234,7 @@ def test_translation_outlives_its_subtitle_by_the_clear_delay(
     window: MainWindow, qtbot: QtBot
 ) -> None:
     engine = engine_of(window)
-    assert window._profile.overlay.clear_delay_ms == 3500  # default: time to finish reading
+    assert window._profile.overlay.clear_delay_ms == 2000  # default: time to finish reading
     window._profile.overlay.clear_delay_ms = 300  # keep the test fast
     window._overlay.show_text("Sen kimsin?")
 
