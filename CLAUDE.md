@@ -405,3 +405,11 @@ Phase 3 — release
   most cards have passthrough, so a splitter may be unnecessary; PS5 HDCP must be off). Viewing
   setup undecided (see "User's primary scenario"). Video device source moved up to 9b, plus an
   own low-latency preview window. Default VRAM reserve for this profile kind is already 0.5 GB.
+- 2026-10-21: gemma4:12b-it-qat measured: in memory **8.52 GB** (weights + vision and audio encoders
+  + KV + graph; num_ctx 2048), so it does not fit 8 GB even on a dedicated machine: 39/49 layers on
+  GPU with ~2 GB used by other apps -> median 1.05-1.2 s per line (target was 0.25-0.6 s).
+  `OLLAMA_FLASH_ATTENTION=1` + `OLLAMA_KV_CACHE_TYPE=q8_0` only saved 0.2 GB and made it *slower*
+  (1.6 s) -> keep Ollama defaults. Quality is clearly better than qwen3:8b: fluent, keeps swearing
+  ("boktan", "lan"), "hugger" right; remaining misses: "pick up" (drugs), "the law chased in".
+  Few-shot slang examples + temperature 0 are slightly better and deterministic (kept as the
+  candidate prompt; not committed yet). The user decides on quality before picking a viewing setup.
