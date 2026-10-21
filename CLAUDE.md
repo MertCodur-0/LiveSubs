@@ -103,6 +103,15 @@ UI process (PySide6)                                  Engine process (multiproce
 - Change detection (`engine/vision/change.py`) compares only the **text mask**: shrunk to a
   96-px-wide thumbnail, IoU >= 0.75 = same line; coverage < 0.1 % = empty. Background motion never
   triggers. Empty mask = subtitle gone (`CLEARED`); the overlay clears after a configurable delay.
+- OCR (`engine/ocr/winrt_ocr.py`): `WinRtOcr.recognize(image) -> OcrResult` (lines with boxes,
+  `text` = lines joined by spaces, `elapsed_ms`). Gray8 `SoftwareBitmap` filled through a WinRT
+  `Buffer` memoryview; `recognize_async(...).get()` blocks the OCR thread (no asyncio); works
+  from worker threads; images over `max_image_dimension` (10000) are downscaled, boxes mapped
+  back. 5-13 ms per sample region, live p50 17 / p95 24 ms. `engine/ocr/language.py`: installed
+  languages, `best_english` (en-US, else any en-*), elevated install via `ShellExecuteW runas`.
+- OCR accuracy on the 18 samples (fuzz ratio vs expected, typographic quotes folded):
+  preprocessed mean 99.5, 15/18 exact, min 96.3; raw gray 96.2 / 12 / 64.3; raw 2x 97.0 / 13 /
+  72.5. Remaining misses: 200236 "What-should", "youir" (road junk); 200302 "You" missing.
 - Filters: letter ratio, minimum length, vowel presence, repeated junk characters; a repeat of the
   last sent line is dropped.
 - Stabilizer: same normalized text (rapidfuzz >= 0.9) in 2 consecutive reads before translating; on
@@ -264,7 +273,7 @@ Phase 1 — working core (source -> region -> OCR -> GPU translation -> overlay)
 - [x] 2. Platform + config: Win32 helpers (window list, DPI, affinity, click-through), config/profile models
 - [x] 3. Capture: `FrameSource` abstraction (all three kinds designed), WGC window + monitor, bench script
 - [x] 4. Vision: preprocessing + text-mask change detection + tests
-- [ ] 5. OCR: WinRT wrapper + language check + tests
+- [x] 5. OCR: WinRT wrapper + language check + tests
 - [ ] 6. Text: normalize, filters, 2-frame stabilizer + tests
 - [ ] 7. Translation: Ollama backend, prompt, cache, orchestrator (GPU lane) + mocked-HTTP tests
 - [ ] 8. Engine process + IPC
@@ -328,3 +337,8 @@ Phase 3 — release
   Known limits, documented in samples.json: 200236 keeps some road-texture junk next to
   "What should" (via the white color; ratio bound widened to 1.6), and in 200302 "You" on
   near-white asphalt is lost. Component filter moved before the upscale: same results, ~40 % faster.
+- 2026-10-21 (step 5): settings models now `extra="forbid"` — the bench silently passed a removed
+  field (`outline_support`) because unknown fields were ignored. Files still load: `read_model`
+  drops unknown keys (also nested, also inside discriminated unions) and validates again.
+- 2026-10-21: GitHub repo created **private** (user's choice): github.com/MertCodur-0/LiveSubs;
+  make it public when it is presentable. CI on GitHub passes.

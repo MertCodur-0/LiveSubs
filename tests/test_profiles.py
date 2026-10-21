@@ -119,6 +119,24 @@ def test_load_all_skips_broken_files(store: ProfileStore) -> None:
         store.load("broken")
 
 
+def test_files_with_retired_or_future_fields_still_load(store: ProfileStore) -> None:
+    store.directory.mkdir(parents=True)
+    (store.directory / "old.json").write_text(
+        '{"name": "Old", "vision": {"outline_support": true, "color_tolerance": 50},'
+        ' "source": {"kind": "window", "exe_name": "GTA5.exe", "monitor_hint": 2}}',
+        encoding="utf-8",
+    )
+    profile = store.load("old")
+    assert profile.vision.color_tolerance == 50
+    assert isinstance(profile.source, WindowSource)
+    assert profile.source.exe_name == "GTA5.exe"
+
+
+def test_unknown_fields_in_code_are_errors() -> None:
+    with pytest.raises(ValidationError):
+        Profile(name="x", vision={"outline_support": True})
+
+
 def test_empty_store(store: ProfileStore) -> None:
     assert store.ids() == []
     assert store.load_all() == {}

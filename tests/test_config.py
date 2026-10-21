@@ -1,9 +1,10 @@
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from livesubs.core import paths
-from livesubs.core.config import AppConfig, load_config, save_config
+from livesubs.core.config import AppConfig, WebSettings, load_config, save_config
 
 
 def test_missing_file_gives_defaults(tmp_path: Path) -> None:
@@ -37,10 +38,22 @@ def test_newer_schema_is_not_loaded(tmp_path: Path) -> None:
     assert load_config(path) == AppConfig()
 
 
-def test_unknown_fields_are_ignored(tmp_path: Path) -> None:
+def test_unknown_fields_in_files_are_dropped(tmp_path: Path) -> None:
     path = tmp_path / "config.json"
-    path.write_text('{"recording_mode": true, "from_the_future": 1}', encoding="utf-8")
-    assert load_config(path).recording_mode
+    path.write_text(
+        '{"recording_mode": true, "from_the_future": 1, "web": {"port": 9000, "tls": true}}',
+        encoding="utf-8",
+    )
+    config = load_config(path)
+    assert config.recording_mode
+    assert config.web.port == 9000
+
+
+def test_unknown_fields_in_code_are_errors() -> None:
+    with pytest.raises(ValidationError):
+        AppConfig(recordng_mode=True)  # typo
+    with pytest.raises(ValidationError):
+        WebSettings(prot=9000)
 
 
 def test_home_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

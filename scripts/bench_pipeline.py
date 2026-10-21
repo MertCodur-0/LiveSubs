@@ -1,8 +1,9 @@
 """Measure the pipeline's latency stage by stage on a real source.
 
-Stages so far: capture (frame delivery), preprocessing and change detection. Later steps add OCR
-and translation. WGC only delivers frames when the content changes, so run it against something
-that moves (a game, a video) to measure the delivery rate.
+Stages so far: capture (frame delivery), preprocessing, change detection and OCR (run when a
+subtitle appears or changes, as the pipeline will). Translation comes in a later step. WGC only
+delivers frames when the content changes, so run it against something that moves (a game, a
+video) to measure the delivery rate.
 
 Examples:
     .venv\\Scripts\\python.exe scripts\\bench_pipeline.py                       # primary monitor
@@ -23,6 +24,8 @@ import numpy as np
 from livesubs.core.geometry import NormRect
 from livesubs.core.profiles import MonitorSource, Source, VisionSettings, WindowSource
 from livesubs.engine.capture import CaptureError, create_source, is_black_frame
+from livesubs.engine.ocr.language import english_ocr_language
+from livesubs.engine.ocr.winrt_ocr import WinRtOcr
 from livesubs.engine.vision.change import Change, ChangeDetector
 from livesubs.engine.vision.preprocess import preprocess
 from livesubs.platform import win32
@@ -73,7 +76,8 @@ def main() -> None:
         default=NormRect(x=0.1, y=0.75, width=0.8, height=0.2),
         help="subtitle region x,y,w,h normalized to the frame (default 0.1,0.75,0.8,0.2)",
     )
-    parser.add_argument("--outline", action="store_true", help="enable outline support")
+    parser.add_argument("--colors", default="#FFFFFF", help="subtitle colors, comma-separated")
+    parser.add_argument("--no-contrast", action="store_true", help="disable local contrast")
     args = parser.parse_args()
 
     win32.enable_per_monitor_dpi_awareness()
@@ -81,11 +85,17 @@ def main() -> None:
     source = create_source(spec, max_fps=args.max_fps, backend=args.backend)
     print(f"Source: {source.info.kind} {source.info.name!r} via {source.info.backend}")
 
-    vision = VisionSettings(outline_support=args.outline)
+    vision = VisionSettings(text_colors=args.colors.split(","), local_contrast=not args.no_contrast)
     detector = ChangeDetector()
+    ocr_language = english_ocr_language()
+    ocr = WinRtOcr(ocr_language) if ocr_language else None
+    if ocr is None:
+        print("English OCR is not installed; skipping the OCR stage.")
     delivery_ms: list[float] = []
     preprocess_ms: list[float] = []
     change_ms: list[float] = []
+    ocr_ms: list[float] = []
+    last_text = ""
     changes: dict[Change, int] = dict.fromkeys(Change, 0)
     black_frames = 0
     started = time.monotonic()
@@ -112,11 +122,16 @@ def main() -> None:
             region = frame.image[r.y : r.bottom, r.x : r.right]
             result = preprocess(region, vision)
             t1 = time.perf_counter()
-            changes[detector.update(result.mask)] += 1
+            change = detector.update(result.mask)
+            changes[change] += 1
             t2 = time.perf_counter()
             preprocess_ms.append((t1 - t0) * 1000)
             change_ms.append((t2 - t1) * 1000)
             black_frames += is_black_frame(frame.image)
+            if ocr is not None and change in (Change.APPEARED, Change.CHANGED):
+                read = ocr.recognize(result.ocr_image)
+                ocr_ms.append(read.elapsed_ms)
+                last_text = read.text
     except CaptureError as exc:
         sys.exit(f"Capture failed: {type(exc).__name__}: {exc}")
     finally:
@@ -130,6 +145,9 @@ def main() -> None:
     print(summarize("preprocess", preprocess_ms))
     print(summarize("change detection", change_ms))
     print("  changes: " + ", ".join(f"{kind} {n}" for kind, n in changes.items() if n))
+    if ocr is not None:
+        print(summarize("OCR (on appear/change)", ocr_ms))
+        print(f"  last read: {last_text!r}")
     print("  (WGC stamps the composition time, which can be a fraction of a ms ahead of 'now'.)")
     if rate < args.max_fps / 2:
         print("Note: WGC sends frames only on change; a static screen gives few frames.")

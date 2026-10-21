@@ -67,5 +67,16 @@ def load_samples() -> list[Sample]:
     return samples
 
 
+# Curly single/double quotes and the ellipsis character, by code point.
+_FOLD = str.maketrans(
+    {chr(0x2018): "'", chr(0x2019): "'", chr(0x201C): '"', chr(0x201D): '"', chr(0x2026): "..."}
+)
+
+
+def fold(text: str) -> str:
+    """Typographic quotes/ellipsis to ASCII and collapsed whitespace, for comparing OCR output."""
+    return " ".join(text.translate(_FOLD).split())
+
+
 def sample_params(samples: list[Sample]) -> list[object]:
     return [pytest.param(s, id=s.name[-6:]) for s in samples]
