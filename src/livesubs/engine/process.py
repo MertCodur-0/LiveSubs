@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import logging.handlers
 import multiprocessing
+import os
 import queue
 from multiprocessing.queues import Queue
 from pathlib import Path
@@ -46,10 +47,12 @@ def _setup_logging() -> None:
 def engine_main(commands: Queue, events: Queue) -> None:
     """Entry point of the engine process."""
     _setup_logging()
+    log.info("Engine started (pid %d)", os.getpid())
     pipeline: Pipeline | None = None
     events.put(StateChanged(EngineState.IDLE))
     while True:
         command: Command = commands.get()
+        log.info("Command: %s", type(command).__name__)
         try:
             match command:
                 case StartPipeline():

@@ -175,6 +175,34 @@ def test_lines_are_read_translated_and_cleared(
     assert not recorder.of(EngineError)
 
 
+def test_lines_shown_during_warm_up_are_not_lost(
+    two_lines_and_a_gap: tuple[list[Sample], list[tuple[np.ndarray, float]]],
+) -> None:
+    """Regression: reading used to start only after the model warmed up (7.5 s in a real run),
+    so the first subtitles after Start were never read."""
+    (a, _), scenes = two_lines_and_a_gap
+
+    class SlowToLoad(UpperCaseBackend):
+        def warm_up(self) -> float:
+            time.sleep(1.5)  # longer than the first subtitle stays on screen
+            return super().warm_up()
+
+    source, recorder = ScriptedSource(scenes), Recorder()
+    pipeline = Pipeline(
+        start_command(a),
+        recorder,
+        open_source=lambda spec: (source.open(), source)[1],
+        backend_factory=lambda start: SlowToLoad(),
+    )
+    run(pipeline, source)
+
+    first = next(e for e in recorder.of(SubtitleRead) if not e.upgrade)
+    assert first.line_id == 1
+    translated = {e.line_id: e for e in recorder.of(SubtitleTranslated)}
+    assert translated[1].translation == first.text.upper()  # translated once the model was ready
+    assert 2 in translated
+
+
 def test_without_ollama_english_still_flows(
     two_lines_and_a_gap: tuple[list[Sample], list[tuple[np.ndarray, float]]],
 ) -> None:

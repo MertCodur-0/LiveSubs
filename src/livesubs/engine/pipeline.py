@@ -4,7 +4,9 @@ Runs on its own thread inside the engine process and reports everything through 
 (``core.messages`` events). The loop runs at the profile's fps, and every ``fast_reread_s`` while
 a new line waits for its confirming read. Frames are only processed when they are new, or when
 the stabilizer wants another read. OCR runs inline (10-20 ms); translation runs on the
-orchestrator's thread, so a slow model never delays reading the next subtitle.
+orchestrator's thread, so a slow model never delays reading the next subtitle. The model warms up on
+a side thread while reading already runs; the newest line read meanwhile is translated once the
+model is ready.
 
 Without Ollama (or without the model) the pipeline keeps running and shows the English lines.
 """
@@ -119,6 +121,10 @@ class Pipeline:
         self._thread = threading.Thread(target=self._run, name="pipeline", daemon=True)
         self._line_id = 0
         self._ocr_ms: dict[int, float] = {}
+        # Set by the warm-up thread once the model answers; lines read before that wait.
+        self._lock = threading.Lock()
+        self._orchestrator: TranslationOrchestrator | None = None
+        self._waiting: tuple[int, str] | None = None
 
     def start(self) -> None:
         self._thread.start()
@@ -140,7 +146,6 @@ class Pipeline:
 
     def _run(self) -> None:
         source: FrameSource | None = None
-        orchestrator: TranslationOrchestrator | None = None
         cache: TranslationCache | None = None
         try:
             self._emit(StateChanged(EngineState.STARTING))
@@ -157,17 +162,24 @@ class Pipeline:
             self._emit(FrameInfo(first.width, first.height, screen))
 
             cache = TranslationCache(self._cache_path)
-            orchestrator = self._translation(cache)
-            if self._stop.is_set():
-                return
-            self._emit(StateChanged(EngineState.RUNNING))
-            self._loop(source, ocr, orchestrator)
+            if self._backend_factory is None:
+                self._emit(StateChanged(EngineState.RUNNING))
+            else:
+                # Read from the first frame on: warming the model up can take 10-40 s, and
+                # subtitles shown meanwhile must not be lost.
+                threading.Thread(
+                    target=self._prepare_translation, args=(cache,), name="warm-up", daemon=True
+                ).start()
+            self._loop(source, ocr)
         except SourceLostError as exc:
             self._fatal(ErrorKind.SOURCE_LOST, str(exc))
         except Exception as exc:
             log.exception("Pipeline crashed")
             self._fatal(ErrorKind.INTERNAL, f"{type(exc).__name__}: {exc}")
         finally:
+            self._stop.set()  # also tells a warm-up still in progress to give up
+            with self._lock:
+                orchestrator, self._orchestrator = self._orchestrator, None
             if orchestrator is not None:
                 orchestrator.close()
             if source is not None:
@@ -190,9 +202,9 @@ class Pipeline:
             return None
         return WinRtOcr(language)
 
-    def _translation(self, cache: TranslationCache) -> TranslationOrchestrator | None:
-        if self._backend_factory is None:
-            return None
+    def _prepare_translation(self, cache: TranslationCache) -> None:
+        """Warm-up thread: load the model, then let waiting and new lines through."""
+        assert self._backend_factory is not None
         backend = self._backend_factory(self._start)
         self._emit(StateChanged(EngineState.WARMING_UP, backend.model))
         warm_up = getattr(backend, "warm_up", None)
@@ -202,9 +214,11 @@ class Pipeline:
         except TranslationError as exc:
             # Keep reading subtitles; the UI shows English only and explains why.
             self._emit(EngineError(_error_kind(exc), str(exc)))
-            return None
+            if not self._stop.is_set():
+                self._emit(StateChanged(EngineState.RUNNING))
+            return
         profile = self._start.profile
-        return TranslationOrchestrator(
+        orchestrator = TranslationOrchestrator(
             backend,
             cache,
             self._on_translation,
@@ -213,10 +227,17 @@ class Pipeline:
             game_context=profile.translation.context,
             glossary=profile.translation.glossary,
         )
+        with self._lock:
+            if self._stop.is_set():  # stopped while the model was loading
+                orchestrator.close()
+                return
+            self._orchestrator = orchestrator
+            waiting, self._waiting = self._waiting, None
+        self._emit(StateChanged(EngineState.RUNNING))
+        if waiting is not None:
+            orchestrator.submit(*waiting)
 
-    def _loop(
-        self, source: FrameSource, ocr: WinRtOcr, orchestrator: TranslationOrchestrator | None
-    ) -> None:
+    def _loop(self, source: FrameSource, ocr: WinRtOcr) -> None:
         profile = self._start.profile
         tick = 1.0 / profile.capture.fps
         detector, stabilizer = ChangeDetector(), Stabilizer()
@@ -229,7 +250,7 @@ class Pipeline:
                 detector.reset()  # a new region: whatever was read before is gone
                 event = stabilizer.update(Change.CLEARED, 0, time.monotonic()).event
                 if event is not None:
-                    self._on_line(event, 0.0, orchestrator)
+                    self._on_line(event, 0.0)
             frame = source.latest_frame()
             if frame is None:
                 continue
@@ -243,17 +264,15 @@ class Pipeline:
             now = time.monotonic()
             decision = stabilizer.update(change, cv2.countNonZero(processed.mask), now)
             if decision.event is not None:
-                self._on_line(decision.event, 0.0, orchestrator)
+                self._on_line(decision.event, 0.0)
             if not decision.read:
                 continue
             read = ocr.recognize(processed.ocr_image)
             event = stabilizer.on_read(read.text, time.monotonic())
             if event is not None:
-                self._on_line(event, read.elapsed_ms, orchestrator)
+                self._on_line(event, read.elapsed_ms)
 
-    def _on_line(
-        self, event: LineEvent, ocr_ms: float, orchestrator: TranslationOrchestrator | None
-    ) -> None:
+    def _on_line(self, event: LineEvent, ocr_ms: float) -> None:
         match event:
             case LineCleared():
                 self._emit(SubtitleCleared())
@@ -261,21 +280,17 @@ class Pipeline:
                 self._emit(SubtitleRead(self._line_id, text, ocr_ms, repeat=True))
             case LineConfirmed(text=text):
                 self._line_id += 1
-                self._submit(self._line_id, text, ocr_ms, orchestrator, upgrade=False)
+                self._submit(self._line_id, text, ocr_ms, upgrade=False)
             case LineUpgraded(text=text):
-                self._submit(self._line_id, text, ocr_ms, orchestrator, upgrade=True)
+                self._submit(self._line_id, text, ocr_ms, upgrade=True)
 
-    def _submit(
-        self,
-        line_id: int,
-        text: str,
-        ocr_ms: float,
-        orchestrator: TranslationOrchestrator | None,
-        *,
-        upgrade: bool,
-    ) -> None:
+    def _submit(self, line_id: int, text: str, ocr_ms: float, *, upgrade: bool) -> None:
         self._ocr_ms[line_id] = ocr_ms
         self._emit(SubtitleRead(line_id, text, ocr_ms, upgrade=upgrade))
+        with self._lock:
+            orchestrator = self._orchestrator
+            if orchestrator is None:
+                self._waiting = (line_id, text)  # the model is still warming up: newest wins
         if orchestrator is not None:
             orchestrator.submit(line_id, text)
 

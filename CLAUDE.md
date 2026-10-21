@@ -100,7 +100,9 @@ UI process (PySide6)                                  Engine process (multiproce
   `wait_event`/`shutdown`) and `engine_main` (logs to `log_dir()/engine.log`). `engine/pipeline.py`:
   one thread runs capture -> region -> preprocess -> change -> stabilizer -> **OCR inline** (10-20 ms,
   no separate OCR thread needed) and hands lines to the orchestrator. Loop at profile fps, 50 ms
-  while a candidate awaits confirmation; unchanged frames skipped. Model warm-up before RUNNING.
+  while a candidate awaits confirmation; unchanged frames skipped. Reading starts at once; the
+  model warms up on a side thread (WARMING_UP), the newest line read meanwhile is translated when
+  it is ready (RUNNING) — a real run lost the first subtitles during a 7.5 s warm-up before.
   Without Ollama/model: non-fatal error, English-only mode. Source/OCR missing or source lost:
   fatal. Region changes reset detection. Source opener and backend factory are injectable (tests
   play sample screenshots as a scripted video).
@@ -330,7 +332,7 @@ Phase 1 — working core (source -> region -> OCR -> GPU translation -> overlay)
 - [x] 6. Text: normalize, filters, 2-frame stabilizer + tests
 - [x] 7. Translation: Ollama backend, prompt, cache, orchestrator (GPU lane) + mocked-HTTP tests
 - [x] 8. Engine process + IPC
-- [ ] 9. Minimal UI: source pick, drag-select region, Start/Stop, live feed, overlay  => core done
+- [x] 9. Minimal UI: source pick, drag-select region, Start/Stop, live feed, overlay  => core done
 - [ ] 9b. **= step 15, moved up** (capture card is the user's main source): video device source,
   then a low-latency fullscreen preview window for it
 
@@ -345,7 +347,7 @@ Phase 2 — features
 - [ ] 17. Web output + QR (+ Screen Wake Lock)
 
 Phase 3 — release
-- [ ] 18. PyInstaller onedir build script (+ earlier smoke build)
+- [ ] 18. PyInstaller onedir build script (+ earlier smoke build) — smoke build done 2026-10-21 (see log)
 - [ ] 19. README (architecture diagram, install, GIF slot), screenshots
 
 ## Known risks
@@ -431,3 +433,21 @@ Phase 3 — release
   it). Prompt: 5 fixed slang few-shot turns (`prompt.EXAMPLES`, never from tests/samples — a test
   enforces it) + temperature 0 (deterministic). User wants a runnable exe next: step 9 (minimal UI)
   + an early PyInstaller smoke build; viewing setup (3 options) chosen after judging quality live.
+- 2026-10-21 (step 9 + smoke build): minimal UI — `ui/main_window.py` (source combo of windows and
+  monitors, region selector, installed-model combo from `/api/tags`, Ollama status every 5 s on a
+  worker thread + "start Ollama" (`ollama app.exe`), Start/Stop, live feed table, errors in the
+  status bar via `i18n` kinds), `ui/overlay.py` (click-through, `WDA_EXCLUDEFROMCAPTURE`,
+  QPainterPath outline + shadow + translucent box, word wrap, font shrinks to `max_lines`; placed
+  right above the region, below it when there is no room), `ui/region_select.py` (dimmed window
+  over the source area; selection painted with alpha 1, not 0 — fully transparent pixels of a
+  layered window pass clicks through), `ui/screens.py` (physical <-> logical: Qt keeps each
+  screen's top-left at its physical position and divides only the size; screens matched by that
+  corner because `QScreen.name()` is "MSI G244F E2" for one monitor and "\.\DISPLAY2" for the
+  other). One profile "varsayilan" (source, region, white+yellow) saved on Start/region change.
+  Overlay: a new line hides the old translation until its own arrives; a repeat restores it; a
+  clear waits `clear_delay_ms`. PyInstaller one-folder build (`scripts/livesubs.spec`,
+  `scripts/build_exe.ps1`): 254 MB (OpenCV + Qt; trim later), exe starts UI + engine (winrt and
+  windows-capture load frozen), closes cleanly. PS 5.1: native stderr + `$ErrorActionPreference
+  = "Stop"` = false failures -> the build script uses "Continue" + `$LASTEXITCODE`.
+  E2E on a sample slideshow with gemma4 (cold): warm-up 7.5 s, OCR 6-12 ms, translation 1.1-1.6 s,
+  cache hits 0 ms across engine restarts.
