@@ -451,3 +451,12 @@ Phase 3 — release
   = "Stop"` = false failures -> the build script uses "Continue" + `$LASTEXITCODE`.
   E2E on a sample slideshow with gemma4 (cold): warm-up 7.5 s, OCR 6-12 ms, translation 1.1-1.6 s,
   cache hits 0 ms across engine restarts.
+- 2026-10-21 (first user test of the exe): **no translation appeared** because the source combo
+  preselected the front-most window — the Explorer window the exe was started from — and the
+  region selector only covered that window (the "small rectangle" the user complained about).
+  Fix, as the user asked: "select region" dims **every monitor**; the user draws the subtitle
+  wherever it is; `ui/pick.resolve` makes the **window under the selection** the source (front-
+  most, not minimized, not "Program Manager"), else the monitor, and normalizes the region to it.
+  The source combo never preselects anything any more. While running with no line read yet the
+  status says "waiting for subtitles". Choosing a different window while running restarts the
+  pipeline.

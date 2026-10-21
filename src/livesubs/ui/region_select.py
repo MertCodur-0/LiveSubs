@@ -1,60 +1,71 @@
-"""Drag a rectangle over the source to mark where its subtitles appear.
+"""Drag a rectangle anywhere on the desktop to mark where subtitles appear.
 
-A dimmed, frameless window covers the source's area on screen (its client area or monitor);
-the selection is returned normalized to that area, i.e. to the source's frame space.
+Every monitor gets a dimmed full-screen layer; the user draws on whichever shows the game. The
+result is a rectangle in Qt's global logical coordinates; ``ui.pick`` turns it into a source and a
+region.
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, QRect, Qt, Signal
-from PySide6.QtGui import QColor, QKeyEvent, QMouseEvent, QPainter, QPen
+from PySide6.QtCore import QObject, QPoint, QRect, Qt, Signal
+from PySide6.QtGui import (
+    QColor,
+    QCursor,
+    QGuiApplication,
+    QKeyEvent,
+    QMouseEvent,
+    QPainter,
+    QPen,
+    QScreen,
+)
 from PySide6.QtWidgets import QWidget
 
-from livesubs.core.geometry import NormRect, Rect
+from livesubs.core.geometry import Rect
 from livesubs.i18n import t
-from livesubs.ui.screens import qrect
 
 MIN_SIZE_PX = 8
 
 
-class RegionSelector(QWidget):
-    selected = Signal(object)  # NormRect
-    cancelled = Signal()
+class _ScreenLayer(QWidget):
+    """One monitor's dimmed layer."""
 
-    def __init__(self, area_logical: Rect, initial: NormRect | None = None) -> None:
+    def __init__(self, picker: RegionPicker, screen: QScreen) -> None:
         super().__init__(
             None,
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
             | Qt.WindowType.Tool,
         )
+        self._picker = picker
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.setCursor(Qt.CursorShape.CrossCursor)
-        self.setGeometry(qrect(area_logical))
+        self.setScreen(screen)
+        self.setGeometry(screen.geometry())
         self._origin: QPoint | None = None
         self._selection = QRect()
-        if initial is not None:
-            r = initial.to_pixels(area_logical.width, area_logical.height)
-            self._selection = QRect(r.x, r.y, r.width, r.height)
 
-    def normalized(self) -> NormRect | None:
+    def selection_global(self) -> Rect | None:
         sel = self._selection.normalized().intersected(self.rect())
         if sel.width() < MIN_SIZE_PX or sel.height() < MIN_SIZE_PX:
             return None
-        return NormRect.from_pixels(
-            Rect(sel.x(), sel.y(), sel.width(), sel.height()), self.width(), self.height()
-        )
+        top_left = self.mapToGlobal(sel.topLeft())
+        return Rect(top_left.x(), top_left.y(), sel.width(), sel.height())
+
+    def clear_selection(self) -> None:
+        self._selection = QRect()
+        self.update()
 
     # --- input -----------------------------------------------------------------------------------
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt override
         if event.button() == Qt.MouseButton.LeftButton:
+            self._picker.focus(self)
             self._origin = event.position().toPoint()
             self._selection = QRect(self._origin, self._origin)
             self.update()
         elif event.button() == Qt.MouseButton.RightButton:
-            self._cancel()
+            self._picker.cancel()
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt override
         if self._origin is not None:
@@ -65,23 +76,13 @@ class RegionSelector(QWidget):
         self._origin = None
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt override
-        self._confirm()
+        self._picker.confirm()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802 - Qt override
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-            self._confirm()
+            self._picker.confirm()
         elif event.key() == Qt.Key.Key_Escape:
-            self._cancel()
-
-    def _confirm(self) -> None:
-        region = self.normalized()
-        if region is not None:
-            self.selected.emit(region)
-            self.close()
-
-    def _cancel(self) -> None:
-        self.cancelled.emit()
-        self.close()
+            self._picker.cancel()
 
     # --- drawing ---------------------------------------------------------------------------------
 
@@ -99,11 +100,55 @@ class RegionSelector(QWidget):
             painter.drawRect(sel.adjusted(0, 0, -1, -1))
         painter.setPen(QColor("white"))
         font = painter.font()
-        font.setPointSize(13)
+        font.setPointSize(14)
         painter.setFont(font)
         painter.drawText(
-            self.rect().adjusted(0, 20, 0, 0),
+            self.rect().adjusted(0, 40, 0, 0),
             Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
             t("region.hint"),
         )
         painter.end()
+
+
+class RegionPicker(QObject):
+    """Covers every monitor; emits ``selected(Rect)`` in global logical coordinates."""
+
+    selected = Signal(object)  # Rect
+    cancelled = Signal()
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._layers = [_ScreenLayer(self, screen) for screen in QGuiApplication.screens()]
+        self._active: _ScreenLayer | None = None
+
+    def show(self) -> None:
+        for layer in self._layers:
+            layer.show()
+        under_cursor = QGuiApplication.screenAt(QCursor.pos())
+        for layer in self._layers:
+            if layer.screen() is under_cursor:
+                layer.activateWindow()
+
+    def focus(self, layer: _ScreenLayer) -> None:
+        """A drag started on ``layer``: a selection lives on one monitor only."""
+        self._active = layer
+        for other in self._layers:
+            if other is not layer:
+                other.clear_selection()
+        layer.activateWindow()
+
+    def confirm(self) -> None:
+        rect = self._active.selection_global() if self._active else None
+        if rect is None:
+            return
+        self._close()
+        self.selected.emit(rect)
+
+    def cancel(self) -> None:
+        self._close()
+        self.cancelled.emit()
+
+    def _close(self) -> None:
+        for layer in self._layers:
+            layer.close()
+        self._layers = []

@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+from PySide6.QtGui import QGuiApplication
 from pytestqt.qtbot import QtBot
 
 from livesubs.core.config import AppConfig
@@ -20,9 +21,12 @@ from livesubs.core.messages import (
     SubtitleRead,
     SubtitleTranslated,
 )
-from livesubs.core.profiles import ProfileStore
+from livesubs.core.profiles import MonitorSource, ProfileStore, WindowSource
+from livesubs.platform.win32 import MonitorInfo, WindowInfo
 from livesubs.ui.main_window import PROFILE_ID, MainWindow, overlay_area
 from livesubs.ui.overlay import Overlay, wrap
+from livesubs.ui.pick import resolve
+from livesubs.ui.region_select import RegionPicker
 from livesubs.ui.screens import ScreenMap, to_logical, to_physical
 
 # The developer's desk: 1080p at 100 % and a 1440p laptop panel at 150 %, up and to the right.
@@ -134,7 +138,15 @@ def test_start_needs_a_region(window: MainWindow) -> None:
     assert window.statusBar().currentMessage()
 
 
+def test_no_source_is_preselected(window: MainWindow) -> None:
+    """Regression: the front-most window (the Explorer window the exe was started from) used
+    to be preselected, so the user's region silently applied to the wrong window."""
+    assert window.selected_source() is None
+    assert window.source_combo.currentIndex() == -1
+
+
 def test_start_sends_the_profile_and_saves_it(window: MainWindow, tmp_path: Path) -> None:
+    window.source_combo.setCurrentIndex(window.source_combo.count() - 1)  # a monitor
     window.set_region(NormRect(x=0.1, y=0.8, width=0.8, height=0.15))
     window.toggle()
     command = engine_of(window).sent[-1]
@@ -208,3 +220,60 @@ def test_region_change_while_running_reaches_the_engine(window: MainWindow) -> N
 def test_close_shuts_the_engine_down(window: MainWindow) -> None:
     window.close()
     assert engine_of(window).stopped
+
+
+# --- picking a region anywhere on the desktop ---------------------------------------------------
+
+MONITORS = [
+    MonitorInfo(1, r"\\.\DISPLAY1", Rect(0, 0, 1920, 1080), Rect(0, 0, 1920, 1032), True, 96),
+    MonitorInfo(
+        2, r"\\.\DISPLAY2", Rect(1920, -164, 2560, 1440), Rect(1920, -164, 2560, 1392), False, 144
+    ),
+]
+
+
+def _window(title: str, exe: str, area: Rect, minimized: bool = False) -> tuple[WindowInfo, Rect]:
+    return WindowInfo(hash(title), title, 1, exe, area, minimized), area
+
+
+def test_pick_uses_the_window_under_the_selection() -> None:
+    browser = _window("GTA trailer - YouTube", "chrome.exe", Rect(0, 0, 1920, 1080))
+    explorer = _window("LiveSubs - Dosya Gezgini", "explorer.exe", Rect(1950, 0, 900, 600))
+    pick = resolve(Rect(300, 930, 1320, 120), [explorer, browser], MONITORS)
+    assert pick is not None
+    assert pick.source == WindowSource(exe_name="chrome.exe", title="GTA trailer - YouTube")
+    assert pick.region.to_pixels(1920, 1080) == Rect(300, 930, 1320, 120)
+    assert pick.label == "GTA trailer - YouTube"
+
+
+def test_pick_prefers_the_front_window_and_normalizes_to_it() -> None:
+    small = _window("Remote Play", "RemotePlay.exe", Rect(100, 100, 1280, 720))
+    behind = _window("Desktop app", "app.exe", Rect(0, 0, 1920, 1080))
+    pick = resolve(Rect(100 + 128, 100 + 612, 1024, 72), [small, behind], MONITORS)
+    assert pick.source.exe_name == "RemotePlay.exe"
+    assert pick.region == NormRect(x=0.1, y=0.85, width=0.8, height=0.1)
+
+
+def test_pick_skips_minimized_windows_and_the_desktop() -> None:
+    minimized = _window("Game", "game.exe", Rect(0, 0, 1920, 1080), minimized=True)
+    desktop = _window("Program Manager", "explorer.exe", Rect(0, 0, 4480, 1440))
+    pick = resolve(Rect(2200, 1000, 800, 100), [minimized, desktop], MONITORS)
+    assert pick.source == MonitorSource(device_name=r"\\.\DISPLAY2")
+    assert pick.area == MONITORS[1].rect
+    assert pick.label == "DISPLAY2"
+
+
+def test_pick_outside_every_monitor() -> None:
+    assert resolve(Rect(9000, 9000, 50, 50), [], MONITORS) is None
+
+
+def test_picker_covers_every_screen(qtbot: QtBot) -> None:
+    picker = RegionPicker()
+    picker.show()
+    layers = picker._layers
+    assert len(layers) == len(QGuiApplication.screens())
+    for layer in layers:
+        qtbot.addWidget(layer)
+        assert layer.geometry() == layer.screen().geometry()
+    picker.cancel()
+    assert picker._layers == []

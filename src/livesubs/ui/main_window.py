@@ -58,7 +58,8 @@ from livesubs.ollama.client import DEFAULT_URL, InstalledModel, list_models, sta
 from livesubs.platform import win32
 from livesubs.ui import screens
 from livesubs.ui.overlay import Overlay
-from livesubs.ui.region_select import RegionSelector
+from livesubs.ui.pick import resolve
+from livesubs.ui.region_select import RegionPicker
 
 PROFILE_ID = "varsayilan"
 FEED_LIMIT = 200
@@ -82,6 +83,12 @@ class SourceOption:
     window: win32.WindowInfo | None = None
 
 
+def visible_client_area(hwnd: int) -> Rect | None:
+    """The part of a window's client area that is captured (what WGC frames show)."""
+    bounds, client = win32.window_frame_bounds(hwnd), win32.client_rect(hwnd)
+    return client.intersection(bounds) if bounds and client else None
+
+
 def available_sources() -> list[SourceOption]:
     options = []
     for window in win32.list_windows(exclude_pid=os.getpid()):
@@ -89,8 +96,7 @@ def available_sources() -> list[SourceOption]:
             continue
 
         def area(hwnd: int = window.hwnd) -> Rect | None:
-            bounds, client = win32.window_frame_bounds(hwnd), win32.client_rect(hwnd)
-            return client.intersection(bounds) if bounds and client else None
+            return visible_client_area(hwnd)
 
         label = t("source.window", title=window.title[:60]) + f"  [{window.exe_name}]"
         spec = WindowSource(exe_name=window.exe_name, title=window.title)
@@ -142,6 +148,7 @@ class MainWindow(QMainWindow):
         self._rows: dict[int, int] = {}
         self._translations: dict[int, str] = {}
         self._clear_generation = 0
+        self._reads = 0  # lines read since Start: tells "running" from "waiting for subtitles"
         self._overlay = Overlay(self._profile.overlay)
         self._bridge = _Bridge()
         self._bridge.models.connect(self._on_models)
@@ -165,6 +172,7 @@ class MainWindow(QMainWindow):
         grid = QGridLayout()
 
         self.source_combo = QComboBox()
+        self.source_combo.setPlaceholderText(t("source.none"))
         refresh = QPushButton(t("source.refresh"), clicked=self.refresh_sources)
         grid.addWidget(QLabel(t("source.label")), 0, 0)
         grid.addWidget(self.source_combo, 0, 1)
@@ -247,8 +255,9 @@ class MainWindow(QMainWindow):
         self.source_combo.setCurrentIndex(self._index_of(self._profile.source))
 
     def _index_of(self, spec: Source | None) -> int:
+        # Never fall back to some other window: a wrong source silently reads nothing.
         if spec is None:
-            return -1 if not self._sources else 0
+            return -1
         if isinstance(spec, WindowSource):
             windows = [o.window for o in self._sources if o.window is not None]
             match = win32.best_window_match(windows, spec.exe_name, spec.title)
@@ -257,40 +266,54 @@ class MainWindow(QMainWindow):
         for i, option in enumerate(self._sources):
             if option.spec == spec:
                 return i
-        return 0 if self._sources else -1
+        return -1
 
     def selected_source(self) -> SourceOption | None:
         index = self.source_combo.currentIndex()
         return self._sources[index] if 0 <= index < len(self._sources) else None
 
     def select_region(self) -> None:
-        option = self.selected_source()
-        if option is None:
-            self.statusBar().showMessage(t("error.no_source"), 5000)
-            return
-        area = option.area()
-        if area is None:
+        """Dim every monitor; the user marks the subtitle wherever it is shown."""
+        picker = RegionPicker()
+        picker.selected.connect(self._on_picked)
+        picker.show()
+        self._picker = picker  # keep a reference while it is open
+
+    def _on_picked(self, logical: Rect) -> None:
+        physical = screens.to_physical(logical, screens.current_screens())
+        windows = [
+            (w, area)
+            for w in win32.list_windows(exclude_pid=os.getpid())
+            if (area := visible_client_area(w.hwnd)) is not None
+        ]
+        pick = resolve(physical, windows, win32.list_monitors())
+        if pick is None:
             self.statusBar().showMessage(t("error.region_needs_screen"), 5000)
             return
-        logical = screens.to_logical(area, screens.current_screens())
-        selector = RegionSelector(logical, self._profile.region)
-        selector.selected.connect(self.set_region)
-        selector.show()
-        selector.activateWindow()
-        self._selector = selector  # keep a reference while it is open
+        source_changed = pick.source != self._profile.source
+        self._profile.source = pick.source
+        self.refresh_sources()
+        self.set_region(pick.region, restart=source_changed)
 
-    def set_region(self, region: NormRect) -> None:
+    def set_region(self, region: NormRect, *, restart: bool = False) -> None:
         self._profile.region = region
         self._update_region_label()
         self._save()
-        if self._state in (EngineState.WARMING_UP, EngineState.RUNNING):
-            self._engine.send(SetRegion(region))
-            self._place_overlay()
+        if self._state in (EngineState.STARTING, EngineState.WARMING_UP, EngineState.RUNNING):
+            if restart:  # another window or monitor: the pipeline must reopen its source
+                self._send_start()
+            else:
+                self._engine.send(SetRegion(region))
+                self._place_overlay()
 
     def _update_region_label(self) -> None:
-        r = self._profile.region
+        r, source = self._profile.region, self._profile.source
+        if r is None or source is None:
+            self.region_label.setText(t("region.none"))
+            return
+        name = source.title if isinstance(source, WindowSource) else source.device_name
         self.region_label.setText(
-            t("region.selected", x=r.x, y=r.y, w=r.width, h=r.height) if r else t("region.none")
+            t("region.selected", source=name[:70], x=r.x, y=r.y, w=r.width, h=r.height)
         )
 
     # --- Ollama ----------------------------------------------------------------------------------
@@ -334,9 +357,13 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(t("error.no_region"), 5000)
             return
         self._profile.source = option.spec
+        self._send_start()
+
+    def _send_start(self) -> None:
         if self.model_combo.currentText():
             self._config.ollama.gpu_model = self.model_combo.currentText()
         self._save()
+        self._reads = 0
         self._engine.send(
             StartPipeline(
                 profile=self._profile.model_copy(deep=True),
@@ -370,7 +397,10 @@ class MainWindow(QMainWindow):
 
     def _set_state(self, state: EngineState, detail: str) -> None:
         self._state = state
-        self.state_label.setText(t(f"state.{state}", model=detail))
+        text = t(f"state.{state}", model=detail)
+        if state == EngineState.RUNNING and self._reads == 0:
+            text = t("state.waiting")
+        self.state_label.setText(text)
         active = state in (EngineState.STARTING, EngineState.WARMING_UP, EngineState.RUNNING)
         self.start_button.setText(t("stop") if active else t("start"))
         if state == EngineState.STOPPED:
@@ -408,6 +438,9 @@ class MainWindow(QMainWindow):
 
     def _on_read(self, event: SubtitleRead) -> None:
         self._clear_generation += 1  # a subtitle is up: cancel a pending clear
+        if self._reads == 0 and self._state == EngineState.RUNNING:
+            self.state_label.setText(t("state.running"))
+        self._reads += 1
         if event.repeat:
             if (text := self._translations.get(event.line_id)) is not None:
                 self._overlay.show_text(text)
