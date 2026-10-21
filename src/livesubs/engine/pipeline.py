@@ -1,0 +1,301 @@
+"""One running chain: source -> region -> preprocess -> change -> stabilizer -> OCR -> translation.
+
+Runs on its own thread inside the engine process and reports everything through ``emit``
+(``core.messages`` events). The loop runs at the profile's fps, and every ``fast_reread_s`` while
+a new line waits for its confirming read. Frames are only processed when they are new, or when
+the stabilizer wants another read. OCR runs inline (10-20 ms); translation runs on the
+orchestrator's thread, so a slow model never delays reading the next subtitle.
+
+Without Ollama (or without the model) the pipeline keeps running and shows the English lines.
+"""
+
+from __future__ import annotations
+
+import logging
+import threading
+import time
+from collections.abc import Callable
+from pathlib import Path
+
+import cv2
+
+from livesubs.core.geometry import NormRect
+from livesubs.core.messages import (
+    EngineError,
+    EngineState,
+    ErrorKind,
+    Event,
+    FrameInfo,
+    StartPipeline,
+    StateChanged,
+    SubtitleCleared,
+    SubtitleRead,
+    SubtitleTranslated,
+)
+from livesubs.core.profiles import Source
+from livesubs.engine.capture import FrameSource, SourceLostError, SourceUnavailableError
+from livesubs.engine.capture import open_source as default_open_source
+from livesubs.engine.ocr.language import english_ocr_language
+from livesubs.engine.ocr.winrt_ocr import WinRtOcr
+from livesubs.engine.text.stabilizer import (
+    Event as LineEvent,
+)
+from livesubs.engine.text.stabilizer import (
+    LineCleared,
+    LineConfirmed,
+    LineUpgraded,
+    Stabilizer,
+)
+from livesubs.engine.translate.base import (
+    BackendUnavailableError,
+    ModelNotFoundError,
+    TranslationBackend,
+    TranslationError,
+)
+from livesubs.engine.translate.cache import TranslationCache
+from livesubs.engine.translate.ollama import OllamaBackend
+from livesubs.engine.translate.orchestrator import (
+    LineFailed,
+    LineTranslated,
+    TranslationEvent,
+    TranslationOrchestrator,
+)
+from livesubs.engine.vision.change import Change, ChangeDetector
+from livesubs.engine.vision.preprocess import preprocess
+
+log = logging.getLogger(__name__)
+
+FIRST_FRAME_TIMEOUT_S = 5.0
+CAPTURE_MAX_FPS = 30.0
+
+SourceOpener = Callable[[Source], FrameSource]
+BackendFactory = Callable[[StartPipeline], TranslationBackend]
+
+
+def _open_wgc_or_mss(spec: Source) -> FrameSource:
+    return default_open_source(spec, max_fps=CAPTURE_MAX_FPS)
+
+
+def ollama_backend(start: StartPipeline) -> OllamaBackend:
+    settings = start.ollama
+    return OllamaBackend(
+        settings.gpu_model,
+        url=settings.url,
+        num_ctx=settings.num_ctx,
+        num_gpu=settings.gpu_num_gpu,
+        keep_alive=settings.keep_alive,
+    )
+
+
+def _error_kind(error: TranslationError) -> ErrorKind:
+    if isinstance(error, BackendUnavailableError):
+        return ErrorKind.OLLAMA_UNAVAILABLE
+    if isinstance(error, ModelNotFoundError):
+        return ErrorKind.MODEL_NOT_FOUND
+    return ErrorKind.TRANSLATION_FAILED
+
+
+class Pipeline:
+    def __init__(
+        self,
+        start: StartPipeline,
+        emit: Callable[[Event], None],
+        *,
+        open_source: SourceOpener | None = None,
+        backend_factory: BackendFactory | None = ollama_backend,
+        cache_path: Path | None = None,
+    ) -> None:
+        """``backend_factory=None`` runs without translation (English only)."""
+        if start.profile.source is None:
+            raise ValueError("the profile has no source")
+        self._start = start
+        self._emit = emit
+        self._open_source = open_source or _open_wgc_or_mss
+        self._backend_factory = backend_factory
+        self._cache_path = cache_path
+        self._region = start.profile.region or NormRect(x=0.1, y=0.75, width=0.8, height=0.2)
+        self._region_changed = False
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, name="pipeline", daemon=True)
+        self._line_id = 0
+        self._ocr_ms: dict[int, float] = {}
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self, timeout: float = 5.0) -> None:
+        self._stop.set()
+        if self._thread.is_alive() and self._thread is not threading.current_thread():
+            self._thread.join(timeout)
+
+    def set_region(self, region: NormRect) -> None:
+        self._region = region
+        self._region_changed = True
+
+    @property
+    def running(self) -> bool:
+        return self._thread.is_alive()
+
+    # --- thread ----------------------------------------------------------------------------------
+
+    def _run(self) -> None:
+        source: FrameSource | None = None
+        orchestrator: TranslationOrchestrator | None = None
+        cache: TranslationCache | None = None
+        try:
+            self._emit(StateChanged(EngineState.STARTING))
+            source = self._open(self._start.profile.source)
+            ocr = self._ocr()
+            if source is None or ocr is None:
+                return
+            first = source.wait_for_frame(0.0, timeout=FIRST_FRAME_TIMEOUT_S)
+            if first is None:
+                self._fatal(ErrorKind.SOURCE_UNAVAILABLE, "no frame from the source (minimized?)")
+                return
+            rect = source.screen_rect()
+            screen = (rect.x, rect.y, rect.width, rect.height) if rect else None
+            self._emit(FrameInfo(first.width, first.height, screen))
+
+            cache = TranslationCache(self._cache_path)
+            orchestrator = self._translation(cache)
+            if self._stop.is_set():
+                return
+            self._emit(StateChanged(EngineState.RUNNING))
+            self._loop(source, ocr, orchestrator)
+        except SourceLostError as exc:
+            self._fatal(ErrorKind.SOURCE_LOST, str(exc))
+        except Exception as exc:
+            log.exception("Pipeline crashed")
+            self._fatal(ErrorKind.INTERNAL, f"{type(exc).__name__}: {exc}")
+        finally:
+            if orchestrator is not None:
+                orchestrator.close()
+            if source is not None:
+                source.close()
+            if cache is not None:
+                cache.close()
+            self._emit(StateChanged(EngineState.STOPPED))
+
+    def _open(self, spec: Source) -> FrameSource | None:
+        try:
+            return self._open_source(spec)
+        except SourceUnavailableError as exc:
+            self._fatal(ErrorKind.SOURCE_UNAVAILABLE, str(exc))
+            return None
+
+    def _ocr(self) -> WinRtOcr | None:
+        language = english_ocr_language()
+        if language is None:
+            self._fatal(ErrorKind.OCR_UNAVAILABLE, "the English OCR language pack is missing")
+            return None
+        return WinRtOcr(language)
+
+    def _translation(self, cache: TranslationCache) -> TranslationOrchestrator | None:
+        if self._backend_factory is None:
+            return None
+        backend = self._backend_factory(self._start)
+        self._emit(StateChanged(EngineState.WARMING_UP, backend.model))
+        warm_up = getattr(backend, "warm_up", None)
+        try:
+            if warm_up is not None:
+                warm_up()
+        except TranslationError as exc:
+            # Keep reading subtitles; the UI shows English only and explains why.
+            self._emit(EngineError(_error_kind(exc), str(exc)))
+            return None
+        profile = self._start.profile
+        return TranslationOrchestrator(
+            backend,
+            cache,
+            self._on_translation,
+            profile_id=self._start.profile_id,
+            history_size=self._start.ollama.context_lines,
+            game_context=profile.translation.context,
+            glossary=profile.translation.glossary,
+        )
+
+    def _loop(
+        self, source: FrameSource, ocr: WinRtOcr, orchestrator: TranslationOrchestrator | None
+    ) -> None:
+        profile = self._start.profile
+        tick = 1.0 / profile.capture.fps
+        detector, stabilizer = ChangeDetector(), Stabilizer()
+        last_timestamp = -1.0
+        while not self._stop.wait(
+            stabilizer.fast_reread_s if stabilizer.awaiting_confirmation else tick
+        ):
+            if self._region_changed:
+                self._region_changed = False
+                detector.reset()  # a new region: whatever was read before is gone
+                event = stabilizer.update(Change.CLEARED, 0, time.monotonic()).event
+                if event is not None:
+                    self._on_line(event, 0.0, orchestrator)
+            frame = source.latest_frame()
+            if frame is None:
+                continue
+            if frame.timestamp == last_timestamp and not stabilizer.awaiting_confirmation:
+                continue  # nothing new on screen
+            last_timestamp = frame.timestamp
+
+            r = self._region.to_pixels(frame.width, frame.height)
+            processed = preprocess(frame.image[r.y : r.bottom, r.x : r.right], profile.vision)
+            change = detector.update(processed.mask)
+            now = time.monotonic()
+            decision = stabilizer.update(change, cv2.countNonZero(processed.mask), now)
+            if decision.event is not None:
+                self._on_line(decision.event, 0.0, orchestrator)
+            if not decision.read:
+                continue
+            read = ocr.recognize(processed.ocr_image)
+            event = stabilizer.on_read(read.text, time.monotonic())
+            if event is not None:
+                self._on_line(event, read.elapsed_ms, orchestrator)
+
+    def _on_line(
+        self, event: LineEvent, ocr_ms: float, orchestrator: TranslationOrchestrator | None
+    ) -> None:
+        match event:
+            case LineCleared():
+                self._emit(SubtitleCleared())
+            case LineConfirmed(text=text, repeat=True):
+                self._emit(SubtitleRead(self._line_id, text, ocr_ms, repeat=True))
+            case LineConfirmed(text=text):
+                self._line_id += 1
+                self._submit(self._line_id, text, ocr_ms, orchestrator, upgrade=False)
+            case LineUpgraded(text=text):
+                self._submit(self._line_id, text, ocr_ms, orchestrator, upgrade=True)
+
+    def _submit(
+        self,
+        line_id: int,
+        text: str,
+        ocr_ms: float,
+        orchestrator: TranslationOrchestrator | None,
+        *,
+        upgrade: bool,
+    ) -> None:
+        self._ocr_ms[line_id] = ocr_ms
+        self._emit(SubtitleRead(line_id, text, ocr_ms, upgrade=upgrade))
+        if orchestrator is not None:
+            orchestrator.submit(line_id, text)
+
+    def _on_translation(self, event: TranslationEvent) -> None:
+        match event:
+            case LineTranslated(line_id=line_id, source=source, result=result):
+                self._emit(
+                    SubtitleTranslated(
+                        line_id=line_id,
+                        source=source,
+                        translation=result.text,
+                        model=result.model,
+                        lane=str(result.lane),
+                        ocr_ms=self._ocr_ms.get(line_id, 0.0),
+                        translate_ms=result.elapsed_ms,
+                        cached=result.cached,
+                    )
+                )
+            case LineFailed(error=error):
+                self._emit(EngineError(_error_kind(error), str(error)))
+
+    def _fatal(self, kind: ErrorKind, message: str) -> None:
+        self._emit(EngineError(kind, message, fatal=True))

@@ -92,6 +92,18 @@ UI process (PySide6)                                  Engine process (multiproce
 
 - IPC: `multiprocessing.Queue`, typed dataclass messages (`core/messages.py`).
   Debug frames (raw/preprocessed) are only sent while calibration mode is on, throttled to ~5 fps.
+  Commands: `StartPipeline(profile, ollama, profile_id)`, `StopPipeline`, `SetRegion`, `Shutdown`.
+  Events: `StateChanged(IDLE/STARTING/WARMING_UP/RUNNING/STOPPED)`, `EngineError(kind, message,
+  fatal)` (UI maps `kind` to Turkish text), `FrameInfo`, `SubtitleRead(line_id, text, ocr_ms,
+  repeat, upgrade)` (English first), `SubtitleTranslated(...)`, `SubtitleCleared`.
+- Engine (`engine/process.py`): `EngineProcess` (UI side, spawn context, `send`/`poll`/
+  `wait_event`/`shutdown`) and `engine_main` (logs to `log_dir()/engine.log`). `engine/pipeline.py`:
+  one thread runs capture -> region -> preprocess -> change -> stabilizer -> **OCR inline** (10-20 ms,
+  no separate OCR thread needed) and hands lines to the orchestrator. Loop at profile fps, 50 ms
+  while a candidate awaits confirmation; unchanged frames skipped. Model warm-up before RUNNING.
+  Without Ollama/model: non-fatal error, English-only mode. Source/OCR missing or source lost:
+  fatal. Region changes reset detection. Source opener and backend factory are injectable (tests
+  play sample screenshots as a scripted video).
 - Region stored **normalized (0–1) to the source's frame space** (window client area / monitor /
   video frame), converted to physical pixels with DPI awareness.
 - Capture FPS configurable, default 10. WGC yellow border disabled where Windows 11 allows it.
@@ -206,7 +218,7 @@ Implementation (step 7, `engine/translate/`):
   (EN -> TR), which keeps small models from translating the context lines; `clean_output` strips
   `<think>` blocks, "Türkçe:" labels, wrapping quotes, line breaks.
 - `ollama.py`: `/api/chat` stream, `think: false`, `num_ctx`, optional `num_gpu`, `num_predict` 200,
-  temperature 0.2, `keep_alive` 30m; `load()`, `unload()` (`keep_alive: 0`) and **`warm_up()`**:
+  temperature 0, `keep_alive` 30m; `load()`, `unload()` (`keep_alive: 0`) and **`warm_up()`**:
   the first chat after a load took ~4 s (measured twice) even with the model already loaded,
   later ones 100-600 ms — so translation start runs one tiny real translation.
 - `cache.py`: LRU (2000) + SQLite WAL (`cache_dir()/translations.sqlite3`), key = (model, profile,
@@ -316,8 +328,8 @@ Phase 1 — working core (source -> region -> OCR -> GPU translation -> overlay)
 - [x] 4. Vision: preprocessing + text-mask change detection + tests
 - [x] 5. OCR: WinRT wrapper + language check + tests
 - [x] 6. Text: normalize, filters, 2-frame stabilizer + tests
-- [ ] 7. Translation: Ollama backend, prompt, cache, orchestrator (GPU lane) + mocked-HTTP tests
-- [ ] 8. Engine process + IPC
+- [x] 7. Translation: Ollama backend, prompt, cache, orchestrator (GPU lane) + mocked-HTTP tests
+- [x] 8. Engine process + IPC
 - [ ] 9. Minimal UI: source pick, drag-select region, Start/Stop, live feed, overlay  => core done
 - [ ] 9b. **= step 15, moved up** (capture card is the user's main source): video device source,
   then a low-latency fullscreen preview window for it
@@ -413,3 +425,9 @@ Phase 3 — release
   ("boktan", "lan"), "hugger" right; remaining misses: "pick up" (drugs), "the law chased in".
   Few-shot slang examples + temperature 0 are slightly better and deterministic (kept as the
   candidate prompt; not committed yet). The user decides on quality before picking a viewing setup.
+- 2026-10-21 (steps 7-8 closed): default GPU model **`gemma4:12b-it-qat`** (clear quality winner on
+  the samples; ~1.1 s/line because it overflows 8 GB; a MoE alternative, `gemma4:26b-a4b-it-qat`,
+  is expected to be both better and faster by bandwidth math — to be measured later, user deferred
+  it). Prompt: 5 fixed slang few-shot turns (`prompt.EXAMPLES`, never from tests/samples — a test
+  enforces it) + temperature 0 (deterministic). User wants a runnable exe next: step 9 (minimal UI)
+  + an early PyInstaller smoke build; viewing setup (3 options) chosen after judging quality live.

@@ -10,7 +10,7 @@ from livesubs.core.config import AppConfig, WebSettings, load_config, save_confi
 def test_missing_file_gives_defaults(tmp_path: Path) -> None:
     config = load_config(tmp_path / "config.json")
     assert config == AppConfig()
-    assert config.ollama.gpu_model == "qwen3:8b"
+    assert config.ollama.gpu_model == "gemma4:12b-it-qat"
     assert not config.cpu_lane.enabled
     assert not config.recording_mode
 

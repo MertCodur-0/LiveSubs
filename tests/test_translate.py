@@ -26,7 +26,7 @@ from livesubs.engine.translate.orchestrator import (
     TranslationEvent,
     TranslationOrchestrator,
 )
-from livesubs.engine.translate.prompt import SYSTEM_PROMPT, build_messages, clean_output
+from livesubs.engine.translate.prompt import EXAMPLES, SYSTEM_PROMPT, build_messages, clean_output
 
 URL = "http://ollama.test"
 
@@ -41,18 +41,18 @@ def test_messages_carry_history_as_turns() -> None:
         glossary={"Vice City": "Vice City", "cop": "aynasız"},
     )
     messages = build_messages(request)
-    assert [m["role"] for m in messages] == [
-        "system",
-        "user",
-        "assistant",
-        "user",
-        "assistant",
-        "user",
-    ]
+    examples = 2 * len(EXAMPLES)
+    turns = len(EXAMPLES) + len(request.history)
+    assert [m["role"] for m in messages] == ["system", *["user", "assistant"] * turns, "user"]
     assert messages[0]["content"].startswith(SYSTEM_PROMPT)
     assert "1980s Miami" in messages[0]["content"]
     assert "- cop -> aynasız" in messages[0]["content"]
-    assert messages[1:5] == [
+    # Fixed examples first, then the dialogue so far, then the line to translate.
+    assert messages[1:3] == [
+        {"role": "user", "content": EXAMPLES[0][0]},
+        {"role": "assistant", "content": EXAMPLES[0][1]},
+    ]
+    assert messages[1 + examples : 5 + examples] == [
         {"role": "user", "content": "Yo."},
         {"role": "assistant", "content": "Selam."},
         {"role": "user", "content": "We're late."},
@@ -62,10 +62,18 @@ def test_messages_carry_history_as_turns() -> None:
 
 
 def test_minimal_messages() -> None:
-    assert build_messages(TranslationRequest("Hi.")) == [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": "Hi."},
-    ]
+    messages = build_messages(TranslationRequest("Hi."))
+    assert messages[0] == {"role": "system", "content": SYSTEM_PROMPT}
+    assert [m["role"] for m in messages[1:-1]] == ["user", "assistant"] * len(EXAMPLES)
+    assert messages[-1] == {"role": "user", "content": "Hi."}
+
+
+def test_examples_are_not_test_samples() -> None:
+    """The few-shot examples must not leak the evaluation lines in tests/samples."""
+    from sample_data import load_samples
+
+    sample_lines = {s.expected for s in load_samples()}
+    assert not sample_lines & {source for source, _ in EXAMPLES}
 
 
 @pytest.mark.parametrize(
@@ -143,8 +151,10 @@ def test_missing_model(backend: OllamaBackend) -> None:
 
 
 @respx.mock
-def test_server_down(backend: OllamaBackend) -> None:
-    respx.post(f"{URL}/api/chat").mock(side_effect=httpx.ConnectError("refused"))
+@pytest.mark.parametrize("error", [httpx.ConnectError("refused"), httpx.ConnectTimeout("dropped")])
+def test_server_down(backend: OllamaBackend, error: httpx.HTTPError) -> None:
+    # A closed port is refused or, behind a firewall, simply times out.
+    respx.post(f"{URL}/api/chat").mock(side_effect=error)
     with pytest.raises(BackendUnavailableError):
         backend.translate(TranslationRequest("Hi."), CancelToken())
 

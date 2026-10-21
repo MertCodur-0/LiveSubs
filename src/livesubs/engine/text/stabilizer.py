@@ -90,6 +90,12 @@ class Stabilizer:
     def current(self) -> str | None:
         return self._current
 
+    @property
+    def awaiting_confirmation(self) -> bool:
+        """A candidate waits for its confirming read: the caller should look again soon
+        (``fast_reread_s``) instead of at its normal tick."""
+        return self._candidate is not None
+
     def update(self, change: Change, text_pixels: int, now: float) -> Decision:
         """Feed the change detector's verdict for a frame; says whether to read it."""
         self._pixels = text_pixels

@@ -41,7 +41,7 @@ class OllamaBackend:
         num_ctx: int = 2048,
         num_gpu: int | None = None,
         keep_alive: str | int = "30m",
-        temperature: float = 0.2,
+        temperature: float = 0.0,  # deterministic: the same line always reads the same
         client: httpx.Client | None = None,
     ) -> None:
         self._model = model
@@ -99,7 +99,7 @@ class OllamaBackend:
                     parts.append(chunk.get("message", {}).get("content", ""))
                     if chunk.get("done"):
                         break
-        except httpx.ConnectError as exc:
+        except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
             raise BackendUnavailableError(f"Ollama is not reachable: {exc}") from exc
         except (httpx.HTTPError, httpx.StreamError) as exc:
             if cancel.cancelled:  # the stream was closed under us on purpose
@@ -138,7 +138,7 @@ class OllamaBackend:
     def _generate(self, body: dict[str, Any]) -> None:
         try:
             response = self._client.post("/api/generate", json={**body, "stream": False})
-        except httpx.ConnectError as exc:
+        except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
             raise BackendUnavailableError(f"Ollama is not reachable: {exc}") from exc
         except httpx.HTTPError as exc:
             raise TranslationError(f"Ollama request failed: {exc}") from exc

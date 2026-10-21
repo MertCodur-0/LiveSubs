@@ -15,7 +15,7 @@ CONFIG_SCHEMA_VERSION = 1
 
 class OllamaSettings(SettingsModel):
     url: str = "http://127.0.0.1:11434"
-    gpu_model: str = "qwen3:8b"
+    gpu_model: str = "gemma4:12b-it-qat"
     # Layers to offload to the GPU; None lets Ollama decide (all that fit).
     gpu_num_gpu: int | None = Field(None, ge=0)
     num_ctx: int = Field(2048, ge=512, le=32768)

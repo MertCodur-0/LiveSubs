@@ -1,7 +1,9 @@
 """The chat messages for a subtitle translation, and cleanup of what the model returns.
 
-Earlier lines go in as real user/assistant turns (English -> Turkish). Small models then keep the
-dialogue's tone and terms consistent and never translate the context lines themselves, which they
+A few fixed example turns (slang English -> natural Turkish) come first: on the sample lines they
+fixed literal slang ("dog" -> "köpek" became "kanka"). They are deliberately not taken from the
+test samples. Earlier lines of the dialogue follow as real user/assistant turns, so small models
+keep the tone and terms consistent and never translate the context lines themselves, which they
 tend to do when the context is pasted into one message.
 """
 
@@ -22,6 +24,20 @@ transliterate them.
 - Reply with the Turkish translation of the user's line only: no quotes, notes, alternatives or \
 English."""
 
+EXAMPLES: tuple[tuple[str, str], ...] = (
+    ("Yo, dog, what's good?", "Naber kanka, ne var ne yok?"),
+    ("Shut the fuck up and drive.", "Kapa lan çeneni de sür şu arabayı."),
+    (
+        "Get your ass in the car, bro. The cops are coming!",
+        "Kıçını arabaya sok kanka. Aynasızlar geliyor!",
+    ),
+    ("Man, that's some bullshit right there.", "Yok artık, saçmalığın daniskası bu."),
+    (
+        "Tell Marcus I got the package from Little Havana.",
+        "Marcus'a söyle, paketi Little Havana'dan aldım.",
+    ),
+)
+
 _THINK_BLOCK = re.compile(r"<think>.*?</think>", re.DOTALL)
 _LABEL = re.compile(r"^(?:turkish|türkçe|translation|çeviri)\s*:\s*", re.IGNORECASE)
 _QUOTES = "\"'“”‘’«»"
@@ -35,6 +51,9 @@ def build_messages(request: TranslationRequest) -> list[dict[str, str]]:
         terms = "\n".join(f"- {en} -> {tr}" for en, tr in request.glossary.items())
         system += f"\n\nAlways translate these terms this way:\n{terms}"
     messages = [{"role": "system", "content": system}]
+    for source, translation in EXAMPLES:
+        messages.append({"role": "user", "content": source})
+        messages.append({"role": "assistant", "content": translation})
     for line in request.history:
         messages.append({"role": "user", "content": line.source})
         messages.append({"role": "assistant", "content": line.translation})
