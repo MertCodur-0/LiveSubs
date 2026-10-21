@@ -84,7 +84,7 @@ def test_vram_reserve_overrides() -> None:
     ("name", "slug"),
     [
         ("Vice City Gece", "vice-city-gece"),
-        ("İstanbul Şoförü: Ağır Çekim", "istanbul-soforu-agir-cekim"),  # noqa: RUF001
+        ("İstanbul Şoförü: Ağır Çekim", "istanbul-soforu-agir-cekim"),
         ("Pokémon", "pokemon"),
         ("!!!", "profile"),
     ],

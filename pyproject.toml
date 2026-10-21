@@ -75,6 +75,9 @@ src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF", "N", "PTH"]
+# Turkish text and typographic subtitle punctuation are everyday content here, not confusables:
+# dotless i, curly single quotes, en dash.
+allowed-confusables = ["ı", "‘", "’", "–"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["livesubs"]

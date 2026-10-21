@@ -190,6 +190,30 @@ Designed from the start for three source kinds; video device lands in phase 2.
   translation; per-profile extra context + glossary; last N lines (default 3) as context.
 - Every result carries model, lane (GPU/CPU), OCR ms and translation ms for the live feed.
 
+Implementation (step 7, `engine/translate/`):
+- `base.py`: `TranslationRequest(text, history: ContextLine(source, translation)..., game_context,
+  glossary)`, `TranslationResult(text, model, lane, elapsed_ms, cached)`, errors
+  (`BackendUnavailableError`, `ModelNotFoundError`, `TranslationCancelledError`), `CancelToken`
+  with `on_cancel` callbacks (the backend closes the HTTP stream from the cancelling thread, so a
+  cancel works even while the model is still loading).
+- `prompt.py`: English system prompt (rules above); history as real user/assistant turns
+  (EN -> TR), which keeps small models from translating the context lines; `clean_output` strips
+  `<think>` blocks, "Türkçe:" labels, wrapping quotes, line breaks.
+- `ollama.py`: `/api/chat` stream, `think: false`, `num_ctx`, optional `num_gpu`, `num_predict` 200,
+  temperature 0.2, `keep_alive` 30m; `load()`, `unload()` (`keep_alive: 0`) and **`warm_up()`**:
+  the first chat after a load took ~4 s (measured twice) even with the model already loaded,
+  later ones 100-600 ms — so translation start runs one tiny real translation.
+- `cache.py`: LRU (2000) + SQLite WAL (`cache_dir()/translations.sqlite3`), key = (model, profile,
+  `normalize.key(text)`), `clear(model)`.
+- `orchestrator.py`: GPU lane worker thread; `submit(line_id, text)` cancels the request in flight,
+  keeps one pending job (newest wins), answers cache hits at once; a result is published only if
+  its sequence number is still the newest (a late answer never overwrites a newer line). History
+  (default 3 lines) updated on publish; an upgrade (same `line_id`) replaces its own entry and
+  never sees itself as context. Events: `LineTranslated` / `LineFailed`.
+- `scripts/compare_models.py`: sample lines (expected EN) through several models next to the
+  user's `reference_tr`, with warm-up time, VRAM fit (`/api/ps` size_vram vs size) and latency.
+  `bench_pipeline.py` now runs stabilizer + orchestrator and reports **appear -> translated**.
+
 ### Model management
 
 - `/api/tags`, `/api/show`, `/api/ps`, `/api/pull` (stream, cancel), `/api/delete` (confirm).
@@ -353,3 +377,9 @@ Phase 3 — release
   drops unknown keys (also nested, also inside discriminated unions) and validates again.
 - 2026-10-21: GitHub repo created **private** (user's choice): github.com/MertCodur-0/LiveSubs;
   make it public when it is presentable. CI on GitHub passes.
+- 2026-10-21 (step 7): Ollama 0.40.5 on the dev machine; only `translategemma:latest` (4.3B) was
+  installed — on the samples it softens swearing ("fucking" dropped) and misreads slang ("pick up"
+  -> "geliyoruz"), median 302 ms. User chose to pull `qwen3:8b` and `gemma4:12b-it-qat` for the
+  comparison. Ollama's GPU discovery took ~40 s at server start (requests 500 meanwhile): the
+  startup check must wait/retry. `OLLAMA_MAX_LOADED_MODELS` is unset on this machine.
+  Ruff `allowed-confusables` = ı ‘ ’ – (Turkish text and subtitle punctuation are normal content).

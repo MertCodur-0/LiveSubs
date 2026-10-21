@@ -1,9 +1,10 @@
 """Measure the pipeline's latency stage by stage on a real source.
 
-Stages so far: capture (frame delivery), preprocessing, change detection and OCR (run when a
-subtitle appears or changes, as the pipeline will). Translation comes in a later step. WGC only
-delivers frames when the content changes, so run it against something that moves (a game, a
-video) to measure the delivery rate.
+Stages: capture (frame delivery), preprocessing, change detection, OCR (when the stabilizer asks
+for a read), confirmation and translation (Ollama, GPU lane). The headline number is
+"appear -> translated": from the frame where a subtitle first showed up to its translation being
+ready. WGC only delivers frames when the content changes, so run it against something that moves
+(a game, a video with subtitles) to measure the delivery rate.
 
 Examples:
     .venv\\Scripts\\python.exe scripts\\bench_pipeline.py                       # primary monitor
@@ -17,8 +18,11 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import threading
 import time
+from collections.abc import Callable
 
+import cv2
 import numpy as np
 
 from livesubs.core.geometry import NormRect
@@ -26,6 +30,15 @@ from livesubs.core.profiles import MonitorSource, Source, VisionSettings, Window
 from livesubs.engine.capture import CaptureError, create_source, is_black_frame
 from livesubs.engine.ocr.language import english_ocr_language
 from livesubs.engine.ocr.winrt_ocr import WinRtOcr
+from livesubs.engine.text.stabilizer import LineConfirmed, LineUpgraded, Stabilizer
+from livesubs.engine.translate.base import TranslationError
+from livesubs.engine.translate.cache import TranslationCache
+from livesubs.engine.translate.ollama import OllamaBackend
+from livesubs.engine.translate.orchestrator import (
+    LineTranslated,
+    TranslationEvent,
+    TranslationOrchestrator,
+)
 from livesubs.engine.vision.change import Change, ChangeDetector
 from livesubs.engine.vision.preprocess import preprocess
 from livesubs.platform import win32
@@ -54,6 +67,65 @@ def resolve_source(args: argparse.Namespace) -> Source:
     return MonitorSource(device_name=next(m for m in monitors if m.is_primary).device_name)
 
 
+class LineTimes:
+    """Per subtitle line: when it appeared, was confirmed, and translated (thread-safe)."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._lines: dict[int, dict[str, object]] = {}
+
+    def confirmed(self, line_id: int, text: str, appeared_at: float) -> None:
+        with self._lock:
+            self._lines[line_id] = {
+                "text": text,
+                "appeared": appeared_at,
+                "confirmed": time.monotonic(),
+            }
+
+    def on_event(self, event: TranslationEvent) -> None:
+        with self._lock:
+            line = self._lines.get(event.line_id)
+            if line is None:
+                return
+            if isinstance(event, LineTranslated):
+                line["translation"] = event.result.text  # an upgrade replaces the text...
+                if "translated" not in line:  # ...but the latency is the first translation's
+                    line["translated"] = time.monotonic()
+                    line["translate_ms"] = 0.0 if event.result.cached else event.result.elapsed_ms
+            else:
+                print(f"  translation failed: {event.error}")
+
+    def _values(self, compute: Callable[[dict[str, object]], float | None]) -> list[float]:
+        with self._lock:
+            return [v for line in self._lines.values() if (v := compute(line)) is not None]
+
+    def confirm_ms(self) -> list[float]:
+        return self._values(lambda x: (x["confirmed"] - x["appeared"]) * 1000)
+
+    def translate_ms(self) -> list[float]:
+        return self._values(lambda x: x.get("translate_ms"))
+
+    def end_to_end_ms(self) -> list[float]:
+        return self._values(
+            lambda x: (x["translated"] - x["appeared"]) * 1000 if "translated" in x else None
+        )
+
+    def translations(self) -> list[tuple[str, str]]:
+        with self._lock:
+            return [(x["text"], x.get("translation", "-")) for x in self._lines.values()]
+
+
+def start_translation(model: str, lines: LineTimes) -> TranslationOrchestrator | None:
+    backend = OllamaBackend(model)
+    try:
+        warm_ms = backend.warm_up()
+        print(f"Model {model} ready in {warm_ms / 1000:.1f} s (load + warm-up)")
+    except TranslationError as exc:
+        print(f"Translation disabled ({type(exc).__name__}: {exc})")
+        return None
+    return TranslationOrchestrator(backend, TranslationCache(), lines.on_event)
+
+
 def summarize(name: str, values_ms: list[float]) -> str:
     if not values_ms:
         return f"  {name:<24} no samples"
@@ -78,6 +150,7 @@ def main() -> None:
     )
     parser.add_argument("--colors", default="#FFFFFF", help="subtitle colors, comma-separated")
     parser.add_argument("--no-contrast", action="store_true", help="disable local contrast")
+    parser.add_argument("--model", default="qwen3:8b", help="Ollama model ('' = no translation)")
     args = parser.parse_args()
 
     win32.enable_per_monitor_dpi_awareness()
@@ -87,17 +160,22 @@ def main() -> None:
 
     vision = VisionSettings(text_colors=args.colors.split(","), local_contrast=not args.no_contrast)
     detector = ChangeDetector()
+    stabilizer = Stabilizer()
     ocr_language = english_ocr_language()
     ocr = WinRtOcr(ocr_language) if ocr_language else None
     if ocr is None:
-        print("English OCR is not installed; skipping the OCR stage.")
+        print("English OCR is not installed; skipping OCR and translation.")
+    lines = LineTimes()
+    orchestrator = start_translation(args.model, lines) if ocr and args.model else None
+
     delivery_ms: list[float] = []
     preprocess_ms: list[float] = []
     change_ms: list[float] = []
     ocr_ms: list[float] = []
-    last_text = ""
     changes: dict[Change, int] = dict.fromkeys(Change, 0)
     black_frames = 0
+    line_id = 0
+    appeared_at = 0.0
     started = time.monotonic()
     try:
         source.open()
@@ -128,14 +206,33 @@ def main() -> None:
             preprocess_ms.append((t1 - t0) * 1000)
             change_ms.append((t2 - t1) * 1000)
             black_frames += is_black_frame(frame.image)
-            if ocr is not None and change in (Change.APPEARED, Change.CHANGED):
-                read = ocr.recognize(result.ocr_image)
-                ocr_ms.append(read.elapsed_ms)
-                last_text = read.text
+            if ocr is None:
+                continue
+            if change in (Change.APPEARED, Change.CHANGED):
+                appeared_at = frame.timestamp
+            decision = stabilizer.update(change, cv2.countNonZero(result.mask), time.monotonic())
+            if not decision.read:
+                continue
+            read = ocr.recognize(result.ocr_image)
+            ocr_ms.append(read.elapsed_ms)
+            event = stabilizer.on_read(read.text, time.monotonic())
+            if isinstance(event, LineConfirmed) and not event.repeat:
+                line_id += 1
+                lines.confirmed(line_id, event.text, appeared_at)
+                print(f"  confirmed: {event.text!r}")
+            elif isinstance(event, LineUpgraded):
+                print(f"  upgraded:  {event.text!r}")  # same line: timings stay the first ones
+            else:
+                continue
+            if orchestrator is not None:
+                orchestrator.submit(line_id, event.text)
     except CaptureError as exc:
         sys.exit(f"Capture failed: {type(exc).__name__}: {exc}")
     finally:
         source.close()
+        if orchestrator is not None:
+            time.sleep(min(2.0, args.seconds))  # let the last translation finish
+            orchestrator.close()
 
     print(f"\nOpen -> first frame: {open_ms:.1f} ms")
     rate = len(delivery_ms) / args.seconds
@@ -146,8 +243,13 @@ def main() -> None:
     print(summarize("change detection", change_ms))
     print("  changes: " + ", ".join(f"{kind} {n}" for kind, n in changes.items() if n))
     if ocr is not None:
-        print(summarize("OCR (on appear/change)", ocr_ms))
-        print(f"  last read: {last_text!r}")
+        print(summarize("OCR (when asked)", ocr_ms))
+        print(summarize("appear -> confirmed", lines.confirm_ms()))
+    if orchestrator is not None:
+        print(summarize("translation", lines.translate_ms()))
+        print(summarize("appear -> translated", lines.end_to_end_ms()))
+        for source_text, translation in lines.translations():
+            print(f"  {source_text!r}\n    -> {translation!r}")
     print("  (WGC stamps the composition time, which can be a fraction of a ms ahead of 'now'.)")
     if rate < args.max_fps / 2:
         print("Note: WGC sends frames only on change; a static screen gives few frames.")
