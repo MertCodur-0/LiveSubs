@@ -34,11 +34,16 @@ class SetRegion:
 
 
 @dataclass(frozen=True, slots=True)
+class SetPaused:
+    paused: bool
+
+
+@dataclass(frozen=True, slots=True)
 class Shutdown:
     pass
 
 
-Command = StartPipeline | StopPipeline | SetRegion | Shutdown
+Command = StartPipeline | StopPipeline | SetRegion | SetPaused | Shutdown
 
 # --- Events (engine -> UI) -----------------------------------------------------------------------
 
@@ -48,6 +53,7 @@ class EngineState(StrEnum):
     STARTING = "starting"  # opening the source, loading OCR
     WARMING_UP = "warming_up"  # loading the translation model
     RUNNING = "running"
+    PAUSED = "paused"  # source open, nothing read or translated
     STOPPED = "stopped"
 
 

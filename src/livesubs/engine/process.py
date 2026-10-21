@@ -21,6 +21,7 @@ from livesubs.core.messages import (
     EngineState,
     ErrorKind,
     Event,
+    SetPaused,
     SetRegion,
     Shutdown,
     StartPipeline,
@@ -67,6 +68,9 @@ def engine_main(commands: Queue, events: Queue) -> None:
                 case SetRegion(region=region):
                     if pipeline is not None:
                         pipeline.set_region(region)
+                case SetPaused(paused=paused):
+                    if pipeline is not None:
+                        pipeline.set_paused(paused)
                 case Shutdown():
                     if pipeline is not None:
                         pipeline.stop()

@@ -117,6 +117,7 @@ class Pipeline:
         self._cache_path = cache_path
         self._region = start.profile.region or NormRect(x=0.1, y=0.75, width=0.8, height=0.2)
         self._region_changed = False
+        self._paused = False
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name="pipeline", daemon=True)
         self._line_id = 0
@@ -137,6 +138,10 @@ class Pipeline:
     def set_region(self, region: NormRect) -> None:
         self._region = region
         self._region_changed = True
+
+    def set_paused(self, paused: bool) -> None:
+        """Keep the source open but read and translate nothing (hotkey while not needed)."""
+        self._paused = paused
 
     @property
     def running(self) -> bool:
@@ -242,15 +247,22 @@ class Pipeline:
         tick = 1.0 / profile.capture.fps
         detector, stabilizer = ChangeDetector(), Stabilizer()
         last_timestamp = -1.0
+        paused = False
         while not self._stop.wait(
             stabilizer.fast_reread_s if stabilizer.awaiting_confirmation else tick
         ):
+            if self._paused != paused:
+                paused = self._paused
+                self._emit(StateChanged(EngineState.PAUSED if paused else EngineState.RUNNING))
+                self._region_changed = True  # start over either way: forget the current line
             if self._region_changed:
                 self._region_changed = False
                 detector.reset()  # a new region: whatever was read before is gone
                 event = stabilizer.update(Change.CLEARED, 0, time.monotonic()).event
                 if event is not None:
                     self._on_line(event, 0.0)
+            if paused:
+                continue
             frame = source.latest_frame()
             if frame is None:
                 continue

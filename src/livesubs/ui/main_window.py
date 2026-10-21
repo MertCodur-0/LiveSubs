@@ -13,11 +13,12 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
-from PySide6.QtGui import QCloseEvent, QFont
+from PySide6.QtGui import QCloseEvent, QFont, QGuiApplication
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
     QGridLayout,
+    QHBoxLayout,
     QHeaderView,
     QLabel,
     QMainWindow,
@@ -38,6 +39,7 @@ from livesubs.core.messages import (
     EngineState,
     Event,
     FrameInfo,
+    SetPaused,
     SetRegion,
     StartPipeline,
     StateChanged,
@@ -59,9 +61,11 @@ from livesubs.i18n import t
 from livesubs.ollama.client import DEFAULT_URL, InstalledModel, list_models, start_ollama
 from livesubs.platform import win32
 from livesubs.ui import screens
+from livesubs.ui.hotkeys import HotkeyManager
 from livesubs.ui.overlay import Overlay
 from livesubs.ui.pick import resolve
 from livesubs.ui.placement import custom_geometry, monitor_at, overlay_geometry
+from livesubs.ui.region_frame import RegionFrame
 from livesubs.ui.region_select import RegionPicker
 from livesubs.ui.tabs.appearance import AppearanceTab
 
@@ -69,6 +73,12 @@ PROFILE_ID = "varsayilan"
 FEED_LIMIT = 200
 OLLAMA_CHECK_MS = 5000
 FOLLOW_MS = 300
+ACTIVE_STATES = (
+    EngineState.STARTING,
+    EngineState.WARMING_UP,
+    EngineState.RUNNING,
+    EngineState.PAUSED,
+)
 # Where the text block sits inside the overlay: next to the subtitle it accompanies.
 TEXT_ALIGN = {
     OverlayPlacement.ABOVE: Qt.AlignmentFlag.AlignBottom,
@@ -154,18 +164,29 @@ class MainWindow(QMainWindow):
         self._reads = 0  # lines read since Start: tells "running" from "waiting for subtitles"
         self._overlay = Overlay(self._profile.overlay)
         self._overlay.edited.connect(self._on_overlay_edited)
+        self._region_frame = RegionFrame()
+        self._region_frame.edited.connect(self._on_region_edited)
         self._previewing = False
+        self._calibrating = False
+        self._paused = False
         self._bridge = _Bridge()
         self._bridge.models.connect(self._on_models)
 
         self._build()
         self.refresh_sources()
         self._update_region_label()
+        self._hotkeys: HotkeyManager | None = None
+        if QGuiApplication.platformName() == "windows":  # not offscreen (tests, CI)
+            self._hotkeys = HotkeyManager(int(self.winId()))
+            self._hotkeys.triggered.connect(self.on_hotkey)
+            failed = self._hotkeys.register_all(self._config.hotkeys.model_dump())
+            if failed:
+                self.statusBar().showMessage(t("hotkey.failed", keys=", ".join(failed)), 15000)
 
         self._poll_timer = QTimer(self, interval=30, timeout=self._poll)
         self._poll_timer.start()
         # The overlay follows its source: windows move, a region can be edited.
-        self._follow_timer = QTimer(self, interval=FOLLOW_MS, timeout=self._place_overlay)
+        self._follow_timer = QTimer(self, interval=FOLLOW_MS, timeout=self._follow)
         self._follow_timer.start()
         self._save_timer = QTimer(self, interval=400, singleShot=True, timeout=self._save)
         self._ollama_timer = QTimer(self, interval=OLLAMA_CHECK_MS, timeout=self.check_ollama)
@@ -210,7 +231,14 @@ class MainWindow(QMainWindow):
         font.setPointSize(14)
         font.setBold(True)
         self.start_button.setFont(font)
-        layout.addWidget(self.start_button)
+        self.calibrate_button = QPushButton(
+            t("calibration.button"), checkable=True, clicked=self.set_calibration
+        )
+        self.calibrate_button.setMinimumHeight(48)
+        buttons = QHBoxLayout()
+        buttons.addWidget(self.start_button, 3)
+        buttons.addWidget(self.calibrate_button, 1)
+        layout.addLayout(buttons)
 
         self.state_label = QLabel(t("state.idle"))
         layout.addWidget(self.state_label)
@@ -316,7 +344,7 @@ class MainWindow(QMainWindow):
         self._profile.region = region
         self._update_region_label()
         self._save()
-        if self._state in (EngineState.STARTING, EngineState.WARMING_UP, EngineState.RUNNING):
+        if self._state in ACTIVE_STATES:
             if restart:  # another window or monitor: the pipeline must reopen its source
                 self._send_start()
             else:
@@ -363,7 +391,7 @@ class MainWindow(QMainWindow):
     # --- start / stop ----------------------------------------------------------------------------
 
     def toggle(self) -> None:
-        if self._state in (EngineState.STARTING, EngineState.WARMING_UP, EngineState.RUNNING):
+        if self._state in ACTIVE_STATES:
             self._engine.send(StopPipeline())
             return
         option = self.selected_source()
@@ -414,15 +442,78 @@ class MainWindow(QMainWindow):
 
     def _set_state(self, state: EngineState, detail: str) -> None:
         self._state = state
+        self._paused = state == EngineState.PAUSED
         text = t(f"state.{state}", model=detail)
         if state == EngineState.RUNNING and self._reads == 0:
             text = t("state.waiting")
         self.state_label.setText(text)
-        active = state in (EngineState.STARTING, EngineState.WARMING_UP, EngineState.RUNNING)
-        self.start_button.setText(t("stop") if active else t("start"))
-        if state == EngineState.STOPPED:
+        self.start_button.setText(t("stop") if state in ACTIVE_STATES else t("start"))
+        if state in (EngineState.PAUSED, EngineState.STOPPED) and not self._calibrating:
             self._overlay.clear()
+        if state == EngineState.STOPPED and not (self._calibrating or self._previewing):
             self._overlay.hide()
+
+    # --- hotkeys and calibration mode ------------------------------------------------------------
+
+    def on_hotkey(self, action: str) -> None:
+        match action:
+            case "calibration":
+                self.set_calibration(not self._calibrating)
+            case "toggle_overlay":
+                self.toggle_overlay()
+            case "pause":
+                if self._state in ACTIVE_STATES:
+                    self._engine.send(SetPaused(not self._paused))
+
+    def toggle_overlay(self) -> None:
+        hidden = not self._overlay.suppressed
+        self._overlay.suppressed = hidden
+        if hidden:
+            self._overlay.hide()
+        elif self._overlay.text:
+            self._overlay.show()
+        self.statusBar().showMessage(t("overlay.hidden" if hidden else "overlay.shown"), 4000)
+
+    def set_calibration(self, on: bool) -> None:
+        """Calibration mode: the overlay and the region frame can be moved and resized."""
+        self._calibrating = on
+        self.calibrate_button.setChecked(on)
+        self._overlay.suppressed = False
+        self._overlay.set_editable(on)
+        if on:
+            self._place_region_frame()
+            self._region_frame.show()
+            self._place_overlay()
+            self.statusBar().showMessage(t("calibration.on"))
+        else:
+            self._region_frame.hide()
+            self._save_timer.start()
+            if self._state not in ACTIVE_STATES and not self._previewing:
+                self._overlay.hide()
+            self.statusBar().showMessage(t("calibration.off"), 4000)
+
+    def _place_region_frame(self) -> None:
+        area, region = self._source_area(), self._profile.region
+        if area is None or region is None:
+            self._region_frame.hide()
+            return
+        physical = region.to_pixels(area.width, area.height).translated(area.x, area.y)
+        self._region_frame.place(screens.to_logical(physical, screens.current_screens()))
+
+    def _on_region_edited(self, logical: Rect) -> None:
+        area = self._source_area()
+        if area is None:
+            return
+        physical = screens.to_physical(logical, screens.current_screens())
+        try:
+            region = NormRect.from_pixels(
+                physical.translated(-area.x, -area.y), area.width, area.height
+            )
+        except ValueError:  # dragged off the source entirely: snap back
+            self._place_region_frame()
+            return
+        self.set_region(region)
+        self._place_region_frame()  # clipped to the source
 
     # --- overlay placement and appearance --------------------------------------------------------
 
@@ -435,8 +526,13 @@ class MainWindow(QMainWindow):
             return Rect(*self._frame.screen_rect)
         return None
 
+    def _follow(self) -> None:
+        self._place_overlay()
+        if self._calibrating:
+            self._place_region_frame()
+
     def _place_overlay(self) -> None:
-        active = self._state in (EngineState.WARMING_UP, EngineState.RUNNING)
+        active = self._state in ACTIVE_STATES
         if not (active or self._previewing or self._overlay.editable):
             return
         s = self._profile.overlay
@@ -470,7 +566,7 @@ class MainWindow(QMainWindow):
             self._place_overlay()
         elif self._overlay.text == t("overlay.sample"):
             self._overlay.clear()
-            if self._state not in (EngineState.WARMING_UP, EngineState.RUNNING):
+            if self._state not in ACTIVE_STATES and not self._calibrating:
                 self._overlay.hide()
 
     def _on_overlay_edited(self, logical: Rect) -> None:
@@ -552,6 +648,13 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 - Qt override
         self._poll_timer.stop()
         self._ollama_timer.stop()
+        self._follow_timer.stop()
+        if self._save_timer.isActive():
+            self._save_timer.stop()
+            self._save()
+        if self._hotkeys is not None:
+            self._hotkeys.close()
+        self._region_frame.close()
         self._overlay.close()
         self._engine.shutdown()
         super().closeEvent(event)

@@ -14,6 +14,7 @@ from livesubs.core.messages import (
     ErrorKind,
     Event,
     FrameInfo,
+    SetPaused,
     SetRegion,
     StartPipeline,
     StateChanged,
@@ -390,3 +391,64 @@ def test_overlay_edit_mode_drag_moves_it(qtbot: QtBot) -> None:
     assert moved.args[0] == from_qrect(overlay.geometry())
     overlay.set_editable(False)
     assert not overlay.editable
+
+
+# --- calibration mode, pause, hide ---------------------------------------------------------------
+
+
+def _with_monitor_source(window: MainWindow) -> win32.MonitorInfo:
+    primary = next(m for m in win32.list_monitors() if m.is_primary)
+    window._profile.source = MonitorSource(device_name=primary.device_name)
+    window.refresh_sources()
+    window.set_region(NormRect(x=0.1, y=0.8, width=0.8, height=0.15))
+    return primary
+
+
+def test_calibration_shows_editable_overlay_and_region(window: MainWindow) -> None:
+    primary = _with_monitor_source(window)
+    window.set_calibration(True)
+    assert window._overlay.editable and window._overlay.isVisible()
+    assert window._region_frame.isVisible()
+    expected = to_logical(
+        NormRect(x=0.1, y=0.8, width=0.8, height=0.15)
+        .to_pixels(primary.rect.width, primary.rect.height)
+        .translated(primary.rect.x, primary.rect.y),
+        current_screens(),
+    )
+    assert from_qrect(window._region_frame.geometry()) == expected
+
+    # Dragging the frame changes the region (normalized to the source).
+    moved = expected.translated(0, -to_logical(Rect(0, 0, 1, 108), current_screens()).height)
+    window._on_region_edited(moved)
+    assert window._profile.region.y == pytest.approx(0.7, abs=0.01)
+
+    window.set_calibration(False)
+    assert not window._overlay.editable
+    assert not window._region_frame.isVisible()
+    assert not window._overlay.isVisible()  # not running: nothing to show
+
+
+def test_pause_hotkey_and_paused_state(window: MainWindow) -> None:
+    engine = engine_of(window)
+    engine.queue = [StateChanged(EngineState.RUNNING)]
+    window._poll()
+    window._overlay.show_text("Arabaya bin.")
+    window.on_hotkey("pause")
+    assert engine.sent[-1] == SetPaused(True)
+    engine.queue = [StateChanged(EngineState.PAUSED)]
+    window._poll()
+    assert window._overlay.text == ""
+    assert "Duraklatıldı" in window.state_label.text()
+    window.on_hotkey("pause")
+    assert engine.sent[-1] == SetPaused(False)
+
+
+def test_toggle_overlay_keeps_text_hidden(window: MainWindow) -> None:
+    window._overlay.show_text("Arabaya bin.")
+    window.on_hotkey("toggle_overlay")
+    assert not window._overlay.isVisible()
+    window._overlay.show_text("Sen kimsin?")  # a new translation while hidden
+    assert not window._overlay.isVisible()
+    window.on_hotkey("toggle_overlay")
+    assert window._overlay.isVisible()
+    assert window._overlay.text == "Sen kimsin?"

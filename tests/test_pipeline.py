@@ -249,3 +249,29 @@ def test_unavailable_source_stops_with_an_error() -> None:
     assert [(e.kind, e.fatal) for e in recorder.of(EngineError)] == [
         (ErrorKind.SOURCE_UNAVAILABLE, True)
     ]
+
+
+def test_pause_reads_nothing_until_resumed(
+    two_lines_and_a_gap: tuple[list[Sample], list[tuple[np.ndarray, float]]],
+) -> None:
+    (a, _), scenes = two_lines_and_a_gap
+    source, recorder = ScriptedSource(scenes), Recorder()
+    pipeline = Pipeline(
+        start_command(a),
+        recorder,
+        open_source=lambda spec: (source.open(), source)[1],
+        backend_factory=None,
+    )
+    pipeline.set_paused(True)  # paused before the first subtitle
+    pipeline.start()
+    time.sleep(1.2)  # the first line comes and goes while paused
+    assert recorder.of(SubtitleRead) == []
+    pipeline.set_paused(False)
+    assert source.finished.wait(10)
+    time.sleep(0.3)
+    pipeline.stop()
+
+    states = recorder.states()
+    assert EngineState.PAUSED in states
+    assert states.index(EngineState.PAUSED) < len(states) - 1
+    assert len([e for e in recorder.of(SubtitleRead) if not e.upgrade]) == 1  # only the second

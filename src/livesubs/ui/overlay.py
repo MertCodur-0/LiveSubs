@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 
-from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, Qt, Signal
+from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -30,7 +30,8 @@ from livesubs.core.geometry import Rect
 from livesubs.core.profiles import OverlaySettings
 from livesubs.i18n import t
 from livesubs.platform import win32
-from livesubs.ui.screens import from_qrect, qrect
+from livesubs.ui.movable import MoveResize
+from livesubs.ui.screens import qrect
 
 log = logging.getLogger(__name__)
 
@@ -38,8 +39,6 @@ MIN_FONT_PT = 12
 ORIGINAL_SCALE = 0.55  # English original under the translation, relative to its font size
 ORIGINAL_MAX_LINES = 2
 _PADDING = 10
-_EDGE = 10  # px from an edge where a drag resizes instead of moving
-_MIN_SIZE = QPoint(160, 48)
 
 
 def wrap(text: str, width_of: Callable[[str], float], max_width: float) -> list[str]:
@@ -71,7 +70,8 @@ class Overlay(QWidget):
         self._text = ""
         self._original = ""
         self._editable = False
-        self._drag: tuple[int, QPoint, QRect] | None = None  # edges, start, geometry
+        self.suppressed = False  # hidden by the user (hotkey): keep the text, stay invisible
+        self._mover = MoveResize(self, self.edited.emit, QPoint(160, 48))
 
     @staticmethod
     def _flags(*, editable: bool) -> Qt.WindowType:
@@ -97,12 +97,12 @@ class Overlay(QWidget):
         return self._editable
 
     def place(self, logical: Rect) -> None:
-        if self._drag is None:  # never fight the user's mouse
+        if not self._mover.dragging:  # never fight the user's mouse
             self.setGeometry(qrect(logical))
 
     def show_text(self, translation: str, original: str = "") -> None:
         self._text, self._original = translation, original
-        if not self.isVisible():
+        if not self.isVisible() and not self.suppressed:
             self.show()
         self.update()
 
@@ -249,65 +249,14 @@ class Overlay(QWidget):
 
     # --- edit mode: move and resize --------------------------------------------------------------
 
-    def _edges_at(self, pos: QPoint) -> int:
-        edges = 0
-        if pos.x() < _EDGE:
-            edges |= Qt.Edge.LeftEdge.value
-        if pos.x() > self.width() - _EDGE:
-            edges |= Qt.Edge.RightEdge.value
-        if pos.y() < _EDGE:
-            edges |= Qt.Edge.TopEdge.value
-        if pos.y() > self.height() - _EDGE:
-            edges |= Qt.Edge.BottomEdge.value
-        return edges
-
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt override
-        if self._editable and event.button() == Qt.MouseButton.LeftButton:
-            self._drag = (
-                self._edges_at(event.position().toPoint()),
-                event.globalPosition().toPoint(),
-                self.geometry(),
-            )
+        if self._editable:
+            self._mover.handle_press(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt override
-        if not self._editable:
-            return
-        if self._drag is None:
-            self.setCursor(_cursor_for(self._edges_at(event.position().toPoint())))
-            return
-        edges, start, geometry = self._drag
-        delta = event.globalPosition().toPoint() - start
-        rect = QRect(geometry)
-        if not edges:
-            rect.translate(delta)
-        else:
-            if edges & Qt.Edge.LeftEdge.value:
-                rect.setLeft(min(rect.left() + delta.x(), rect.right() - _MIN_SIZE.x()))
-            if edges & Qt.Edge.RightEdge.value:
-                rect.setRight(max(rect.right() + delta.x(), rect.left() + _MIN_SIZE.x()))
-            if edges & Qt.Edge.TopEdge.value:
-                rect.setTop(min(rect.top() + delta.y(), rect.bottom() - _MIN_SIZE.y()))
-            if edges & Qt.Edge.BottomEdge.value:
-                rect.setBottom(max(rect.bottom() + delta.y(), rect.top() + _MIN_SIZE.y()))
-        self.setGeometry(rect)
+        if self._editable:
+            self._mover.handle_move(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt override
-        if self._drag is not None:
-            self._drag = None
-            self.edited.emit(from_qrect(self.geometry()))
-
-
-def _cursor_for(edges: int) -> Qt.CursorShape:
-    horizontal = edges & (Qt.Edge.LeftEdge.value | Qt.Edge.RightEdge.value)
-    vertical = edges & (Qt.Edge.TopEdge.value | Qt.Edge.BottomEdge.value)
-    if horizontal and vertical:
-        top_left = edges & Qt.Edge.LeftEdge.value and edges & Qt.Edge.TopEdge.value
-        bottom_right = edges & Qt.Edge.RightEdge.value and edges & Qt.Edge.BottomEdge.value
-        if top_left or bottom_right:
-            return Qt.CursorShape.SizeFDiagCursor
-        return Qt.CursorShape.SizeBDiagCursor
-    if horizontal:
-        return Qt.CursorShape.SizeHorCursor
-    if vertical:
-        return Qt.CursorShape.SizeVerCursor
-    return Qt.CursorShape.SizeAllCursor
+        if self._editable:
+            self._mover.handle_release(event)

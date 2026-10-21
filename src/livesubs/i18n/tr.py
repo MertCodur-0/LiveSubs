@@ -55,6 +55,17 @@ STRINGS: dict[str, str] = {
         "bölgeye göre gösterir. Serbest konumda overlay'i F8 ile ayar moduna geçip fareyle "
         "taşıyabilir ve kenarlarından boyutlandırabilirsiniz."
     ),
+    # Calibration and hotkeys
+    "calibration.button": "Ayar modu (F8)",
+    "calibration.on": (
+        "Ayar modu: overlay'i ve altyazı bölgesini sürükleyin, kenarlarından boyutlandırın. "
+        "Çıkmak için F8."
+    ),
+    "calibration.off": "Ayar modu kapandı; değişiklikler kaydedildi.",
+    "region_frame.label": "Altyazı bölgesi",
+    "overlay.hidden": "Çeviri gizlendi (göstermek için F9)",
+    "overlay.shown": "Çeviri gösteriliyor",
+    "hotkey.failed": "Kısayol kaydedilemedi, başka bir uygulama kullanıyor olabilir: {keys}",
     # Ollama
     "ollama.checking": "Ollama kontrol ediliyor…",
     "ollama.connected": "Ollama bağlı",
@@ -67,6 +78,7 @@ STRINGS: dict[str, str] = {
     "state.warming_up": "Model hazırlanıyor: {model} (ilk seferde 10-40 sn sürebilir)",
     "state.running": "Çalışıyor",
     "state.waiting": "Çalışıyor — altyazı bekleniyor (seçilen bölgede henüz yazı okunmadı)",
+    "state.paused": "Duraklatıldı (devam için F10)",
     "state.stopped": "Durdu",
     # Errors (by EngineError kind)
     "error.source_unavailable": "Kaynak açılamadı. Pencere kapalı ya da simge durumunda olabilir.",
