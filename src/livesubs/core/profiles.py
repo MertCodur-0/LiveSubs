@@ -118,7 +118,8 @@ class OverlaySettings(SettingsModel):
     max_lines: int = Field(2, ge=1, le=6)
     show_original: bool = False
     # How long a translation stays up after the subtitle disappears.
-    clear_delay_ms: int = Field(800, ge=0, le=10_000)
+    # 3.5 s after the user's first test: 0.8 s made translations vanish before they were read.
+    clear_delay_ms: int = Field(3500, ge=0, le=10_000)
 
 
 class TranslationSettings(SettingsModel):

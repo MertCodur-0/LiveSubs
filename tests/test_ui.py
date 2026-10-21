@@ -180,18 +180,35 @@ def test_events_drive_the_feed_and_overlay(window: MainWindow, qtbot: QtBot) -> 
     assert window.feed.item(0, 5).text() == "640"
     assert window._overlay.text == "Arabaya bin."
 
-    # A new line hides the old translation until its own arrives.
+    # A new line keeps the old translation up until its own is ready.
     engine.queue = [SubtitleRead(2, "Who are you?", 10.0)]
     window._poll()
     assert window.feed.rowCount() == 2
-    assert window._overlay.text == ""
+    assert window._overlay.text == "Arabaya bin."
+    engine.queue = [SubtitleTranslated(2, "Who are you?", "Sen kimsin?", "m", "gpu", 9, 500, False)]
+    window._poll()
+    assert window._overlay.text == "Sen kimsin?"
 
-    # The line disappears: the overlay clears after the configured delay.
+
+def test_translation_outlives_its_subtitle_by_the_clear_delay(
+    window: MainWindow, qtbot: QtBot
+) -> None:
+    engine = engine_of(window)
+    assert window._profile.overlay.clear_delay_ms == 3500  # default: time to finish reading
+    window._profile.overlay.clear_delay_ms = 300  # keep the test fast
     window._overlay.show_text("Sen kimsin?")
+
+    # The subtitle disappears, but a new one comes before the delay is over: nothing is cleared.
+    engine.queue = [SubtitleCleared(), SubtitleRead(3, "Get out.", 9.0)]
+    window._poll()
+    qtbot.wait(500)
+    assert window._overlay.text == "Sen kimsin?"
+
+    # It disappears and nothing follows: cleared once the delay has passed.
     engine.queue = [SubtitleCleared()]
     window._poll()
     assert window._overlay.text == "Sen kimsin?"
-    qtbot.waitUntil(lambda: window._overlay.text == "", timeout=3000)
+    qtbot.waitUntil(lambda: window._overlay.text == "", timeout=2000)
 
 
 def test_errors_and_stop(window: MainWindow) -> None:

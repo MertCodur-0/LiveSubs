@@ -437,6 +437,8 @@ class MainWindow(QMainWindow):
             self.feed.setItem(row, column, QTableWidgetItem(value))
 
     def _on_read(self, event: SubtitleRead) -> None:
+        """A line was read. The overlay keeps the previous translation until this line's own
+        arrives: a blank overlay while the model works looked like subtitles vanishing early."""
         self._clear_generation += 1  # a subtitle is up: cancel a pending clear
         if self._reads == 0 and self._state == EngineState.RUNNING:
             self.state_label.setText(t("state.running"))
@@ -455,8 +457,6 @@ class MainWindow(QMainWindow):
                 4: f"{event.ocr_ms:.0f}",
             },
         )
-        if not event.upgrade:
-            self._overlay.clear()  # never show the previous line's translation under a new one
 
     def _on_translated(self, event: SubtitleTranslated) -> None:
         self._translations[event.line_id] = event.translation
