@@ -28,6 +28,16 @@ share the PC).
 ## Environment
 
 - Windows 11, i7-14700HX, RTX 4070 Laptop (8 GB VRAM), 32 GB RAM. The game may run on the same PC.
+- Two displays, **mixed DPI** — test region/overlay mapping here:
+  `\\.\DISPLAY1` external monitor 1920x1080 @ 100 %, 179 Hz, primary, at (0, 0);
+  `\\.\DISPLAY2` laptop panel 2560x1440 @ 150 %, at (1920, -164).
+  Only the RTX 4070 is active (no Intel iGPU listed; MUX in dGPU mode), so both displays are on
+  the same adapter — no cross-adapter capture copies.
+- **User's primary scenario:** game (borderless windowed), subtitle region and overlay on the
+  1080p monitor; main window (live feed, latency, model status) on the laptop panel. Benchmarks
+  run on DISPLAY1 only. In calibration mode the Inspector opens by default on a monitor *other*
+  than the game's; window positions are remembered. Hotkeys are global, so the user never has to
+  click the laptop panel mid-game (some games pause or drop FPS on focus loss).
 - **Python 3.13** (3.15 breaks winrt/numpy builds). `py` defaults to 3.15 — always use the venv:
   `.\.venv\Scripts\python.exe`.
 - Ollama installed at `%LOCALAPPDATA%\Programs\Ollama`, API `http://127.0.0.1:11434`.
@@ -41,7 +51,10 @@ share the PC).
 - License MIT. Python 3.13 venv + pip, `pyproject.toml` (src layout).
 - Lint/format: `ruff check .` and `ruff format .` (line length 100). Tests: `pytest`.
 - Tests needing Windows OCR are marked `@pytest.mark.ocr`; tests hitting a live Ollama are marked
-  `@pytest.mark.ollama`. CI runs `pytest -m "not ocr and not ollama"`.
+  `@pytest.mark.ollama`; tests capturing the real desktop are marked `@pytest.mark.capture`.
+  CI runs `pytest -m "not ocr and not ollama and not capture"`. Capture tests target
+  `tests/helpers/flicker_window.py` (a window in a *separate* process; see WGC pitfalls).
+- Scratch scripts never get stdlib module names (a `bisect.py` once shadowed the stdlib).
 - One meaningful commit per step (or a few). Commit identity is repo-local, using the GitHub
   noreply address (keeps the personal e-mail out of public history).
 
@@ -93,9 +106,29 @@ Designed from the start for three source kinds; video device lands in phase 2.
 - `SourceKind`: `WINDOW` (WGC by HWND), `MONITOR` (WGC by monitor; mss fallback),
   `VIDEO_DEVICE` (capture card via OpenCV `CAP_MSMF`, `CAP_DSHOW` fallback).
 - `FrameSource` protocol: `open()`, `close()`, `latest_frame() -> Frame | None` (newest-wins, never
-  queues stale frames), `info` (kind, frame size, nominal fps), `screen_rect() -> Rect | None`
+  queues stale frames; raises `SourceLostError` once gone), `wait_for_frame(newer_than, timeout)`
+  (for the fast re-read), `info` (kind, name, backend, max fps), `screen_rect() -> Rect | None`
   (where the frame lives on the desktop; `None` for video devices — no screen mapping).
-- `Frame`: BGR(A) ndarray + monotonic timestamp + frame-space size.
+  `BaseFrameSource` + `LatestFrameSlot` hold the shared plumbing; `factory.open_source(spec)`
+  resolves a profile's source (window: exe first, then title; own process excluded) and falls
+  back WGC -> mss.
+- `Frame`: BGR(A) ndarray (zero-copy view, read-only by convention) + `time.monotonic()` timestamp.
+  WGC frames: BGRA, cropped to the window **client area** (WGC itself captures title bar and
+  borders: frame = DWM extended frame bounds), stamped with WGC's composition time.
+- Capture runs up to `max_fps` (default 30, via `minimum_update_interval`); WGC delivers only on
+  content change. The pipeline tick (profile fps, default 10) is separate.
+
+#### WGC pitfalls (windows-capture 2.0.1, reproduced 2026-10-21)
+
+- Starting a WGC session crashes the process (access violation in `start_free_threaded`) when
+  (a) a window **of the capturing process** was captured earlier -> `WgcWindowSource` refuses own
+  windows; or (b) a **WMI query** ran after an earlier session -> `keep_platform_off_wmi()` sets
+  `platform._wmi = None` (stdlib `platform.system()` queries WMI since 3.12 and `mss` calls it).
+  Never run WMI (e.g. for GPU/VRAM info) in the engine process; do it in the UI process.
+- Measured on DISPLAY1: present -> consumer p95 ~2.4 ms, region crop + BGR copy ~1 ms, first
+  session open ~200 ms (WinRT init), later ones ~55 ms. mss (GDI): ~22 ms per 1080p grab.
+- mss copies screen pixels: it sees the lock screen while the session is locked
+  (`win32.is_session_locked()`), and obscured windows.
 - Typed errors: `SourceUnavailableError`, `SourceBusyError` (device held by another app such as OBS
   -> UI suggests using the OBS preview window as a *window* source), `SourceLostError`.
 - Health signals: black-frame detector emits `BlackFrameWarning` (window/monitor: protected content;
@@ -193,7 +226,7 @@ src/livesubs/
   app.py, __main__.py, i18n/
   core/        config.py, profiles.py, paths.py, jsonio.py, geometry.py, messages.py
   engine/      process.py, pipeline.py
-    capture/   base.py, wgc.py, mss_fallback.py, video_device.py (phase 2)
+    capture/   base.py, wgc.py, mss_fallback.py, factory.py, video_device.py (phase 2)
     vision/    preprocess.py, change.py
     ocr/       winrt_ocr.py, language.py
     text/      normalize.py, filters.py, stabilizer.py
@@ -203,7 +236,7 @@ src/livesubs/
   ui/          main_window.py, overlay.py, region_frame.py, inspector.py, tray.py,
                setup_check.py, tabs/, theme/
   web/         server.py, static/
-tests/         samples/ (+ samples.json), test_*.py
+tests/         samples/ (+ samples.json), helpers/, test_*.py
 scripts/       build_exe.ps1, livesubs.spec, bench_pipeline.py
 ```
 
@@ -212,7 +245,7 @@ scripts/       build_exe.ps1, livesubs.spec, bench_pipeline.py
 Phase 1 — working core (source -> region -> OCR -> GPU translation -> overlay)
 - [x] 1. Skeleton: pyproject, ruff/pytest, LICENSE, CLAUDE.md, README stubs, CI
 - [x] 2. Platform + config: Win32 helpers (window list, DPI, affinity, click-through), config/profile models
-- [ ] 3. Capture: `FrameSource` abstraction (all three kinds designed), WGC window + monitor, bench script
+- [x] 3. Capture: `FrameSource` abstraction (all three kinds designed), WGC window + monitor, bench script
 - [ ] 4. Vision: preprocessing + text-mask change detection + tests
 - [ ] 5. OCR: WinRT wrapper + language check + tests
 - [ ] 6. Text: normalize, filters, 2-frame stabilizer + tests
@@ -258,3 +291,8 @@ Phase 3 — release
   redirects all app files (tests / portable). Click-through only adds `WS_EX_LAYERED` (+ alpha)
   when missing — Qt's own layered windows use `UpdateLayeredWindow`, which
   `SetLayeredWindowAttributes` would break.
+- 2026-10-21 (step 3): WGC via windows-capture **2.x** (pinned `>=2.0,<3`; 1.x API differs).
+  Frames stored zero-copy (held buffers verified stable). Cursor never captured (it would pollute
+  OCR), WGC border off. `monitor_index` = 1-based position in `win32.list_monitors()` order
+  (verified). Two windows-capture crash triggers found and guarded (see "WGC pitfalls"); worth
+  reporting upstream. mss timestamps use the grab start so its latency is not under-reported.

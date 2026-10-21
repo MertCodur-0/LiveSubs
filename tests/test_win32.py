@@ -68,6 +68,7 @@ def test_window_details(hwnd: int) -> None:
     assert win32.window_title(hwnd) == TITLE
     assert win32.window_pid(hwnd) == os.getpid()
     assert win32.client_rect(hwnd) == GEOMETRY
+    assert win32.window_frame_bounds(hwnd) == GEOMETRY  # borderless: frame == client area
     assert win32.window_dpi(hwnd) >= win32.BASE_DPI
 
 
@@ -116,8 +117,9 @@ def test_monitors(hwnd: int) -> None:
     assert monitor.device_name in {m.device_name for m in monitors}
 
 
-def test_fullscreen_query_does_not_fail() -> None:
+def test_session_queries_do_not_fail() -> None:
     assert isinstance(win32.is_exclusive_fullscreen_running(), bool)
+    assert isinstance(win32.is_session_locked(), bool)
 
 
 def _window(exe: str, title: str, hwnd: int = 1, minimized: bool = False) -> win32.WindowInfo:

@@ -80,6 +80,9 @@ _EnumDisplayMonitors = _fn(
 )
 _MonitorFromWindow = _fn(_user32, "MonitorFromWindow", wintypes.HMONITOR, _HWND, _DWORD)
 _GetMonitorInfoW = _fn(_user32, "GetMonitorInfoW", _BOOL, wintypes.HMONITOR, ctypes.c_void_p)
+_OpenInputDesktop = _fn(_user32, "OpenInputDesktop", wintypes.HANDLE, _DWORD, _BOOL, _DWORD)
+_SwitchDesktop = _fn(_user32, "SwitchDesktop", _BOOL, wintypes.HANDLE)
+_CloseDesktop = _fn(_user32, "CloseDesktop", _BOOL, wintypes.HANDLE)
 _OpenProcess = _fn(_kernel32, "OpenProcess", wintypes.HANDLE, _DWORD, _BOOL, _DWORD)
 _CloseHandle = _fn(_kernel32, "CloseHandle", _BOOL, wintypes.HANDLE)
 _QueryFullProcessImageNameW = _fn(
@@ -113,12 +116,14 @@ _LWA_ALPHA = 0x2
 _SWP_FLAGS_STYLE_CHANGED = 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020  # NOSIZE..FRAMECHANGED
 _WDA_NONE = 0x0
 WDA_EXCLUDEFROMCAPTURE = 0x11
+_DWMWA_EXTENDED_FRAME_BOUNDS = 9
 _DWMWA_CLOAKED = 14
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 _MONITOR_DEFAULTTONEAREST = 2
 _MONITORINFOF_PRIMARY = 1
 _MDT_EFFECTIVE_DPI = 0
 _QUNS_RUNNING_D3D_FULL_SCREEN = 3
+_DESKTOP_SWITCHDESKTOP = 0x0100
 BASE_DPI = 96
 
 
@@ -222,6 +227,15 @@ def client_rect(hwnd: int) -> Rect | None:
     if not _ClientToScreen(hwnd, ctypes.byref(origin)):
         return None
     return Rect(origin.x, origin.y, rect.right - rect.left, rect.bottom - rect.top)
+
+
+def window_frame_bounds(hwnd: int) -> Rect | None:
+    """The window's visible bounds without the invisible resize borders; what WGC captures."""
+    rect = wintypes.RECT()
+    result = _DwmGetWindowAttribute(
+        hwnd, _DWMWA_EXTENDED_FRAME_BOUNDS, ctypes.byref(rect), ctypes.sizeof(rect)
+    )
+    return _rect(rect) if result == 0 else None
 
 
 def _is_cloaked(hwnd: int) -> bool:
@@ -393,6 +407,20 @@ def list_monitors() -> list[MonitorInfo]:
 def monitor_for_window(hwnd: int) -> MonitorInfo | None:
     """The monitor showing most of a window (the nearest one if it is off-screen)."""
     return _monitor_info(_MonitorFromWindow(hwnd, _MONITOR_DEFAULTTONEAREST))
+
+
+# --- Session -------------------------------------------------------------------------------------
+
+
+def is_session_locked() -> bool:
+    """True while the lock screen is up: screen grabs then show it instead of the game."""
+    desktop = _OpenInputDesktop(0, False, _DESKTOP_SWITCHDESKTOP)
+    if not desktop:
+        return True
+    try:
+        return not _SwitchDesktop(desktop)
+    finally:
+        _CloseDesktop(desktop)
 
 
 # --- Fullscreen ----------------------------------------------------------------------------------

@@ -21,7 +21,7 @@ jobs:
           ruff check .
           ruff format --check .
       - name: Test
-        # OCR language packs and an Ollama server are not available on CI runners.
-        run: pytest -m "not ocr and not ollama"
+        # CI runners have no OCR language pack, no Ollama and no interactive desktop for WGC.
+        run: pytest -m "not ocr and not ollama and not capture"
         env:
           QT_QPA_PLATFORM: offscreen

@@ -28,7 +28,7 @@ dependencies = [
     "numpy>=2.1",
     # windows-capture depends on opencv-python; never add opencv-python-headless next to it.
     "opencv-python>=4.10",
-    "windows-capture>=1.4",
+    "windows-capture>=2.0,<3",
     "mss>=9.0",
     "winrt-runtime>=2.3",
     "winrt-Windows.Foundation>=2.3",
@@ -85,4 +85,5 @@ addopts = ["-ra", "--strict-markers"]
 markers = [
     "ocr: requires the Windows en-US OCR language pack",
     "ollama: requires a running Ollama server",
+    "capture: captures the real desktop (needs an interactive session)",
 ]
