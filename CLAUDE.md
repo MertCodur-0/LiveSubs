@@ -107,6 +107,11 @@ UI process (PySide6)                                  Engine process (multiproce
   last sent line is dropped.
 - Stabilizer: same normalized text (rapidfuzz >= 0.9) in 2 consecutive reads before translating; on
   change a fast re-read is scheduled (~50 ms) instead of waiting for the next tick.
+- **Read upgrades** (user's point: the background keeps moving, so words lost on a bright frame
+  show up in later frames): while the change detector says `SAME`, keep re-reading — at once when
+  the text mask grows noticeably (newly visible glyphs), otherwise every ~500 ms. If a new read is
+  a clear improvement (contains the current text and adds words), re-translate and replace the
+  overlay text; mere variations never replace it (no flicker). Static bright scenes stay a limit.
 - Cache: in-memory LRU + SQLite, key = (model, profile, normalized text); context not in key.
 - Latency budget (8B on GPU): capture+preprocess ~10 ms, OCR 30–80 ms, confirm ~50 ms,
   translate 250–600 ms => ~0.4–0.8 s on-screen to overlay. `scripts/bench_pipeline.py` measures it.
