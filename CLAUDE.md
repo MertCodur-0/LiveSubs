@@ -55,6 +55,11 @@ share the PC).
   CI runs `pytest -m "not ocr and not ollama and not capture"`. Capture tests target
   `tests/helpers/flicker_window.py` (a window in a *separate* process; see WGC pitfalls).
 - Scratch scripts never get stdlib module names (a `bisect.py` once shadowed the stdlib).
+- `cv2.imread`/`imwrite` fail on non-ASCII paths on Windows (e.g. "Ekran görüntüsü"): use
+  `np.fromfile` + `cv2.imdecode` / `cv2.imencode(...)[1].tofile(...)` everywhere.
+- Sample screenshots (`tests/samples/*.png`) are game footage: git-ignored, never published;
+  `samples.json` (region, vision overrides, expected text, `reference_tr`) is committed and sample
+  tests skip when an image is missing (CI). Loader: `tests/sample_data.py`.
 - One meaningful commit per step (or a few). Commit identity is repo-local, using the GitHub
   noreply address (keeps the personal e-mail out of public history).
 
@@ -84,13 +89,16 @@ UI process (PySide6)                                  Engine process (multiproce
 - Region stored **normalized (0–1) to the source's frame space** (window client area / monitor /
   video frame), converted to physical pixels with DPI awareness.
 - Capture FPS configurable, default 10. WGC yellow border disabled where Windows 11 allows it.
-- Preprocessing: crop -> 2x upscale (`INTER_CUBIC`) -> HSV/color-distance mask for the configured
-  subtitle colors -> optional outline support (never *require* a dark text edge) -> morphological
-  cleanup -> connected-component filter (size/aspect) -> black text on white. Every step can be
-  toggled, every threshold is tunable.
-- Change detection compares only the **text mask** (downscaled; pixel diff / IoU), never raw
-  pixels, so background motion never triggers. Empty mask = subtitle gone; the overlay clears after
-  a configurable delay.
+- Preprocessing (`engine/vision/preprocess.py`): color mask at native resolution (per-channel
+  distance to the subtitle colors, `cv2.inRange`; Otsu when off) -> optional outline support (text
+  pixels need a pixel <= `outline_dark_level` within `outline_radius_px`; never required by
+  default) -> 2x upscale of the mask (linear + threshold) -> 2x2 opening -> connected-component
+  filter (area between `min_component_px` and `max_component_fraction` of the region) -> OCR image
+  = inverted mask (black on white). Every step can be toggled, every threshold is tunable.
+  Cost: ~3 ms for a 1066x106 region, p50 5.4 ms / p95 8.7 ms for 1536x216 at 1080p.
+- Change detection (`engine/vision/change.py`) compares only the **text mask**: shrunk to a
+  96-px-wide thumbnail, IoU >= 0.75 = same line; coverage < 0.1 % = empty. Background motion never
+  triggers. Empty mask = subtitle gone (`CLEARED`); the overlay clears after a configurable delay.
 - Filters: letter ratio, minimum length, vowel presence, repeated junk characters; a repeat of the
   last sent line is dropped.
 - Stabilizer: same normalized text (rapidfuzz >= 0.9) in 2 consecutive reads before translating; on
@@ -246,7 +254,7 @@ Phase 1 — working core (source -> region -> OCR -> GPU translation -> overlay)
 - [x] 1. Skeleton: pyproject, ruff/pytest, LICENSE, CLAUDE.md, README stubs, CI
 - [x] 2. Platform + config: Win32 helpers (window list, DPI, affinity, click-through), config/profile models
 - [x] 3. Capture: `FrameSource` abstraction (all three kinds designed), WGC window + monitor, bench script
-- [ ] 4. Vision: preprocessing + text-mask change detection + tests
+- [x] 4. Vision: preprocessing + text-mask change detection + tests
 - [ ] 5. OCR: WinRT wrapper + language check + tests
 - [ ] 6. Text: normalize, filters, 2-frame stabilizer + tests
 - [ ] 7. Translation: Ollama backend, prompt, cache, orchestrator (GPU lane) + mocked-HTTP tests
@@ -296,3 +304,11 @@ Phase 3 — release
   OCR), WGC border off. `monitor_index` = 1-based position in `win32.list_monitors()` order
   (verified). Two windows-capture crash triggers found and guarded (see "WGC pitfalls"); worth
   reporting upstream. mss timestamps use the grab start so its latency is not under-reported.
+- 2026-10-21 (step 4): first samples (11 subtitles + 1 empty frame, user-provided with reference
+  Turkish translations) are from a *video* with YouTube-style captions: white text on a translucent
+  dark box. Region for all: [0.12, 0.86, 0.76, 0.135]. `color_tolerance` default 60 -> **75**: one
+  sample's glyphs were dimmed to exactly 190 by a translucent band (fades do the same); 85 starts
+  admitting scenery. Mask components ~= glyph count (ratio 1.0-1.13) on all samples, 0 on the empty
+  frame (bright skin), so tests assert 0.9-1.25x. A few small junk marks remain near some captions
+  (an edge line, a bracket next to "man."); left for OCR + text filters, revisit in step 5.
+  **Still needed:** screenshots of real in-game subtitles (no box, outline only).

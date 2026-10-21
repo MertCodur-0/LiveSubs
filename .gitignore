@@ -19,3 +19,7 @@ desktop.ini
 # Local runtime data
 *.log
 *.sqlite3
+
+# Test screenshots are game footage: kept local, never published
+tests/samples/*.png
+tests/samples/*.jpg

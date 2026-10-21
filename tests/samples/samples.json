@@ -1,0 +1,83 @@
+{
+  "defaults": {
+    "region": [0.12, 0.86, 0.76, 0.135],
+    "vision": {
+      "text_colors": ["#FFFFFF"],
+      "outline_support": true
+    }
+  },
+  "samples": [
+    {
+      "file": "Ekran görüntüsü 2026-10-21 193903.png",
+      "expected": "Boobie, huh? Yeah, he ain’t here, though.",
+      "reference_tr": "Boobie mi? Hı, ama burada değil.",
+      "notes": "dark alley, ceiling lights"
+    },
+    {
+      "file": "Ekran görüntüsü 2026-10-21 194210.png",
+      "expected": "Like, I don’t even wanna hear that shit.",
+      "reference_tr": "Yani, o boku duymak bile istemiyorum.",
+      "notes": "bright tiles; watermark bottom right, outside the region"
+    },
+    {
+      "file": "Ekran görüntüsü 2026-10-21 194314.png",
+      "expected": "Raymond, listen very closely, cabrón.",
+      "reference_tr": "Raymond, beni çok dikkatli dinle, cabrón.",
+      "notes": "player controls visible, caption raised; red progress bar inside the region"
+    },
+    {
+      "file": "Ekran görüntüsü 2026-10-21 194325.png",
+      "expected": "I mean, look at Lori’s Snapmatic. Looks like they’re loving it.",
+      "reference_tr": "Yani, Lori’nin Snapmatic’ine bak. Bayağı keyif yapıyorlar gibi.",
+      "notes": "long single line, bright wall behind"
+    },
+    {
+      "file": "Ekran görüntüsü 2026-10-21 194340.png",
+      "expected": "Hey. Got this Raul guy’s car and heading to the address he gave.",
+      "reference_tr": "Selam. Şu Raul denen adamın arabasını aldım, verdiği adrese gidiyorum.",
+      "notes": "two lines; minimap bottom left, outside the region"
+    },
+    {
+      "file": "Ekran görüntüsü 2026-10-21 194347.png",
+      "expected": "Hey, bro, get your ass back here man.",
+      "reference_tr": "Hey kanka, kıçını buraya geri getir be adamım.",
+      "notes": "hard: bright, nearly white arm right next to the caption"
+    },
+    {
+      "file": "Ekran görüntüsü 2026-10-21 194400.png",
+      "expected": "I bet you’d be real good at battle rapping, dog.",
+      "reference_tr": "Bahse girerim battle rap’te çok iyi olurdun, kanka.",
+      "notes": "light denim behind the caption"
+    },
+    {
+      "file": "Ekran görüntüsü 2026-10-21 194410.png",
+      "expected": "She’s part of the new security detail that we hired for Andrés.",
+      "reference_tr": "Andrés için tuttuğumuz yeni koruma ekibinden biri o.",
+      "notes": "dark scene, accented name"
+    },
+    {
+      "file": "Ekran görüntüsü 2026-10-21 194422.png",
+      "expected": "I just want to thank you all for coming here tonight to join us in celebrating the opening",
+      "reference_tr": "Bu gece açılışı bizimle kutlamak için buraya geldiğiniz için hepinize teşekkür etmek istiyorum",
+      "notes": "two lines, saturated purple/blue club lights; sentence continues in the next caption"
+    },
+    {
+      "file": "Ekran görüntüsü 2026-10-21 194443.png",
+      "expected": "You know, what you’re wearing right now looks pretty good, so... You wanna head out?",
+      "reference_tr": "Bak, şu an üstündeki gayet iyi duruyor, yani... Çıkalım mı?",
+      "notes": "two lines, neon pink shop; on screen the ellipsis is one character (…)"
+    },
+    {
+      "file": "Ekran görüntüsü 2026-10-21 194453.png",
+      "expected": "Look what the law chased in.",
+      "reference_tr": "Bak hele, polis kimi kovalayıp buraya getirmiş.",
+      "notes": "garage, red tool chest behind"
+    },
+    {
+      "file": "Ekran görüntüsü 2026-10-21 194500.png",
+      "expected": "",
+      "reference_tr": "",
+      "notes": "no subtitle; hard negative: bright skin inside the region"
+    }
+  ]
+}

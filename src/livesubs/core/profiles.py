@@ -72,13 +72,21 @@ class VisionSettings(SettingsModel):
     """Preprocessing steps; each can be switched off while calibrating."""
 
     text_colors: list[HexColor] = Field(default_factory=lambda: ["#FFFFFF"], min_length=1)
-    color_tolerance: int = Field(60, ge=0, le=255)
+    # Max per-channel distance from a subtitle color that still counts as text. 75 keeps glyphs
+    # dimmed by ~25 % (fades, translucent overlays); 85+ starts letting scenery in.
+    color_tolerance: int = Field(75, ge=0, le=255)
     upscale: bool = True
     color_mask: bool = True
-    # Accept a dark outline around the glyphs without requiring one.
+    # Keep only text pixels with something dark nearby (an outline or a caption box). Rejects
+    # bright scenery of the subtitle's color; off for subtitles drawn without any edge.
     outline_support: bool = False
+    outline_dark_level: int = Field(90, ge=0, le=255)
+    outline_radius_px: int = Field(3, ge=1, le=10)
     morphology: bool = True
     component_filter: bool = True
+    # Component limits at native resolution: specks below, scenery blobs above.
+    min_component_px: int = Field(4, ge=1)
+    max_component_fraction: float = Field(0.02, gt=0, le=1)
 
 
 class OverlayDisplay(StrEnum):
