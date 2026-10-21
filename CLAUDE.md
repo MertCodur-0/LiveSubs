@@ -112,15 +112,25 @@ UI process (PySide6)                                  Engine process (multiproce
 - OCR accuracy on the 18 samples (fuzz ratio vs expected, typographic quotes folded):
   preprocessed mean 99.5, 15/18 exact, min 96.3; raw gray 96.2 / 12 / 64.3; raw 2x 97.0 / 13 /
   72.5. Remaining misses: 200236 "What-should", "youir" (road junk); 200302 "You" missing.
-- Filters: letter ratio, minimum length, vowel presence, repeated junk characters; a repeat of the
-  last sent line is dropped.
-- Stabilizer: same normalized text (rapidfuzz >= 0.9) in 2 consecutive reads before translating; on
-  change a fast re-read is scheduled (~50 ms) instead of waiting for the next tick.
+- Text (`engine/text/`): `normalize.clean` = what is shown and translated (NFC, typographic
+  quotes/dashes/ellipsis to ASCII, lone "|"/"l" before a word -> "I", edge junk stripped, single
+  spaces); `normalize.key` = comparisons and cache key (casefold, accents and punctuation dropped).
+  `filters.check` -> `Verdict(reason)`: empty, < 2 letters, repeated junk runs, letter ratio
+  < 0.5, a vowel-less letter run of 5+ ("Hmm"/"Shh" pass); reasons are shown in the Inspector.
+- Stabilizer (`engine/text/stabilizer.py`, pure logic, caller passes `time.monotonic()`):
+  `update(change, text_pixels, now) -> Decision(read, event)` and `on_read(text, now) -> event`.
+  A new line needs 2 agreeing reads (rapidfuzz ratio of keys >= 90; latest read wins) ->
+  `LineConfirmed(text, repeat)`; `repeat` = same as the previous line (reappeared after a flash),
+  so its translation is reused. `CHANGED` keeps the old line on screen until the new one is
+  confirmed. `CLEARED` -> `LineCleared` (only if a line existed). Fast re-read 50 ms only while a
+  candidate awaits its confirming read; otherwise reads every 500 ms, or at once when text pixels
+  grow >= 15 % (fade-ins, glyphs uncovered by the moving background).
 - **Read upgrades** (user's point: the background keeps moving, so words lost on a bright frame
-  show up in later frames): while the change detector says `SAME`, keep re-reading — at once when
-  the text mask grows noticeably (newly visible glyphs), otherwise every ~500 ms. If a new read is
-  a clear improvement (contains the current text and adds words), re-translate and replace the
-  overlay text; mere variations never replace it (no flicker). Static bright scenes stay a limit.
+  show up in later frames): while a line is confirmed, a read that keeps >= 85 % of its words in
+  order and adds words (`is_upgrade`), confirmed by a second read, replaces it ->
+  `LineUpgraded(text, previous)` (re-translate). Mere variations never replace it (no flicker).
+  Static bright scenes stay a limit. Verified end to end on the samples played as a stream: each
+  line confirmed exactly once, cleared once.
 - Cache: in-memory LRU + SQLite, key = (model, profile, normalized text); context not in key.
 - Latency budget (8B on GPU): capture+preprocess ~10 ms, OCR 30–80 ms, confirm ~50 ms,
   translate 250–600 ms => ~0.4–0.8 s on-screen to overlay. `scripts/bench_pipeline.py` measures it.
@@ -154,7 +164,8 @@ Designed from the start for three source kinds; video device lands in phase 2.
 - Measured on DISPLAY1: present -> consumer p95 ~2.4 ms, region crop + BGR copy ~1 ms, first
   session open ~200 ms (WinRT init), later ones ~55 ms. mss (GDI): ~22 ms per 1080p grab.
 - mss copies screen pixels: it sees the lock screen while the session is locked
-  (`win32.is_session_locked()`), and obscured windows.
+  (`win32.is_session_locked()`, WTS session flags — the OpenInputDesktop/SwitchDesktop trick
+  reported "unlocked" under LockApp on Windows 11), and obscured windows.
 - Typed errors: `SourceUnavailableError`, `SourceBusyError` (device held by another app such as OBS
   -> UI suggests using the OBS preview window as a *window* source), `SourceLostError`.
 - Health signals: black-frame detector emits `BlackFrameWarning` (window/monitor: protected content;
@@ -274,7 +285,7 @@ Phase 1 — working core (source -> region -> OCR -> GPU translation -> overlay)
 - [x] 3. Capture: `FrameSource` abstraction (all three kinds designed), WGC window + monitor, bench script
 - [x] 4. Vision: preprocessing + text-mask change detection + tests
 - [x] 5. OCR: WinRT wrapper + language check + tests
-- [ ] 6. Text: normalize, filters, 2-frame stabilizer + tests
+- [x] 6. Text: normalize, filters, 2-frame stabilizer + tests
 - [ ] 7. Translation: Ollama backend, prompt, cache, orchestrator (GPU lane) + mocked-HTTP tests
 - [ ] 8. Engine process + IPC
 - [ ] 9. Minimal UI: source pick, drag-select region, Start/Stop, live feed, overlay  => core done

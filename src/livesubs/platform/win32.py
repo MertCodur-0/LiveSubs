@@ -19,6 +19,7 @@ _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 _dwmapi = ctypes.WinDLL("dwmapi")
 _shcore = ctypes.WinDLL("shcore")
 _shell32 = ctypes.WinDLL("shell32")
+_wtsapi32 = ctypes.WinDLL("wtsapi32")
 
 _LONG_PTR = ctypes.c_ssize_t
 _HRESULT = ctypes.c_long
@@ -80,9 +81,19 @@ _EnumDisplayMonitors = _fn(
 )
 _MonitorFromWindow = _fn(_user32, "MonitorFromWindow", wintypes.HMONITOR, _HWND, _DWORD)
 _GetMonitorInfoW = _fn(_user32, "GetMonitorInfoW", _BOOL, wintypes.HMONITOR, ctypes.c_void_p)
-_OpenInputDesktop = _fn(_user32, "OpenInputDesktop", wintypes.HANDLE, _DWORD, _BOOL, _DWORD)
-_SwitchDesktop = _fn(_user32, "SwitchDesktop", _BOOL, wintypes.HANDLE)
-_CloseDesktop = _fn(_user32, "CloseDesktop", _BOOL, wintypes.HANDLE)
+_WTSQuerySessionInformationW = _fn(
+    _wtsapi32,
+    "WTSQuerySessionInformationW",
+    _BOOL,
+    *(
+        wintypes.HANDLE,
+        _DWORD,
+        ctypes.c_int,
+        ctypes.POINTER(ctypes.c_void_p),
+        ctypes.POINTER(_DWORD),
+    ),
+)
+_WTSFreeMemory = _fn(_wtsapi32, "WTSFreeMemory", None, ctypes.c_void_p)
 _OpenProcess = _fn(_kernel32, "OpenProcess", wintypes.HANDLE, _DWORD, _BOOL, _DWORD)
 _CloseHandle = _fn(_kernel32, "CloseHandle", _BOOL, wintypes.HANDLE)
 _QueryFullProcessImageNameW = _fn(
@@ -123,7 +134,9 @@ _MONITOR_DEFAULTTONEAREST = 2
 _MONITORINFOF_PRIMARY = 1
 _MDT_EFFECTIVE_DPI = 0
 _QUNS_RUNNING_D3D_FULL_SCREEN = 3
-_DESKTOP_SWITCHDESKTOP = 0x0100
+_WTS_CURRENT_SESSION = 0xFFFFFFFF
+_WTS_SESSION_INFO_EX = 25
+_WTS_SESSIONSTATE_LOCK = 0  # Windows 10+; Windows 7 had the values swapped
 BASE_DPI = 96
 
 
@@ -412,15 +425,48 @@ def monitor_for_window(hwnd: int) -> MonitorInfo | None:
 # --- Session -------------------------------------------------------------------------------------
 
 
+class _WtsInfoExLevel1(ctypes.Structure):
+    _fields_ = (
+        ("SessionId", wintypes.ULONG),
+        ("SessionState", ctypes.c_int),
+        ("SessionFlags", wintypes.LONG),
+        ("WinStationName", wintypes.WCHAR * 33),
+        ("UserName", wintypes.WCHAR * 21),
+        ("DomainName", wintypes.WCHAR * 18),
+        ("LogonTime", wintypes.LARGE_INTEGER),
+        ("ConnectTime", wintypes.LARGE_INTEGER),
+        ("DisconnectTime", wintypes.LARGE_INTEGER),
+        ("LastInputTime", wintypes.LARGE_INTEGER),
+        ("CurrentTime", wintypes.LARGE_INTEGER),
+        ("IncomingBytes", _DWORD),
+        ("OutgoingBytes", _DWORD),
+        ("IncomingFrames", _DWORD),
+        ("OutgoingFrames", _DWORD),
+        ("IncomingCompressedBytes", _DWORD),
+        ("OutgoingCompressedBytes", _DWORD),
+    )
+
+
+class _WtsInfoEx(ctypes.Structure):
+    _fields_ = (("Level", _DWORD), ("Level1", _WtsInfoExLevel1))
+
+
 def is_session_locked() -> bool:
-    """True while the lock screen is up: screen grabs then show it instead of the game."""
-    desktop = _OpenInputDesktop(0, False, _DESKTOP_SWITCHDESKTOP)
-    if not desktop:
-        return True
+    """True while the lock screen is up: screen grabs then show it instead of the game.
+
+    Uses the session's WTS lock flag; the older OpenInputDesktop/SwitchDesktop trick reports
+    "unlocked" on Windows 11 while LockApp is showing.
+    """
+    buffer, size = ctypes.c_void_p(), _DWORD()
+    if not _WTSQuerySessionInformationW(
+        None, _WTS_CURRENT_SESSION, _WTS_SESSION_INFO_EX, ctypes.byref(buffer), ctypes.byref(size)
+    ):
+        return False
     try:
-        return not _SwitchDesktop(desktop)
+        info = ctypes.cast(buffer, ctypes.POINTER(_WtsInfoEx)).contents
+        return info.Level == 1 and info.Level1.SessionFlags == _WTS_SESSIONSTATE_LOCK
     finally:
-        _CloseDesktop(desktop)
+        _WTSFreeMemory(buffer)
 
 
 # --- Fullscreen ----------------------------------------------------------------------------------

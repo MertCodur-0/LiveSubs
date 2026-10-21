@@ -7,8 +7,11 @@ from rapidfuzz import fuzz
 
 from livesubs.engine.ocr import language
 from livesubs.engine.ocr.winrt_ocr import OcrUnavailableError, WinRtOcr
+from livesubs.engine.text.normalize import clean
+from livesubs.engine.text.stabilizer import LineCleared, LineConfirmed, Stabilizer
+from livesubs.engine.vision.change import ChangeDetector
 from livesubs.engine.vision.preprocess import preprocess
-from sample_data import Sample, fold, load_samples, sample_params
+from sample_data import Sample, load_samples, sample_params
 
 SAMPLES = load_samples()
 
@@ -111,8 +114,8 @@ def test_works_from_a_worker_thread(ocr: WinRtOcr) -> None:
 @pytest.mark.ocr
 @pytest.mark.parametrize("sample", sample_params(SAMPLES))
 def test_sample_reads_expected_text(ocr: WinRtOcr, sample: Sample) -> None:
-    text = fold(ocr.recognize(preprocess(sample.load_region(), sample.vision).ocr_image).text)
-    expected = fold(sample.expected)
+    text = clean(ocr.recognize(preprocess(sample.load_region(), sample.vision).ocr_image).text)
+    expected = clean(sample.expected)
     if not expected:
         assert text == ""
     else:
@@ -129,11 +132,42 @@ def test_preprocessing_beats_raw_frames(ocr: WinRtOcr) -> None:
     scores = {"pre": [], "raw": []}
     for sample in available:
         region = sample.load_region()
-        expected = fold(sample.expected)
+        expected = clean(sample.expected)
         pre = ocr.recognize(preprocess(region, sample.vision).ocr_image).text
         raw = ocr.recognize(region).text
-        scores["pre"].append(fuzz.ratio(fold(pre), expected))
-        scores["raw"].append(fuzz.ratio(fold(raw), expected))
+        scores["pre"].append(fuzz.ratio(clean(pre), expected))
+        scores["raw"].append(fuzz.ratio(clean(raw), expected))
     assert np.mean(scores["pre"]) >= 99
     assert np.mean(scores["pre"]) > np.mean(scores["raw"])
     assert min(scores["pre"]) > min(scores["raw"])
+
+
+@pytest.mark.ocr
+def test_sample_stream_confirms_each_line_once(ocr: WinRtOcr) -> None:
+    """Samples played as a subtitle stream: each line stays up for a few frames, with a frame
+    without subtitles in between. Every line is confirmed exactly once and cleared after."""
+    lines = [s for s in SAMPLES if s.has_subtitle and s.path.is_file()]
+    blank = next((s for s in SAMPLES if not s.has_subtitle and s.path.is_file()), None)
+    if len(lines) < 2 or blank is None:
+        pytest.skip("needs sample images")
+
+    detector, stab, now = ChangeDetector(), Stabilizer(), 0.0
+    events = []
+    for sample in [x for line in lines for x in (line, blank)]:
+        processed = preprocess(sample.load_region(), sample.vision)
+        pixels = cv2.countNonZero(processed.mask)
+        for _ in range(4):  # the same frame for ~0.25 s
+            now += 0.065
+            decision = stab.update(detector.update(processed.mask), pixels, now)
+            if decision.event is not None:
+                events.append(decision.event)
+            if decision.read:
+                event = stab.on_read(ocr.recognize(processed.ocr_image).text, now)
+                if event is not None:
+                    events.append(event)
+
+    confirmed = [e for e in events if isinstance(e, LineConfirmed)]
+    assert len(confirmed) == len(lines)
+    assert sum(isinstance(e, LineCleared) for e in events) == len(lines)
+    for event, sample in zip(confirmed, lines, strict=True):
+        assert fuzz.ratio(event.text, clean(sample.expected)) >= 95, event.text
