@@ -114,6 +114,9 @@ _GetDpiForMonitor = _fn(
 _SHQueryUserNotificationState = _fn(
     _shell32, "SHQueryUserNotificationState", _HRESULT, ctypes.POINTER(ctypes.c_int)
 )
+_SetCurrentProcessExplicitAppUserModelID = _fn(
+    _shell32, "SetCurrentProcessExplicitAppUserModelID", _HRESULT, wintypes.LPCWSTR
+)
 
 _DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
 _GW_OWNER = 4
@@ -478,3 +481,12 @@ def is_exclusive_fullscreen_running() -> bool:
     if _SHQueryUserNotificationState(ctypes.byref(state)) != 0:
         return False
     return state.value == _QUNS_RUNNING_D3D_FULL_SCREEN
+
+
+# --- Taskbar -------------------------------------------------------------------------------------
+
+
+def set_app_user_model_id(app_id: str) -> bool:
+    """Groups the process's windows under ``app_id`` on the taskbar instead of under the Python
+    interpreter that runs it (the packaged LiveSubs.exe is a renamed pythonw.exe)."""
+    return _SetCurrentProcessExplicitAppUserModelID(app_id) == 0

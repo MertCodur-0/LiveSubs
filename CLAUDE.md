@@ -77,7 +77,7 @@ App: PySide6-Essentials (not the `PySide6` meta package — it drags in WebEngin
 opencv-python (required by `windows-capture`; do **not** also install `-headless`, they conflict),
 windows-capture (WGC), mss (fallback), winrt-* (Media.Ocr, Graphics.Imaging, Storage.Streams,
 Globalization, Foundation), httpx, pydantic, rapidfuzz, qrcode, platformdirs.
-Dev: pytest, pytest-qt, respx, ruff, pyinstaller.
+Dev: pytest, pytest-qt, respx, ruff. Packaging needs no extra tool (embeddable Python, see Other).
 
 ## Architecture
 
@@ -300,7 +300,15 @@ remaining size, cancel. Minimizes to tray.
   cyan, sunset orange accents; pink -> orange -> purple gradients. Animations light.
   Own SVG icon/header (palms + sunset). No Rockstar/GTA logos, fonts, art or names.
   Glow (`QGraphicsDropShadowEffect`) only on logo and Start button — it is expensive.
-- Packaging: PyInstaller **onedir** zipped for GitHub Releases (onefile unpacks on every start).
+- Packaging (`scripts/build_exe.ps1`, replaces PyInstaller 2026-10-22): the official **embeddable
+  Python** of the venv's exact version; its PSF-signed `pythonw.exe` (signature checked) renamed to
+  `LiveSubs.exe`; `python313._pth` adds `Lib\site-packages` + `import site`; runtime deps + app via
+  `pip install --target` (wheels only); `scripts/embedded/sitecustomize.py` runs the app when the
+  exe has no arguments (the engine child gets `-c ... --multiprocessing-fork`, so it is skipped);
+  unused Qt parts trimmed (QML/Quick, Designer, tools, translations, opengl32sw: 421 -> 265 MB);
+  `scripts/embedded/smoke_test.py` run through the packaged exe (Qt, SVG, OpenCV, WinRT OCR,
+  windows-capture, app modules); then `dist/LiveSubs-<version>-win64.zip` (~160 MB) for
+  GitHub Releases. Taskbar grouping via `SetCurrentProcessExplicitAppUserModelID`.
   Do an early smoke build — winrt / windows-capture native modules may need spec tweaks.
 
 ## Project layout (target)
@@ -322,7 +330,8 @@ src/livesubs/
                setup_check.py, tabs/, theme/
   web/         server.py, static/
 tests/         samples/ (+ samples.json), helpers/, test_*.py
-scripts/       build_exe.ps1, livesubs.spec, bench_pipeline.py
+scripts/       build_exe.ps1, embedded/ (sitecustomize.py, smoke_test.py), create_shortcut.ps1,
+               bench_pipeline.py, compare_models.py
 ```
 
 ## Plan and progress
@@ -344,16 +353,16 @@ Phase 2 — features
 - [x] 10. Calibration mode (F8): movable region frame, Inspector, overlay move/resize; hotkeys (+ appearance tab, user request)
 - [ ] 11. Profiles (incl. per-profile VRAM reserve, overlay display target)
 - [ ] 12. Models tab (list, VRAM labels vs active profile, pull/cancel, delete, recommended, test/compare)
-- [ ] 13. CPU quality mode
+- [~] 13. CPU quality mode — dropped by the user (2026-10-22)
 - [ ] 14. Settings tab (incl. recording mode + overlap warning), startup checks, tray, fullscreen warning
 - [ ] 15. Video device source (capture card): enumerate, resolution/fps, busy/HDCP errors, inspector region pick (done as 9b)
 - [ ] 16. Vice theme, fonts, SVG icon/header, overlay styles
 - [ ] 17. Web output + QR (+ Screen Wake Lock)
 
 Phase 3 — release
-- [ ] 18. PyInstaller onedir build script (+ earlier smoke build) — smoke build done 2026-10-21 (see log);
-  **code signing** needed (Smart App Control blocks unsigned builds): SignPath (free for OSS) or
-  Azure Trusted Signing
+- [ ] 18. Release: build script **done** (embeddable signed Python, runs under Smart App Control,
+  2026-10-22); left: first-run setup for a fresh PC (user: "format atınca GitHub'dan indirip hızlıca
+  kurayım" — Ollama, model, en-US OCR; part of step 14), version bump, GitHub Release with the zip
 - [ ] 19. README (architecture diagram, install, GIF slot), screenshots
 
 ## Known risks
@@ -362,7 +371,7 @@ Phase 3 — release
 - Two models loaded at once needs `OLLAMA_MAX_LOADED_MODELS >= 2` (app checks and explains).
 - CPU model RAM: `qwen3:30b-a3b` Q4 is ~18–19 GB; borderline on 32 GB next to a game — say so in
   Settings.
-- PyInstaller + winrt / windows-capture native modules — early smoke build at the end of phase 1.
+- Packaging: the build's smoke test must keep covering every native module (Qt trim!).
 
 ## Decision log
 
@@ -522,3 +531,14 @@ Phase 3 — release
   a tall region ("No." = 0.05-0.11 %), so the line was never read at all; now 0.02 %. End-to-end
   regression test plays long line -> 0.6 s "Yeah." -> long line through the real pipeline with a
   slow fake model; it fails on the old code.
+- 2026-10-22: **User decisions:** the CPU quality lane (step 13) is **dropped** — gemma4:26b already
+  uses GPU + RAM, and a second big model does not fit 32 GB. Goal now: **finish the app and make
+  the exe work properly** (Smart App Control!); capture card (9b) and a **Claude API translation
+  backend** (the `TranslationBackend` protocol was built for this) come after.
+- 2026-10-22: **Packaging switched from PyInstaller to the embeddable Python** (see Other ->
+  Packaging): a PyInstaller bootloader is unsigned and new on every build, so Smart App Control
+  blocks it; the renamed PSF-signed pythonw.exe starts UI + engine under SAC (verified with a
+  double-click-equivalent launch: window "LiveSubs 0.1.0.dev0", engine child, clean close). No
+  code signing certificate needed for now. User's goal for the exe: after reinstalling Windows,
+  **download the zip from the GitHub repo and be running quickly** -> next: first-run setup that
+  finds/installs what the app needs (Ollama, the model, en-US OCR), then a GitHub Release.

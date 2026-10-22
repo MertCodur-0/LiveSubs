@@ -2,7 +2,6 @@
 
 import logging
 import logging.handlers
-import multiprocessing
 import sys
 
 from PySide6.QtWidgets import QApplication
@@ -23,13 +22,14 @@ def _setup_logging() -> None:
 
 
 def main() -> int:
-    # Required for the engine process when frozen with PyInstaller.
-    multiprocessing.freeze_support()
     _setup_logging()
 
-    # Imported after freeze_support: the engine child process never needs the UI modules.
+    # Imported here: the engine child process imports this module but never needs the UI.
     from livesubs.engine.process import EngineProcess
+    from livesubs.platform import win32
     from livesubs.ui.main_window import MainWindow
+
+    win32.set_app_user_model_id(f"{APP_NAME}.App")
 
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
