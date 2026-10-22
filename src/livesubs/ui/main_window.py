@@ -88,12 +88,14 @@ from livesubs.ui.tabs.models import ModelsTab, cpu_share
 from livesubs.ui.tabs.profiles import ProfilesTab
 from livesubs.ui.tabs.settings import SettingsTab
 from livesubs.ui.tray import Tray
+from livesubs.web.server import WebServer
 
 DEFAULT_PROFILE_ID = "varsayilan"
 FEED_LIMIT = 200
 OLLAMA_CHECK_MS = 5000
 FOLLOW_MS = 300
 FULLSCREEN_CHECK_MS = 3000
+WEB_STATUS_MS = 2000
 ACTIVE_STATES = (
     EngineState.STARTING,
     EngineState.WARMING_UP,
@@ -236,6 +238,10 @@ class MainWindow(QMainWindow):
             self, interval=FULLSCREEN_CHECK_MS, timeout=self._check_fullscreen
         )
         self._fullscreen_timer.start()
+        self._web: WebServer | None = None
+        self._web_timer = QTimer(self, interval=WEB_STATUS_MS, timeout=self._show_web_status)
+        self._apply_web()
+        self._apply_display()
         self.check_ollama()
         self._engine.start()
 
@@ -329,6 +335,8 @@ class MainWindow(QMainWindow):
         self.settings.profile_changed.connect(self._save_later)
         self.settings.hotkeys_changed.connect(lambda: self._register_hotkeys(changed=True))
         self.settings.recording_changed.connect(self._on_recording_changed)
+        self.settings.web_changed.connect(self._apply_web)
+        self.settings.display_changed.connect(self._on_display_changed)
         self.settings.theme_changed.connect(self.set_theme)
         self.settings.clear_cache_requested.connect(self.clear_cache)
         self.settings.open_logs_requested.connect(self._open_logs)
@@ -394,6 +402,57 @@ class MainWindow(QMainWindow):
         self._overlay.set_capture_visible(on)
         self._warned_overlap = False
         self._place_overlay()
+
+    # --- phone (web) output -----------------------------------------------------------------------
+
+    def _apply_web(self) -> None:
+        """Run the web server when it is on, on the configured port."""
+        web = self._config.web
+        if self._web is not None and (not web.enabled or self._web.port != web.port):
+            self._web.stop()
+            self._web = None
+        if web.enabled and self._web is None:
+            server = WebServer(web.port)
+            try:
+                server.start()
+            except OSError as exc:
+                self.settings.show_web(
+                    None, error=t("settings.web_failed", port=web.port, detail=exc)
+                )
+                self.statusBar().showMessage(t("settings.web_failed", port=web.port, detail=exc))
+                return
+            self._web = server
+        if self._web is None:
+            self._web_timer.stop()
+        else:
+            self._web_timer.start()
+        self._show_web_status()
+
+    def _show_web_status(self) -> None:
+        if self._web is None:
+            if not self._config.web.enabled:
+                self.settings.show_web(None)
+            return
+        self.settings.show_web(self._web.url, self._web.client_count)
+
+    def _web_only(self) -> bool:
+        return self._profile.overlay.display == OverlayDisplay.WEB_ONLY
+
+    def _apply_display(self) -> None:
+        """Phone only: the PC overlay stays hidden and the web output must be on."""
+        web_only = self._web_only()
+        self._overlay.set_disabled(web_only)
+        if web_only and not self._config.web.enabled:
+            self.settings.web_enabled.setChecked(True)  # turns the server on
+        in_use = self._state in ACTIVE_STATES or self._previewing or self._calibrating
+        if in_use and not web_only and self._overlay.text and not self._overlay.suppressed:
+            self._overlay.show()
+        self._place_overlay()
+
+    def _on_display_changed(self) -> None:
+        self._apply_display()
+        self.profiles.refresh()
+        self.appearance.refresh()
 
     def clear_cache(self) -> None:
         """The engine opens the cache per start, so it is free to clear while stopped."""
@@ -497,6 +556,7 @@ class MainWindow(QMainWindow):
         self.appearance.set_settings(profile.overlay)
         self.settings.set_profile(profile)
         self.profiles.set_profile(profile)
+        self._apply_display()
         self.models.set_profile(profile)
         self._fill_profile_combo()
         self.refresh_sources()
@@ -543,6 +603,8 @@ class MainWindow(QMainWindow):
 
     def _on_profile_edited(self) -> None:
         self._save_timer.start()
+        self.settings.refresh_profile()
+        self._apply_display()  # the profile may show translations on the phone only now
         self._place_overlay()  # the display monitor may have changed
         self.appearance.refresh()
         self.models.set_profile(self._profile)  # the game's VRAM reserve may have changed
@@ -717,6 +779,8 @@ class MainWindow(QMainWindow):
         self._save()
         self._reads = 0
         self._warned_spill = False
+        if self._web is not None:
+            self._web.new_session()  # line ids start again
         self._engine.send(
             StartPipeline(
                 profile=self._profile.model_copy(deep=True),
@@ -773,6 +837,8 @@ class MainWindow(QMainWindow):
         self.models.set_busy(state in ACTIVE_STATES)
         if state in (EngineState.PAUSED, EngineState.STOPPED) and not self._calibrating:
             self._overlay.clear()
+            if self._web is not None:
+                self._web.clear()
         if state == EngineState.STOPPED and not (self._calibrating or self._previewing):
             self._overlay.hide()
 
@@ -793,7 +859,7 @@ class MainWindow(QMainWindow):
         self._overlay.suppressed = hidden
         if hidden:
             self._overlay.hide()
-        elif self._overlay.text:
+        elif self._overlay.text and not self._overlay.disabled:
             self._overlay.show()
         self.statusBar().showMessage(t("overlay.hidden" if hidden else "overlay.shown"), 4000)
 
@@ -968,6 +1034,8 @@ class MainWindow(QMainWindow):
         if event.repeat:
             if (text := self._translations.get(event.line_id)) is not None:
                 self._overlay.show_text(text)
+                if self._web is not None:
+                    self._web.show(event.line_id, text)
             return
         row = self._row_for(event.line_id)
         self._set_cells(
@@ -987,6 +1055,8 @@ class MainWindow(QMainWindow):
         self._set_cells(row, {2: event.translation, 3: event.model, 5: timing})
         self.feed.resizeRowToContents(row)
         self._overlay.show_text(event.translation, event.source)
+        if self._web is not None:
+            self._web.show(event.line_id, event.translation)
 
     def _schedule_clear(self) -> None:
         self._clear_generation += 1
@@ -995,6 +1065,8 @@ class MainWindow(QMainWindow):
         def clear() -> None:
             if generation == self._clear_generation:
                 self._overlay.clear()
+                if self._web is not None:
+                    self._web.clear()
 
         QTimer.singleShot(self._profile.overlay.clear_delay_ms, clear)
 
@@ -1005,6 +1077,9 @@ class MainWindow(QMainWindow):
         self._ollama_timer.stop()
         self._follow_timer.stop()
         self._fullscreen_timer.stop()
+        self._web_timer.stop()
+        if self._web is not None:
+            self._web.stop()
         self.tray.hide()
         self._flush_save()
         if self._hotkeys is not None:

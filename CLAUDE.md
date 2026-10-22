@@ -347,9 +347,25 @@ remaining size, cancel. Minimizes to tray.
 
 - Global hotkeys via Win32 `RegisterHotKey` + Qt native event filter (no low-level hooks:
   anti-cheat friendly, no admin). Defaults: F8 calibration, overlay show/hide, pause/resume.
-- Web output: stdlib `ThreadingHTTPServer` + Server-Sent Events, QR via `qrcode`; firewall note
-  in the UI. Page uses the Screen Wake Lock API so the phone screen stays on; if unsupported, show a
-  "disable screen timeout" hint. Vice-themed, large readable text, works in portrait and landscape.
+- Web output (step 17, done 2026-10-23; page design by the user): `web/server.py` — stdlib
+  `ThreadingHTTPServer` in the UI process (0.0.0.0, `config.web.port`, default 8765), routes `/`
+  (page), `/font.ttf` (bundled Inter SemiBold), `/events` (SSE, keep-alive comment every 15 s).
+  `web/feed.py` `WebFeed` holds the state (current line + 4 older ones, keyed per page, line ids
+  forgotten on a new Start); **every change sends the whole state**, so a reconnecting phone is
+  right at once and the page only diffs it. Rules: new line -> current moves up; upgrade (same
+  line id) -> text replaced in place; subtitle cleared (after `clear_delay_ms`, also on
+  stop/pause) -> current moves up too; a repeat right after a clear comes back to the middle.
+  Page `web/static/index.html` (`{{web.*}}` placeholders filled from i18n): **plain black, no
+  Vice theme** (user), white text centred on the screen, older lines above it, dimmer with age
+  (opacity .42/.24/.13/.06); FLIP animation: a new line fades in from slightly below, the others
+  slide up 0.6 s. Screen Wake Lock (needs a secure context, so over plain http on the LAN it is
+  usually missing -> "extend the screen timeout" hint); a tap asks for fullscreen + the lock.
+  Settings tab group **Telefonda göster**: on/off, port, address + client count, QR
+  (`ui/qr.py`, painted from `qrcode`'s matrix, no PIL), Wi-Fi/firewall hint, and **"show the
+  translation only on the phone"** = the active profile's `OverlayDisplay.WEB_ONLY` (also in
+  the Profiles tab's display combo); it disables the PC overlay (`Overlay.disabled`, F9 cannot
+  show it) and turns the web output on. Not verified with a real phone yet (needs the firewall
+  prompt answered); layout checked in headless Edge.
 - Startup checks (`ui/setup_check.py`, done 2026-10-22): **Kurulum** dialog, opened at start only
   when something is missing (and on `ocr_unavailable` / `model_not_found` engine errors, and from
   the "Kurulum…" button): en-US OCR (elevated `Add-WindowsCapability`, then polls 10 min),
@@ -409,9 +425,9 @@ src/livesubs/
     translate/ base.py, ollama.py, orchestrator.py, prompt.py, cache.py
   ollama/      client.py, catalog.py, install.py, vram.py, compare.py
   platform/    win32.py, hotkeys.py, shortcuts.py, gpu.py
-  ui/          main_window.py, header.py, icon.py, overlay.py, region_frame.py, inspector.py,
+  ui/          main_window.py, header.py, icon.py, qr.py, overlay.py, region_frame.py, inspector.py,
                tray.py, setup_check.py, tabs/, theme/ (base.qss, vice.json, dark.json)
-  web/         server.py, static/
+  web/         server.py, feed.py, static/index.html
 tests/         samples/ (+ samples.json), helpers/, test_*.py
 scripts/       build_exe.ps1, embedded/ (sitecustomize.py, smoke_test.py), create_shortcut.ps1,
                make_icon.py, bench_pipeline.py, compare_models.py
@@ -443,7 +459,7 @@ Phase 2 — features
   startup checks (setup dialog) — 2026-10-22
 - [ ] 15. Video device source (capture card): enumerate, resolution/fps, busy/HDCP errors, inspector region pick (done as 9b)
 - [x] 16. Vice theme, fonts, SVG icon/header, overlay styles — 2026-10-22
-- [ ] 17. Web output + QR (+ Screen Wake Lock)
+- [x] 17. Web output + QR (+ Screen Wake Lock), phone-only mode — 2026-10-23
 
 Phase 3 — release
 - [x] 18. Release: build script (embeddable signed Python, runs under Smart App Control), first-run
@@ -457,8 +473,7 @@ Phase 3 — release
 First **finish the app** (each step committed and pushed; no new release unless asked):
 1. ~~Step 12 — Models tab~~ (done 2026-10-22; the text-only experiment deferred by the user).
 2. ~~Step 16 — Vice theme, fonts, SVG icon/header, overlay styles~~ (done 2026-10-22).
-3. Step 17 — web/phone output + QR + Screen Wake Lock, incl. the profile's "web only" display
-   target (`OverlayDisplay.WEB_ONLY`).
+3. ~~Step 17 — web/phone output + QR + Screen Wake Lock, phone-only mode~~ (done 2026-10-23).
 4. Step 19 — README (EN + TR), screenshots; then make the GitHub repo public (user's call).
 
 **Afterwards:**
@@ -675,3 +690,9 @@ First **finish the app** (each step committed and pushed; no new release unless 
   code point (`ord(c)`); (2) a screenshot script that dropped `MainWindow._hotkeys` freed the
   Python native event filter Qt still called -> random access violations that looked like a theme
   bug for a while. Never drop the `HotkeyManager` while its window lives.
+- 2026-10-23 (step 17): **User's design for the phone page:** no Vice theme — all black, text
+  centred; when a new translation comes the old one moves up and dims, animated (no hard cut);
+  and a setting to turn the translation off on the PC so it shows on the phone only. Done as
+  described under Other -> Web output; the phone-only switch is per profile (`WEB_ONLY` already
+  existed there) and mirrored in the Settings tab. UI tests use a fake `WebServer` so no test
+  opens a LAN port (a real bind on 0.0.0.0 raises the Windows firewall prompt).

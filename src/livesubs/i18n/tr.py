@@ -219,6 +219,7 @@ STRINGS: dict[str, str] = {
     "profiles.display": "Çevirinin gösterileceği ekran",
     "profiles.display.auto": "Altyazının olduğu ekran (otomatik)",
     "profiles.display.monitor": "{name} ({width}x{height}) — F8 ile konumlandırın",
+    "profiles.display.web_only": "Yalnızca telefonda (bilgisayarda çeviri gösterilmez)",
     "profiles.game_hint": (
         "Oyun bu bilgisayarda çalışıyorsa ekran kartı belleğinin bir kısmı ona kalır; model "
         "seçerken bu dikkate alınır. Oyunu TV'de oynayıp çeviriyi bilgisayar ekranında okumak "
@@ -356,11 +357,31 @@ STRINGS: dict[str, str] = {
         "Kayıt modunda çeviri altyazı bölgesiyle çakışırsa OCR onu da okuyabilir; "
         "bu durumda uyarı gösterilir."
     ),
+    "settings.web": "Telefonda göster",
+    "settings.web_enabled": "Çeviriyi telefona da gönder (web sayfası)",
+    "settings.web_port": "Port",
+    "settings.web_only": "Çeviriyi yalnızca telefonda göster (bilgisayar ekranında kapalı)",
+    "settings.web_only_tip": "Bu profil için geçerlidir (Profiller sekmesindeki ekran seçimi).",
+    "settings.web_off": "Kapalı",
+    "settings.web_address": "Telefonda açın: <b>{url}</b> — bağlı cihaz: {clients}",
+    "settings.web_failed": "Web çıktısı başlatılamadı (port {port} kullanımda olabilir): {detail}",
+    "settings.web_hint": (
+        "Telefon bilgisayarla aynı Wi-Fi ağında olmalı. Kamerayla QR kodu okutun ya da adresi "
+        "tarayıcıya yazın. Windows ilk seferde güvenlik duvarı izni sorarsa “Özel ağlar”a izin "
+        "verin."
+    ),
     "settings.upkeep": "Bakım",
     "settings.clear_cache": "Çeviri önbelleğini temizle",
     "settings.open_logs": "Günlük klasörünü aç",
     "settings.cache_cleared": "Önbellek temizlendi.",
     "settings.cache_busy": "Önce çeviriyi durdurun.",
+    # Phone page (web output)
+    "web.waiting": "Çeviri bekleniyor…",
+    "web.connecting": "Bağlantı kuruluyor…",
+    "web.hint_timeout": (
+        "Ekranın kararmaması için telefonun ekran zaman aşımını uzatın. Tam ekran için dokunun."
+    ),
+    "web.hint_tap": "Ekranın açık kalması için bir kez dokunun.",
     # Tray and warnings
     "tray.show": "LiveSubs'ı göster",
     "tray.toggle_overlay": "Çeviriyi gizle / göster",

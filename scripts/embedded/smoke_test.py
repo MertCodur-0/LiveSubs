@@ -43,8 +43,12 @@ def check() -> list[str]:
     from livesubs.engine.ocr.winrt_ocr import WinRtOcr
     from livesubs.engine.process import EngineProcess  # noqa: F401
     from livesubs.ui.main_window import MainWindow  # noqa: F401
+    from livesubs.ui.qr import qr_pixmap
+    from livesubs.web.server import FONT, render_page
 
     WinRtOcr().recognize(np.full((40, 200), 255, np.uint8))
+    assert b"EventSource" in render_page() and FONT.is_file()  # package data of the phone page
+    assert not qr_pixmap("http://192.168.1.2:8765/").isNull()
     return [f"plugin path: {p}" for p in QCoreApplication.libraryPaths()]
 
 

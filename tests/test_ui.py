@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QGuiApplication, QKeySequence
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QApplication, QMessageBox
 from pytestqt.qtbot import QtBot
 
 from livesubs.core import paths
@@ -887,3 +887,101 @@ def test_start_button_shows_the_running_state(window: MainWindow) -> None:
     assert window.start_button.text() == t("stop")
     window.handle(StateChanged(EngineState.STOPPED, ""))
     assert window.start_button.property("running") is False
+
+
+class FakeWebServer:
+    """Records what the phone page would get; never opens a port."""
+
+    def __init__(self, port: int) -> None:
+        self.port = port
+        self.calls: list[tuple] = []
+        self.running = False
+        self.url = f"http://192.168.1.20:{port}/"
+        self.client_count = 0
+
+    def start(self) -> None:
+        self.running = True
+
+    def stop(self) -> None:
+        self.running = False
+
+    def show(self, line_id: int, text: str) -> None:
+        self.calls.append(("show", line_id, text))
+
+    def clear(self) -> None:
+        self.calls.append(("clear",))
+
+    def new_session(self) -> None:
+        self.calls.append(("new_session",))
+
+
+@pytest.fixture
+def web(monkeypatch: pytest.MonkeyPatch) -> list[FakeWebServer]:
+    servers: list[FakeWebServer] = []
+
+    def make(port: int) -> FakeWebServer:
+        servers.append(FakeWebServer(port))
+        return servers[-1]
+
+    monkeypatch.setattr("livesubs.ui.main_window.WebServer", make)
+    return servers
+
+
+def test_web_output_starts_and_follows_the_port(
+    window: MainWindow, web: list[FakeWebServer]
+) -> None:
+    assert not web  # off by default
+    window.settings.web_enabled.setChecked(True)
+    assert web[-1].running and web[-1].port == 8765
+    assert "192.168.1.20:8765" in window.settings.web_status.text()
+    assert window.settings.web_qr.isVisibleTo(window.settings)
+    window.settings.web_port.setValue(9000)
+    window.settings.web_port.editingFinished.emit()
+    assert not web[0].running
+    assert web[-1].running and web[-1].port == 9000
+    window.settings.web_enabled.setChecked(False)
+    assert not web[-1].running
+    assert window.settings.web_status.text() == t("settings.web_off")
+    assert window._config.web.port == 9000
+
+
+def test_translations_go_to_the_phone(window: MainWindow, web: list[FakeWebServer]) -> None:
+    window.settings.web_enabled.setChecked(True)
+    running_with_region(window)
+    engine = engine_of(window)
+    engine.queue = [
+        SubtitleRead(1, "Get in.", 9.0),
+        SubtitleTranslated(1, "Get in.", "Bin.", "m", "gpu", 9, 500, False),
+    ]
+    window._poll()
+    window._profile.overlay.clear_delay_ms = 0
+    engine.queue = [SubtitleCleared()]
+    window._poll()
+    QApplication.processEvents()
+    assert web[-1].calls[-2:] == [("show", 1, "Bin."), ("clear",)]
+
+
+def test_phone_only_hides_the_pc_overlay(window: MainWindow, web: list[FakeWebServer]) -> None:
+    running_with_region(window)
+    window.settings.web_only.setChecked(True)
+    assert window._profile.overlay.display == OverlayDisplay.WEB_ONLY
+    assert window._config.web.enabled and web[-1].running  # the phone is the only output now
+    assert window.profiles.display.currentData() == OverlayDisplay.WEB_ONLY
+    engine_of(window).queue = [SubtitleTranslated(1, "Get in.", "Bin.", "m", "gpu", 9, 500, False)]
+    window._poll()
+    assert not window._overlay.isVisible()
+    assert web[-1].calls[-1] == ("show", 1, "Bin.")
+    window.toggle_overlay()  # F9 twice: still hidden
+    window.toggle_overlay()
+    assert not window._overlay.isVisible()
+
+    window.settings.web_only.setChecked(False)
+    assert window._profile.overlay.display == OverlayDisplay.AUTO
+    assert window._overlay.isVisible()
+
+
+def test_phone_only_from_the_profiles_tab(window: MainWindow, web: list[FakeWebServer]) -> None:
+    window.profiles.display.setCurrentIndex(window.profiles.display.count() - 1)
+    assert window._profile.overlay.display == OverlayDisplay.WEB_ONLY
+    assert window.settings.web_only.isChecked()
+    assert window._overlay.disabled

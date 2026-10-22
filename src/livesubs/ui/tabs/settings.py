@@ -1,4 +1,4 @@
-"""Settings tab: translation, reading speed, hotkeys, window behaviour, recording mode, upkeep.
+"""Settings tab: translation, reading speed, phone output, hotkeys, window, recording, upkeep.
 
 Edits change the given ``AppConfig`` / ``Profile`` objects in place and announce it; the main
 window saves them and applies what can change while running (hotkeys, recording mode).
@@ -6,7 +6,7 @@ window saves them and applies what can change while running (hotkeys, recording 
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -24,9 +24,10 @@ from PySide6.QtWidgets import (
 )
 
 from livesubs.core.config import AppConfig, HotkeySettings
-from livesubs.core.profiles import Profile
+from livesubs.core.profiles import OverlayDisplay, Profile
 from livesubs.i18n import t
 from livesubs.platform import hotkeys
+from livesubs.ui.qr import qr_pixmap
 from livesubs.ui.theme import THEMES
 
 KEEP_ALIVE = ("5m", "30m", "2h", "-1")  # Ollama durations; -1 keeps the model loaded
@@ -52,6 +53,8 @@ class SettingsTab(QWidget):
     profile_changed = Signal()
     hotkeys_changed = Signal()
     recording_changed = Signal(bool)
+    web_changed = Signal()  # turned on/off or another port
+    display_changed = Signal()  # the active profile shows translations on the phone only, or not
     theme_changed = Signal(str)
     clear_cache_requested = Signal()
     open_logs_requested = Signal()
@@ -62,6 +65,7 @@ class SettingsTab(QWidget):
         self.profile = profile
         layout = QVBoxLayout(self)
         layout.addWidget(self._translation_box())
+        layout.addWidget(self._web_box())
         layout.addWidget(self._hotkey_box())
         layout.addWidget(self._window_box())
         layout.addWidget(self._upkeep_box())
@@ -101,6 +105,35 @@ class SettingsTab(QWidget):
         self.fps.valueChanged.connect(self._on_fps)
         form.addRow(t("settings.fps"), self.fps)
         form.addRow(_hint(t("settings.translation_hint")))
+        return box
+
+    def _web_box(self) -> QGroupBox:
+        box = QGroupBox(t("settings.web"))
+        row = QHBoxLayout(box)
+        form = QFormLayout()
+        self.web_enabled = QCheckBox(t("settings.web_enabled"))
+        self.web_enabled.setChecked(self.config.web.enabled)
+        self.web_enabled.toggled.connect(self._on_web_enabled)
+        form.addRow(self.web_enabled)
+        self.web_only = QCheckBox(t("settings.web_only"))
+        self.web_only.setToolTip(t("settings.web_only_tip"))
+        self.web_only.setChecked(self.profile.overlay.display == OverlayDisplay.WEB_ONLY)
+        self.web_only.toggled.connect(self._on_web_only)
+        form.addRow(self.web_only)
+        self.web_port = QSpinBox()
+        self.web_port.setRange(1024, 65535)
+        self.web_port.setValue(self.config.web.port)
+        self.web_port.editingFinished.connect(self._on_web_port)
+        form.addRow(t("settings.web_port"), self.web_port)
+        self.web_status = QLabel(t("settings.web_off"), wordWrap=True)
+        self.web_status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        form.addRow(self.web_status)
+        form.addRow(_hint(t("settings.web_hint")))
+        self.web_qr = QLabel()
+        self.web_qr.hide()
+        self._qr_url = ""
+        row.addLayout(form, 1)
+        row.addWidget(self.web_qr, 0, Qt.AlignmentFlag.AlignTop)
         return box
 
     def _hotkey_box(self) -> QGroupBox:
@@ -155,9 +188,29 @@ class SettingsTab(QWidget):
 
     def set_profile(self, profile: Profile) -> None:
         self.profile = profile
+        self.refresh_profile()
+
+    def refresh_profile(self) -> None:
+        """Show the active profile's values (they can also change on the Profiles tab)."""
         self.fps.blockSignals(True)
-        self.fps.setValue(profile.capture.fps)
+        self.fps.setValue(self.profile.capture.fps)
         self.fps.blockSignals(False)
+        self.web_only.blockSignals(True)
+        self.web_only.setChecked(self.profile.overlay.display == OverlayDisplay.WEB_ONLY)
+        self.web_only.blockSignals(False)
+
+    def show_web(self, url: str | None, clients: int = 0, error: str = "") -> None:
+        """The web output's state: its address and QR code while it runs."""
+        if error:
+            self.web_status.setText(error)
+        elif url is None:
+            self.web_status.setText(t("settings.web_off"))
+        else:
+            self.web_status.setText(t("settings.web_address", url=url, clients=clients))
+        if url and url != self._qr_url:
+            self.web_qr.setPixmap(qr_pixmap(url))
+        self._qr_url = url or ""
+        self.web_qr.setVisible(bool(url))
 
     # --- edits -----------------------------------------------------------------------------------
 
@@ -176,6 +229,26 @@ class SettingsTab(QWidget):
     def _on_fps(self, fps: int) -> None:
         self.profile.capture.fps = fps
         self.profile_changed.emit()
+
+    def _on_web_enabled(self, on: bool) -> None:
+        self.config.web.enabled = on
+        self.config_changed.emit()
+        self.web_changed.emit()
+
+    def _on_web_port(self) -> None:
+        if self.web_port.value() != self.config.web.port:
+            self.config.web.port = self.web_port.value()
+            self.config_changed.emit()
+            self.web_changed.emit()
+
+    def _on_web_only(self, on: bool) -> None:
+        overlay = self.profile.overlay
+        if on:
+            overlay.display = OverlayDisplay.WEB_ONLY
+        elif overlay.display == OverlayDisplay.WEB_ONLY:
+            overlay.display = OverlayDisplay.AUTO
+        self.profile_changed.emit()
+        self.display_changed.emit()
 
     def _on_theme(self, index: int) -> None:
         self.config.theme = self.theme.itemData(index)

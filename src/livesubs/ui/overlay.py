@@ -110,6 +110,7 @@ class Overlay(QWidget):
         self._original = ""
         self._editable = False
         self.suppressed = False  # hidden by the user (hotkey): keep the text, stay invisible
+        self.disabled = False  # the profile shows translations on the phone only
         self.capture_visible = False  # recording mode: let OBS and screenshots see it
         self._mover = MoveResize(self, self.edited.emit, QPoint(160, 48))
 
@@ -142,7 +143,7 @@ class Overlay(QWidget):
 
     def show_text(self, translation: str, original: str = "") -> None:
         self._text, self._original = translation, original
-        if not self.isVisible() and not self.suppressed:
+        if not self.isVisible() and not (self.suppressed or self.disabled):
             self.show()
         self.update()
 
@@ -157,9 +158,14 @@ class Overlay(QWidget):
         self._editable = editable
         visible = self.isVisible()
         self.setWindowFlags(self._flags(editable=editable))  # hides the window
-        if visible or editable:
+        if (visible or editable) and not self.disabled:
             self.show()
         self.update()
+
+    def set_disabled(self, disabled: bool) -> None:
+        self.disabled = disabled
+        if disabled:
+            self.hide()
 
     def preferred_height(self) -> float:
         """Logical height for ``max_lines`` lines at the configured size (plus the original)."""

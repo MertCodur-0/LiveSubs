@@ -177,9 +177,12 @@ class ProfilesTab(QWidget):
                     height=monitor.rect.height,
                 )
                 self.display.addItem(label, monitor.device_name)
+            self.display.addItem(t("profiles.display.web_only"), OverlayDisplay.WEB_ONLY)
             index = 0
             if p.overlay.display == OverlayDisplay.MONITOR:
                 index = max(self.display.findData(p.overlay.monitor_device), 0)
+            elif p.overlay.display == OverlayDisplay.WEB_ONLY:
+                index = self.display.count() - 1
             self.display.setCurrentIndex(index)
         finally:
             self._loading = False
@@ -254,8 +257,12 @@ class ProfilesTab(QWidget):
             return
         device = self.display.itemData(index)
         overlay = self.profile.overlay
-        overlay.display = OverlayDisplay.AUTO if device is None else OverlayDisplay.MONITOR
-        if device is not None:
+        if device == OverlayDisplay.WEB_ONLY:
+            overlay.display = OverlayDisplay.WEB_ONLY
+        elif device is None:
+            overlay.display = OverlayDisplay.AUTO
+        else:
+            overlay.display = OverlayDisplay.MONITOR
             overlay.monitor_device = device
         self._edited()
 

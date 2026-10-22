@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>LiveSubs</title>
+<style>
+  @font-face {
+    font-family: "Inter";
+    src: url("/font.ttf") format("truetype");
+    font-weight: 600;
+    font-display: swap;
+  }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: #000;
+    color: #fff;
+    overflow: hidden;
+  }
+  body {
+    font-family: Inter, system-ui, sans-serif;
+    font-weight: 600;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  /* Bottom-anchored at the middle of the screen; script shifts it so the current line is centred
+     and older lines sit above it. */
+  #stack {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 50%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.55em;
+    padding: 0 max(6vw, env(safe-area-inset-left), env(safe-area-inset-right));
+    font-size: clamp(22px, min(7vw, 10vh), 72px);
+    line-height: 1.25;
+  }
+  .line {
+    max-width: 100%;
+    text-align: center;
+    overflow-wrap: anywhere;
+    transition: opacity 0.6s ease, transform 0.6s cubic-bezier(0.22, 0.8, 0.3, 1);
+  }
+  .line.enter { opacity: 0; transform: translateY(0.5em); }
+  .line.p1 { opacity: 0.42; }
+  .line.p2 { opacity: 0.24; }
+  .line.p3 { opacity: 0.13; }
+  .line.p4 { opacity: 0.06; }
+  .line.leave { opacity: 0; }
+  .note {
+    position: fixed;
+    left: 0;
+    right: 0;
+    padding: 0 16px;
+    text-align: center;
+    font: 500 15px/1.4 Inter, system-ui, sans-serif;
+    color: #6b6b6b;
+    transition: opacity 0.4s ease;
+  }
+  #idle { top: 50%; transform: translateY(-50%); }
+  #status { top: max(14px, env(safe-area-inset-top)); }
+  #hint { bottom: max(18px, env(safe-area-inset-bottom)); }
+  .hidden { opacity: 0; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="stack"></div>
+<div id="idle" class="note">{{web.waiting}}</div>
+<div id="status" class="note hidden">{{web.connecting}}</div>
+<div id="hint" class="note hidden" data-timeout="{{web.hint_timeout}}" data-tap="{{web.hint_tap}}"></div>
+<script>
+"use strict";
+const stack = document.getElementById("stack");
+const idle = document.getElementById("idle");
+const statusNote = document.getElementById("status");
+const hint = document.getElementById("hint");
+const LINE_EM = 1.25, GAP_EM = 0.55, DIM_STEPS = 4;
+const lines = new Map();  // key -> element, in screen order
+let state = { history: [], current: null };
+
+// Shift the stack so the current line sits in the middle. Without one, the space it would take
+// stays empty, so the line that just moved up does not drop back down when the next one comes.
+function center() {
+  const current = state.current ? lines.get(state.current.key) : null;
+  const size = parseFloat(getComputedStyle(stack).fontSize);
+  const shift = current ? current.offsetHeight / 2 : -(size * LINE_EM / 2 + size * GAP_EM);
+  stack.style.transform = `translateY(${shift}px)`;
+}
+
+function render(next) {
+  state = next;
+  const wanted = [
+    ...next.history.map((line, i) => ({ ...line, age: next.history.length - i })),
+    ...(next.current ? [{ ...next.current, age: 0 }] : []),
+  ];
+  // FLIP: remember where every line is, change the layout, then animate from there.
+  const before = new Map();
+  for (const [key, el] of lines) before.set(key, el.getBoundingClientRect().top);
+
+  const keep = new Set(wanted.map((line) => line.key));
+  for (const [key, el] of lines) {
+    if (keep.has(key)) continue;
+    lines.delete(key);  // the oldest line: it is at the top, so fading it moves nothing else
+    el.className = "line leave";
+    setTimeout(() => el.remove(), 700);
+  }
+  const fresh = [];
+  for (const line of wanted) {
+    let el = lines.get(line.key);
+    if (!el) {
+      el = document.createElement("div");
+      el.className = "line enter";
+      fresh.push(el);
+    }
+    lines.delete(line.key);
+    lines.set(line.key, el);  // keep the map in screen order
+    if (el.textContent !== line.text) el.textContent = line.text;
+    stack.appendChild(el);
+    for (let i = 1; i <= DIM_STEPS; i++) el.classList.toggle(`p${i}`, line.age === i);
+    if (line.age > DIM_STEPS) el.classList.add(`p${DIM_STEPS}`);
+  }
+  center();
+
+  for (const [key, top] of before) {
+    const el = lines.get(key);
+    if (!el) continue;
+    const dy = top - el.getBoundingClientRect().top;
+    if (Math.abs(dy) < 0.5) continue;
+    el.style.transition = "opacity 0.6s ease";  // jump back to where it was, fade on
+    el.style.transform = `translateY(${dy}px)`;
+  }
+  void stack.offsetHeight;  // apply the jump before the slide starts
+  for (const el of lines.values()) {
+    el.style.transition = "";
+    el.style.transform = "";
+  }
+  requestAnimationFrame(() => fresh.forEach((el) => el.classList.remove("enter")));
+  idle.classList.toggle("hidden", wanted.length > 0);
+}
+
+function connect() {
+  const events = new EventSource("/events");
+  events.onmessage = (e) => {
+    statusNote.classList.add("hidden");
+    render(JSON.parse(e.data));
+  };
+  events.onerror = () => {
+    statusNote.classList.remove("hidden");
+    if (events.readyState === EventSource.CLOSED) setTimeout(connect, 3000);  // never give up
+  };
+}
+
+// Keep the phone screen on. Browsers allow it only on secure pages (https), so on the local
+// network it usually is missing: then ask for a longer screen timeout instead.
+let wakeLock = null;
+async function keepAwake() {
+  if (!("wakeLock" in navigator) || (wakeLock && !wakeLock.released)) return true;
+  try {
+    wakeLock = await navigator.wakeLock.request("screen");
+    hint.classList.add("hidden");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function showHint(text) {
+  hint.textContent = text;
+  hint.classList.remove("hidden");
+  setTimeout(() => hint.classList.add("hidden"), 15000);
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") keepAwake();  // the lock ends with the page hidden
+});
+document.addEventListener("click", () => {
+  const page = document.documentElement;
+  if (!document.fullscreenElement && page.requestFullscreen) page.requestFullscreen().catch(() => {});
+  keepAwake();
+});
+window.addEventListener("resize", center);
+document.fonts.ready.then(center);
+
+if (!("wakeLock" in navigator)) showHint(hint.dataset.timeout);
+else keepAwake().then((ok) => { if (!ok) showHint(hint.dataset.tap); });
+connect();
+</script>
+</body>
+</html>
