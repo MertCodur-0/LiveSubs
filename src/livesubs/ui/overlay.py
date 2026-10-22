@@ -71,6 +71,7 @@ class Overlay(QWidget):
         self._original = ""
         self._editable = False
         self.suppressed = False  # hidden by the user (hotkey): keep the text, stay invisible
+        self.capture_visible = False  # recording mode: let OBS and screenshots see it
         self._mover = MoveResize(self, self.edited.emit, QPoint(160, 48))
 
     @staticmethod
@@ -140,10 +141,23 @@ class Overlay(QWidget):
         hwnd = int(self.winId())
         try:
             win32.set_click_through(hwnd, not self._editable)
-            if not win32.set_exclude_from_capture(hwnd, True):
-                log.warning("The overlay could not be hidden from screen capture")
         except OSError:
             log.exception("Styling the overlay window failed")
+        self._apply_capture_visibility()
+
+    def set_capture_visible(self, visible: bool) -> None:
+        self.capture_visible = visible
+        if self.isVisible():
+            self._apply_capture_visibility()
+
+    def _apply_capture_visibility(self) -> None:
+        if QGuiApplication.platformName() != "windows":
+            return
+        try:
+            if not win32.set_exclude_from_capture(int(self.winId()), not self.capture_visible):
+                log.warning("The overlay's capture visibility could not be changed")
+        except OSError:
+            log.exception("Changing the overlay's capture visibility failed")
 
     # --- painting --------------------------------------------------------------------------------
 

@@ -14,8 +14,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
-from PySide6.QtCore import QObject, Qt, QTimer, Signal
-from PySide6.QtGui import QCloseEvent, QFont, QGuiApplication
+from PySide6.QtCore import QCoreApplication, QEvent, QObject, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QCloseEvent, QDesktopServices, QFont, QGuiApplication
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 )
 
 from livesubs import APP_NAME, __version__
+from livesubs.core import paths
 from livesubs.core.config import AppConfig, load_config, save_config
 from livesubs.core.geometry import NormRect, Rect
 from livesubs.core.messages import (
@@ -64,11 +65,13 @@ from livesubs.core.profiles import (
     VisionSettings,
     WindowSource,
 )
+from livesubs.engine.translate.cache import TranslationCache
 from livesubs.i18n import t
 from livesubs.ollama.client import DEFAULT_URL, InstalledModel, list_models, start_ollama
 from livesubs.platform import win32
 from livesubs.ui import screens
 from livesubs.ui.hotkeys import HotkeyManager
+from livesubs.ui.icon import app_icon
 from livesubs.ui.inspector import Inspector
 from livesubs.ui.overlay import Overlay
 from livesubs.ui.pick import resolve
@@ -77,11 +80,14 @@ from livesubs.ui.region_frame import RegionFrame
 from livesubs.ui.region_select import RegionPicker
 from livesubs.ui.setup_check import SetupDialog
 from livesubs.ui.tabs.appearance import AppearanceTab
+from livesubs.ui.tabs.settings import SettingsTab
+from livesubs.ui.tray import Tray
 
 PROFILE_ID = "varsayilan"
 FEED_LIMIT = 200
 OLLAMA_CHECK_MS = 5000
 FOLLOW_MS = 300
+FULLSCREEN_CHECK_MS = 3000
 ACTIVE_STATES = (
     EngineState.STARTING,
     EngineState.WARMING_UP,
@@ -160,6 +166,7 @@ class MainWindow(QMainWindow):
     ) -> None:
         super().__init__()
         self.setWindowTitle(f"{APP_NAME} {__version__}")
+        self.setWindowIcon(app_icon())
         self.resize(980, 640)
         self._engine = engine
         self._config = config or load_config()
@@ -174,6 +181,9 @@ class MainWindow(QMainWindow):
         self._reads = 0  # lines read since Start: tells "running" from "waiting for subtitles"
         self._overlay = Overlay(self._profile.overlay)
         self._overlay.edited.connect(self._on_overlay_edited)
+        self._overlay.set_capture_visible(self._config.recording_mode)
+        self._warned_overlap = False
+        self._warned_fullscreen = False
         self._region_frame = RegionFrame()
         self._region_frame.edited.connect(self._on_region_edited)
         self._inspector = Inspector(self._profile.vision)
@@ -188,6 +198,13 @@ class MainWindow(QMainWindow):
         self.setup.model_selected.connect(self._on_model_selected)
         self.setup.settings_imported.connect(self._on_settings_imported)
 
+        self.tray = Tray(app_icon())
+        self.tray.show_window.connect(self.show_from_tray)
+        self.tray.toggle_running.connect(self.toggle)
+        self.tray.toggle_overlay.connect(self.toggle_overlay)
+        self.tray.quit.connect(self.close)
+        self.tray.show()
+
         self._build()
         self.refresh_sources()
         self._update_region_label()
@@ -195,9 +212,7 @@ class MainWindow(QMainWindow):
         if QGuiApplication.platformName() == "windows":  # not offscreen (tests, CI)
             self._hotkeys = HotkeyManager(int(self.winId()))
             self._hotkeys.triggered.connect(self.on_hotkey)
-            failed = self._hotkeys.register_all(self._config.hotkeys.model_dump())
-            if failed:
-                self.statusBar().showMessage(t("hotkey.failed", keys=", ".join(failed)), 15000)
+            self._register_hotkeys()
 
         self._poll_timer = QTimer(self, interval=30, timeout=self._poll)
         self._poll_timer.start()
@@ -207,6 +222,10 @@ class MainWindow(QMainWindow):
         self._save_timer = QTimer(self, interval=400, singleShot=True, timeout=self._save)
         self._ollama_timer = QTimer(self, interval=OLLAMA_CHECK_MS, timeout=self.check_ollama)
         self._ollama_timer.start()
+        self._fullscreen_timer = QTimer(
+            self, interval=FULLSCREEN_CHECK_MS, timeout=self._check_fullscreen
+        )
+        self._fullscreen_timer.start()
         self.check_ollama()
         self._engine.start()
 
@@ -290,10 +309,83 @@ class MainWindow(QMainWindow):
         self.appearance.changed.connect(self._on_appearance_changed)
         self.appearance.preview_toggled.connect(self._on_preview)
 
+        self.settings = SettingsTab(self._config, self._profile)
+        self.settings.config_changed.connect(self._save_later)
+        self.settings.profile_changed.connect(self._save_later)
+        self.settings.hotkeys_changed.connect(lambda: self._register_hotkeys(changed=True))
+        self.settings.recording_changed.connect(self._on_recording_changed)
+        self.settings.clear_cache_requested.connect(self.clear_cache)
+        self.settings.open_logs_requested.connect(self._open_logs)
+
         self.tabs = QTabWidget()
         self.tabs.addTab(live, t("tab.live"))
         self.tabs.addTab(self.appearance, t("tab.appearance"))
+        self.tabs.addTab(self.settings, t("tab.settings"))
         self.setCentralWidget(self.tabs)
+
+    # --- settings tab, tray and warnings ----------------------------------------------------------
+
+    def _save_later(self) -> None:
+        self._save_timer.start()  # debounced: spin boxes send many changes
+
+    def _register_hotkeys(self, *, changed: bool = False) -> None:
+        if self._hotkeys is None:
+            return
+        failed = self._hotkeys.register_all(self._config.hotkeys.model_dump())
+        self.settings.show_hotkey_result(failed, changed=changed)
+        if failed:
+            self.statusBar().showMessage(t("hotkey.failed", keys=", ".join(failed)), 15000)
+
+    def _on_recording_changed(self, on: bool) -> None:
+        self._overlay.set_capture_visible(on)
+        self._warned_overlap = False
+        self._place_overlay()
+
+    def clear_cache(self) -> None:
+        """The engine opens the cache per start, so it is free to clear while stopped."""
+        if self._state in ACTIVE_STATES:
+            self.settings.upkeep_status.setText(t("settings.cache_busy"))
+            return
+        cache = TranslationCache(paths.translation_cache_file())
+        try:
+            cache.clear()
+        finally:
+            cache.close()
+        self.settings.upkeep_status.setText(t("settings.cache_cleared"))
+
+    def _open_logs(self) -> None:
+        folder = paths.log_dir()
+        folder.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+
+    def show_from_tray(self) -> None:
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def changeEvent(self, event: QEvent) -> None:  # noqa: N802 - Qt override
+        super().changeEvent(event)
+        minimized = event.type() == QEvent.Type.WindowStateChange and self.isMinimized()
+        if minimized and self._config.minimize_to_tray and self.tray.icon.isVisible():
+            QTimer.singleShot(0, self.hide)  # hiding inside the state change confuses Windows
+            self.tray.notify_minimized()
+
+    def _check_fullscreen(self) -> None:
+        """An exclusive-fullscreen game draws over every window, the overlay included."""
+        fullscreen = self._state in ACTIVE_STATES and win32.is_exclusive_fullscreen_running()
+        if fullscreen and not self._warned_fullscreen:
+            self.statusBar().showMessage(t("warning.fullscreen"), 30000)
+            self.tray.notify(APP_NAME, t("warning.fullscreen"))
+        self._warned_fullscreen = fullscreen
+
+    def _check_overlap(self, overlay: Rect, subtitle: Rect | None) -> None:
+        """Recording mode: an overlay over the subtitle region would be read back by OCR."""
+        overlap = (
+            self._config.recording_mode and subtitle is not None and overlay.intersects(subtitle)
+        )
+        if overlap and not self._warned_overlap:
+            self.statusBar().showMessage(t("warning.recording_overlap"), 15000)
+        self._warned_overlap = overlap
 
     # --- profile ---------------------------------------------------------------------------------
 
@@ -507,6 +599,7 @@ class MainWindow(QMainWindow):
             text = t("state.waiting")
         self.state_label.setText(text)
         self.start_button.setText(t("stop") if state in ACTIVE_STATES else t("start"))
+        self.tray.set_running(state in ACTIVE_STATES)
         if state in (EngineState.PAUSED, EngineState.STOPPED) and not self._calibrating:
             self._overlay.clear()
         if state == EngineState.STOPPED and not (self._calibrating or self._previewing):
@@ -621,20 +714,25 @@ class MainWindow(QMainWindow):
         s = self._profile.overlay
         monitors = win32.list_monitors()
         area, region = self._source_area(), self._profile.region
-        if s.placement == OverlayPlacement.CUSTOM or area is None or region is None:
+        subtitle = (
+            region.to_pixels(area.width, area.height).translated(area.x, area.y)
+            if area is not None and region is not None
+            else None
+        )
+        if s.placement == OverlayPlacement.CUSTOM or subtitle is None:
             monitor = next(
                 (m for m in monitors if m.device_name == s.monitor_device),
                 next(m for m in monitors if m.is_primary),
             )
             physical = custom_geometry(s.rect, monitor.rect)
         else:
-            subtitle = region.to_pixels(area.width, area.height).translated(area.x, area.y)
             center = (subtitle.x + subtitle.width / 2, subtitle.y + subtitle.height / 2)
             monitor = monitor_at(monitors, *center)
             height = round(self._overlay.preferred_height() * monitor.scale)
             physical = overlay_geometry(s.placement, subtitle, monitor.rect, height)
         self._overlay.align = TEXT_ALIGN[s.placement]
         self._overlay.place(screens.to_logical(physical, screens.current_screens()))
+        self._check_overlap(physical, subtitle)
 
     def _on_appearance_changed(self) -> None:
         self._overlay.update()
@@ -732,6 +830,8 @@ class MainWindow(QMainWindow):
         self._poll_timer.stop()
         self._ollama_timer.stop()
         self._follow_timer.stop()
+        self._fullscreen_timer.stop()
+        self.tray.hide()
         if self._save_timer.isActive():
             self._save_timer.stop()
             self._save()
@@ -744,3 +844,6 @@ class MainWindow(QMainWindow):
         self._overlay.close()
         self._engine.shutdown()
         super().closeEvent(event)
+        # Qt quits when the last *visible* window closes; this one may be hidden in the tray, or
+        # the setup dialog may still be open.
+        QCoreApplication.quit()

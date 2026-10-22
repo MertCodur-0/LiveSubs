@@ -40,6 +40,10 @@ def cache_dir() -> Path:
     return platformdirs.user_cache_path(APP_NAME, appauthor=False)
 
 
+def translation_cache_file() -> Path:
+    return cache_dir() / "translations.sqlite3"
+
+
 def log_dir() -> Path:
     if home := _override():
         return home / "logs"

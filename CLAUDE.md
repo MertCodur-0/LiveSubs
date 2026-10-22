@@ -284,6 +284,16 @@ remaining size, cancel. Minimizes to tray.
   see the overlay (README GIF, LinkedIn video). When on, warn if the overlay rectangle intersects the
   subtitle region on screen (OCR would read our own translation).
 - Exclusive fullscreen detection via `SHQueryUserNotificationState` -> suggest borderless windowed.
+- Implemented (step 14, 2026-10-22): **Ayarlar** tab (`ui/tabs/settings.py`): Ollama URL (http(s)
+  only), context lines, keep-alive (5 min / 30 min / 2 h / always), reading fps (profile), hotkeys
+  (`QKeySequenceEdit`, one combination, Qt's text mapped to the parser's: Meta -> Win, PgUp/Del
+  aliases; invalid or duplicate keys rejected; re-registered at once), minimize to tray, recording
+  mode (`Overlay.set_capture_visible`; the overlap check runs on every overlay placement and warns
+  once per overlap), clear the translation cache (only while stopped: the engine opens the cache
+  per start), open the log folder. **Tray** (`ui/tray.py`): show, Start/Stop, hide/show the
+  translation, quit; minimizing hides the window when the setting is on (one notice per session).
+  **Fullscreen warning**: every 3 s while running, once per occurrence (status bar + tray).
+  Temporary app icon drawn in code (`ui/icon.py`) until step 16.
 
 ### Other
 
@@ -362,8 +372,8 @@ Phase 2 — features
 - [ ] 11. Profiles (incl. per-profile VRAM reserve, overlay display target)
 - [ ] 12. Models tab (list, VRAM labels vs active profile, pull/cancel, delete, recommended, test/compare)
 - [~] 13. CPU quality mode — dropped by the user (2026-10-22)
-- [ ] 14. Settings tab (incl. recording mode + overlap warning), tray, fullscreen warning;
-  startup checks **done** (setup dialog, 2026-10-22)
+- [x] 14. Settings tab (incl. recording mode + overlap warning), tray, fullscreen warning,
+  startup checks (setup dialog) — 2026-10-22
 - [ ] 15. Video device source (capture card): enumerate, resolution/fps, busy/HDCP errors, inspector region pick (done as 9b)
 - [ ] 16. Vice theme, fonts, SVG icon/header, overlay styles
 - [ ] 17. Web output + QR (+ Screen Wake Lock)
@@ -558,3 +568,9 @@ Phase 3 — release
   of an installed model (10 updates, 1.1 s, sizes summed per file), the shortcut script in a temp
   folder, the dialog rendered from the packaged exe; a fresh-PC run (winget install, OCR install)
   is not testable here. Sizes shown in GB = 10^9 like Ollama.
+- 2026-10-22 (step 14): Settings tab, tray, recording mode, fullscreen warning (see Main window).
+  Found live: closing a window hidden in the tray (tray "Quit", or WM_CLOSE) ran `closeEvent`
+  but the app kept running — Qt quits only when the last *visible* window closes (same with the
+  setup dialog left open). `closeEvent` now calls `QCoreApplication.quit()`; regression test.
+  The dev launcher `.venv\Scripts\pythonw.exe` starts the real interpreter as a child process:
+  find the app's window by the child's PID.

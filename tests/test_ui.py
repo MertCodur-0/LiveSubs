@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QGuiApplication, QKeySequence
 from PySide6.QtWidgets import QMessageBox
 from pytestqt.qtbot import QtBot
 
@@ -32,11 +32,13 @@ from livesubs.core.messages import (
 from livesubs.core.profiles import (
     MonitorSource,
     OverlayPlacement,
+    Profile,
     ProfileStore,
     VisionSettings,
     WindowSource,
 )
-from livesubs.platform import win32
+from livesubs.engine.translate.cache import TranslationCache
+from livesubs.platform import hotkeys, win32
 from livesubs.platform.win32 import MonitorInfo, WindowInfo
 from livesubs.ui.inspector import Inspector
 from livesubs.ui.main_window import PROFILE_ID, MainWindow
@@ -45,6 +47,7 @@ from livesubs.ui.pick import resolve
 from livesubs.ui.placement import GAP_PX, custom_geometry, monitor_at, overlay_geometry
 from livesubs.ui.region_select import RegionPicker
 from livesubs.ui.screens import ScreenMap, current_screens, from_qrect, to_logical, to_physical
+from livesubs.ui.tabs.settings import SettingsTab, hotkey_text
 
 # The developer's desk: 1080p at 100 % and a 1440p laptop panel at 150 %, up and to the right.
 DESK = [
@@ -556,3 +559,144 @@ def test_imported_settings_are_not_overwritten(
 def test_missing_ocr_language_opens_setup(window: MainWindow) -> None:
     window.handle(EngineError(ErrorKind.OCR_UNAVAILABLE, "no English", fatal=True))
     assert window.setup.isVisible()
+
+
+# --- settings tab, tray, warnings ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("typed", "stored"),
+    [("F8", "F8"), ("Ctrl+Shift+P", "Ctrl+Shift+P"), ("Meta+F5", "Win+F5"), ("PgUp", "PgUp")],
+)
+def test_typed_hotkeys_are_stored_in_parser_form(typed: str, stored: str) -> None:
+    text = hotkey_text(QKeySequence(typed))
+    assert text == stored
+    hotkeys.parse(text)  # Windows can register it
+
+
+def settings_tab(qtbot: QtBot) -> SettingsTab:
+    tab = SettingsTab(AppConfig(), Profile(name="p"))
+    qtbot.addWidget(tab)
+    return tab
+
+
+def test_settings_edit_the_config(qtbot: QtBot) -> None:
+    tab = settings_tab(qtbot)
+    with qtbot.waitSignal(tab.config_changed):
+        tab.context_lines.setValue(5)
+    assert tab.config.ollama.context_lines == 5
+    tab.keep_alive.setCurrentIndex(tab.keep_alive.findData("-1"))
+    assert tab.config.ollama.keep_alive == "-1"
+    with qtbot.waitSignal(tab.profile_changed):
+        tab.fps.setValue(15)
+    assert tab.profile.capture.fps == 15
+
+
+def test_ollama_url_must_be_http(qtbot: QtBot) -> None:
+    tab = settings_tab(qtbot)
+    tab.ollama_url.setText("bilgisayar:11434")
+    tab.ollama_url.editingFinished.emit()
+    assert tab.config.ollama.url == "http://127.0.0.1:11434"
+    assert tab.ollama_url.text() == "http://127.0.0.1:11434"
+    tab.ollama_url.setText("http://192.168.1.20:11434/")
+    tab.ollama_url.editingFinished.emit()
+    assert tab.config.ollama.url == "http://192.168.1.20:11434"
+
+
+def test_hotkey_change_is_validated(qtbot: QtBot) -> None:
+    tab = settings_tab(qtbot)
+    edit = tab.hotkey_edits["pause"]
+    edit.setKeySequence(QKeySequence("F8"))  # already the calibration key
+    edit.editingFinished.emit()
+    assert tab.config.hotkeys.pause == "F10"
+    assert edit.keySequence().toString() == "F10"
+    with qtbot.waitSignal(tab.hotkeys_changed):
+        edit.setKeySequence(QKeySequence("Ctrl+F11"))
+        edit.editingFinished.emit()
+    assert tab.config.hotkeys.pause == "Ctrl+F11"
+    tab.reset_hotkeys()
+    assert tab.config.hotkeys.pause == "F10"
+
+
+def test_settings_are_saved(window: MainWindow, qtbot: QtBot) -> None:
+    window.settings.context_lines.setValue(6)
+    window.settings.fps.setValue(12)
+    qtbot.waitUntil(
+        lambda: paths.config_file().exists() and load_config().ollama.context_lines == 6
+    )
+    assert window._store.load(PROFILE_ID).capture.fps == 12
+
+
+def test_recording_mode_lets_capture_see_the_overlay(window: MainWindow) -> None:
+    assert not window._overlay.capture_visible
+    window.settings.recording.setChecked(True)
+    assert window._overlay.capture_visible
+    assert window._config.recording_mode
+
+
+def running_with_region(window: MainWindow) -> None:
+    window.set_region(NormRect(x=0.1, y=0.8, width=0.8, height=0.15))
+    engine_of(window).queue = [
+        StateChanged(EngineState.RUNNING),
+        FrameInfo(1920, 1080, (0, 0, 1920, 1080)),
+    ]
+    window._poll()
+
+
+def test_recording_mode_warns_when_the_overlay_covers_the_subtitle(window: MainWindow) -> None:
+    running_with_region(window)
+    window._profile.overlay.placement = OverlayPlacement.OVER
+    window._place_overlay()
+    assert not window.statusBar().currentMessage()  # hidden from capture: no problem
+    window.settings.recording.setChecked(True)
+    assert "OCR çeviriyi de okuyabilir" in window.statusBar().currentMessage()
+    window.statusBar().clearMessage()
+    window._profile.overlay.placement = OverlayPlacement.ABOVE
+    window._place_overlay()
+    assert not window._warned_overlap
+
+
+def test_exclusive_fullscreen_is_reported_once(
+    window: MainWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(win32, "is_exclusive_fullscreen_running", lambda: True)
+    window._check_fullscreen()
+    assert not window.statusBar().currentMessage()  # not running: nothing to warn about
+    running_with_region(window)
+    window._check_fullscreen()
+    assert "Kenarlıksız" in window.statusBar().currentMessage()
+    window.statusBar().clearMessage()
+    window._check_fullscreen()
+    assert not window.statusBar().currentMessage()
+
+
+def test_cache_is_cleared_only_while_stopped(window: MainWindow) -> None:
+    cache = TranslationCache(paths.translation_cache_file())
+    cache.put("m", "p", "Hi.", "Selam.")
+    cache.close()
+    running_with_region(window)
+    window.clear_cache()
+    assert window.settings.upkeep_status.text() == "Önce çeviriyi durdurun."
+    window.handle(StateChanged(EngineState.STOPPED))
+    window.clear_cache()
+    cache = TranslationCache(paths.translation_cache_file())
+    assert cache.get("m", "p", "Hi.") is None
+    cache.close()
+
+
+def test_tray_follows_the_engine_state(window: MainWindow) -> None:
+    assert window.tray.run_action.text() == "Başlat"
+    running_with_region(window)
+    assert window.tray.run_action.text() == "Durdur"
+
+
+def test_closing_from_the_tray_quits_the_app(
+    window: MainWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: a window hidden in the tray closed without ending the app."""
+    quits: list[bool] = []
+    monkeypatch.setattr("livesubs.ui.main_window.QCoreApplication.quit", lambda: quits.append(True))
+    window.hide()
+    window.tray.quit.emit()
+    assert quits == [True]
+    assert engine_of(window).stopped

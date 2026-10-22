@@ -168,6 +168,60 @@ STRINGS: dict[str, str] = {
         "Şimdi yeniden başlatılsın mı?"
     ),
     "setup.close": "Kapat",
+    # Settings tab
+    "tab.settings": "Ayarlar",
+    "settings.translation": "Çeviri ve okuma",
+    "settings.ollama_url": "Ollama adresi",
+    "settings.context_lines": "Bağlam için önceki satır",
+    "settings.keep_alive": "Modeli bellekte tut",
+    "settings.keep_alive.5m": "5 dakika",
+    "settings.keep_alive.30m": "30 dakika",
+    "settings.keep_alive.2h": "2 saat",
+    "settings.keep_alive.-1": "Hep (uygulama kapanınca da)",
+    "settings.fps": "Okuma hızı",
+    "settings.fps_suffix": " kare/sn",
+    "settings.translation_hint": (
+        "Bir sonraki Başlat'ta geçerli olur. Önceki satırlar çeviriye bağlam olarak verilir "
+        "(daha tutarlı, biraz daha yavaş). Okuma hızı yükseldikçe altyazı daha erken yakalanır "
+        "ama işlemci daha çok çalışır; 10 çoğu oyun için yeterli."
+    ),
+    "settings.hotkeys": "Kısayol tuşları",
+    "settings.hotkey.calibration": "Ayar modu",
+    "settings.hotkey.toggle_overlay": "Çeviriyi gizle / göster",
+    "settings.hotkey.pause": "Duraklat / devam",
+    "settings.hotkeys_reset": "Varsayılana dön",
+    "settings.hotkeys_hint": "Kutuya tıklayıp yeni tuşa basın; hemen geçerli olur.",
+    "settings.hotkeys_saved": "Kısayollar kaydedildi.",
+    "settings.hotkey_invalid": "Bu tuş kullanılamaz: {hotkey}",
+    "settings.hotkey_taken": "{hotkey} başka bir işe atanmış.",
+    "settings.window": "Pencere ve kayıt",
+    "settings.minimize_to_tray": "Simge durumuna küçültünce sistem tepsisine gönder",
+    "settings.recording_mode": "Kayıt modu (OBS ve ekran görüntüleri çeviriyi de görsün)",
+    "settings.recording_hint": (
+        "Normalde çeviri ekran yakalamadan gizlenir; böylece OCR kendi çevirimizi okumaz. "
+        "Kayıt modunda çeviri altyazı bölgesiyle çakışırsa OCR onu da okuyabilir; "
+        "bu durumda uyarı gösterilir."
+    ),
+    "settings.upkeep": "Bakım",
+    "settings.clear_cache": "Çeviri önbelleğini temizle",
+    "settings.open_logs": "Günlük klasörünü aç",
+    "settings.cache_cleared": "Önbellek temizlendi.",
+    "settings.cache_busy": "Önce çeviriyi durdurun.",
+    # Tray and warnings
+    "tray.show": "LiveSubs'ı göster",
+    "tray.toggle_overlay": "Çeviriyi gizle / göster",
+    "tray.quit": "Çıkış",
+    "tray.running": "çalışıyor",
+    "tray.idle": "hazır",
+    "tray.minimized": "LiveSubs burada çalışmaya devam ediyor. Açmak için simgeye tıklayın.",
+    "warning.fullscreen": (
+        "Oyun özel tam ekran modunda: çeviri onun üstünde görünmez. Oyunun görüntü ayarlarından "
+        '"Kenarlıksız pencere" (borderless) modunu seçin.'
+    ),
+    "warning.recording_overlap": (
+        "Kayıt modu açık ve çeviri altyazı bölgesinin üstünde: OCR çeviriyi de okuyabilir. "
+        "Çeviriyi altyazının üstüne/altına alın ya da kayıt modunu kapatın."
+    ),
     # Engine states
     "state.idle": "Hazır",
     "state.starting": "Kaynak açılıyor…",

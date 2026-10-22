@@ -32,11 +32,15 @@ _NAMED_KEYS = {
     "pause": 0x13,
     "space": 0x20,
     "pageup": 0x21,
+    "pgup": 0x21,  # Qt's spelling (key sequence editor)
     "pagedown": 0x22,
+    "pgdown": 0x22,
     "end": 0x23,
     "home": 0x24,
     "insert": 0x2D,
+    "ins": 0x2D,
     "delete": 0x2E,
+    "del": 0x2E,
     "scrolllock": 0x91,
     **{f"f{n}": 0x6F + n for n in range(1, 25)},  # F1 = 0x70 ... F24 = 0x87
     **{f"num{n}": 0x60 + n for n in range(10)},

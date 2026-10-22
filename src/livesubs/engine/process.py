@@ -12,7 +12,6 @@ import multiprocessing
 import os
 import queue
 from multiprocessing.queues import Queue
-from pathlib import Path
 
 from livesubs.core import paths
 from livesubs.core.messages import (
@@ -61,7 +60,9 @@ def engine_main(commands: Queue, events: Queue) -> None:
                 case StartPipeline():
                     if pipeline is not None:
                         pipeline.stop()
-                    pipeline = Pipeline(command, events.put, cache_path=_cache_path())
+                    # Resolved per start, so LIVESUBS_HOME set by tests applies.
+                    cache_path = paths.translation_cache_file()
+                    pipeline = Pipeline(command, events.put, cache_path=cache_path)
                     pipeline.start()
                 case StopPipeline():
                     if pipeline is not None:
@@ -86,11 +87,6 @@ def engine_main(commands: Queue, events: Queue) -> None:
         except Exception as exc:
             log.exception("Engine command failed: %r", command)
             events.put(EngineError(ErrorKind.INTERNAL, f"{type(exc).__name__}: {exc}"))
-
-
-def _cache_path() -> Path:
-    # Resolved when a pipeline starts, so LIVESUBS_HOME set by tests applies.
-    return paths.cache_dir() / "translations.sqlite3"
 
 
 class EngineProcess:
