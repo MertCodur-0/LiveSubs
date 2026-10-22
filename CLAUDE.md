@@ -245,11 +245,16 @@ Implementation (step 7, `engine/translate/`):
   overhead. Label **fits / borderline / doesn't fit** against the budget
   `total VRAM − active profile's game VRAM reserve` (see Profiles). Runtime check: `/api/ps`
   `size_vram < size` -> warning.
-- Recommended models live in `ollama/recommended_models.json` (verify tags on ollama.com):
-  GPU: `qwen3:8b`, `aya-expanse:8b`, `gemma4:12b-it-qat` (7.2 GB, verified 2026-10-21 — borderline
-  on PC-game profiles), `translategemma:4b`; CPU: `qwen3:30b-a3b`.
+- Recommended models live in `ollama/catalog.py` (`RECOMMENDED`, used by the setup dialog;
+  verify tags on ollama.com): `gemma4:26b-a4b-it-qat` (best Turkish, needs 24 GB+ RAM — the
+  recommendation on the dev PC) and `gemma4:12b-it-qat` (code default). Measured and weaker:
+  `qwen3:8b`, `translategemma`. The CPU lane (`qwen3:30b-a3b`) was dropped (step 13).
 - Test/compare: fixed set of sample game lines through two models side by side with ms.
-- Two models loaded at once needs `OLLAMA_MAX_LOADED_MODELS >= 2` — check and explain.
+- Two models loaded at once needs `OLLAMA_MAX_LOADED_MODELS >= 2` — check and explain (only
+  relevant for the side-by-side comparison now that the CPU lane is gone).
+- **Step 12 experiment (deferred by the user, see decision log 2026-10-21):** a text-only
+  gemma4:26b via a Modelfile (`FROM` the text GGUF blob, without the ~0.8-1 GB vision encoder),
+  to free VRAM for more experts on the GPU; estimated gain ~10-15 % (1.33 -> ~1.2 s per line).
 
 ### Config and profiles — `%APPDATA%\LiveSubs\config.json` + `profiles\*.json`
 
@@ -382,6 +387,7 @@ Phase 2 — features
 - [x] 10. Calibration mode (F8): movable region frame, Inspector, overlay move/resize; hotkeys (+ appearance tab, user request)
 - [x] 11. Profiles (incl. per-profile VRAM reserve, overlay display target) — 2026-10-22
 - [ ] 12. Models tab (list, VRAM labels vs active profile, pull/cancel, delete, recommended, test/compare)
+  + the text-only gemma4:26b experiment (see Model management)
 - [~] 13. CPU quality mode — dropped by the user (2026-10-22)
 - [x] 14. Settings tab (incl. recording mode + overlap warning), tray, fullscreen warning,
   startup checks (setup dialog) — 2026-10-22
