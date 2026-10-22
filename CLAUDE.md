@@ -380,8 +380,9 @@ Phase 1 — working core (source -> region -> OCR -> GPU translation -> overlay)
 - [x] 7. Translation: Ollama backend, prompt, cache, orchestrator (GPU lane) + mocked-HTTP tests
 - [x] 8. Engine process + IPC
 - [x] 9. Minimal UI: source pick, drag-select region, Start/Stop, live feed, overlay  => core done
-- [ ] 9b. **= step 15, moved up** (capture card is the user's main source): video device source,
-  then a low-latency fullscreen preview window for it
+- [ ] 9b. **= step 15** (capture card is the user's main source): video device source, then a
+  low-latency fullscreen preview window for it. **Postponed** (2026-10-22): the user has not
+  bought the card yet — see "Next up".
 
 Phase 2 — features
 - [x] 10. Calibration mode (F8): movable region frame, Inspector, overlay move/resize; hotkeys (+ appearance tab, user request)
@@ -399,14 +400,31 @@ Phase 3 — release
 - [x] 18. Release: build script (embeddable signed Python, runs under Smart App Control), first-run
   setup, **v0.1.0 GitHub Release** with the zip (2026-10-22). Repeat for later versions: bump
   `__version__`, `.\scripts\build_exe.ps1`, `gh release create vX.Y.Z dist\LiveSubs-X.Y.Z-win64.zip`
-- [ ] 19. README (architecture diagram, install, GIF slot), screenshots
+- [ ] 19. README (architecture diagram, install, GIF slot), screenshots; must explain Smart App
+  Control (why LiveSubs.exe is a renamed, signed pythonw.exe) and the setup dialog
+
+### Next up (order agreed with the user, 2026-10-22)
+
+First **finish the app** (each step committed and pushed; no new release unless asked):
+1. Step 12 — Models tab + the text-only gemma4:26b experiment.
+2. Step 16 — Vice theme, fonts, SVG icon/header (replaces the temporary `ui/icon.py`), overlay
+   styles.
+3. Step 17 — web/phone output + QR + Screen Wake Lock, incl. the profile's "web only" display
+   target (`OverlayDisplay.WEB_ONLY`).
+4. Step 19 — README (EN + TR), screenshots; then make the GitHub repo public (user's call).
+
+**Afterwards:**
+- **Claude API translation backend** — a second `TranslationBackend` next to Ollama (the
+  protocol was built for it): API key in settings, model choice, cost/latency shown in the feed.
+- **Capture card** (steps 9b/15) once the user has the card: video device source, low-latency
+  fullscreen preview window, HDCP/busy-device errors.
 
 ## Known risks
 
 - DPI scaling: Qt logical coordinates vs. physical capture pixels — handle from step 2, test it.
 - Two models loaded at once needs `OLLAMA_MAX_LOADED_MODELS >= 2` (app checks and explains).
-- CPU model RAM: `qwen3:30b-a3b` Q4 is ~18–19 GB; borderline on 32 GB next to a game — say so in
-  Settings.
+- RAM: gemma4:26b keeps ~10 GB of experts in RAM; on a PC that also runs the game, 32 GB is
+  tight — the setup dialog recommends it only from 24 GB of RAM (12b otherwise).
 - Packaging: the build's smoke test must keep covering every native module (Qt trim!).
 
 ## Decision log
