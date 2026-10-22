@@ -46,6 +46,7 @@ from livesubs.ollama.client import (
     wait_until_running,
 )
 from livesubs.platform import shortcuts, win32
+from livesubs.ui import theme
 
 log = logging.getLogger(__name__)
 
@@ -433,7 +434,7 @@ class SetupDialog(QDialog):
         )
 
     def create_shortcuts(self) -> None:
-        if self._exe is None or not shortcuts.create_shortcuts(self._exe):
+        if self._exe is None or not shortcuts.create_shortcuts(self._exe, theme.asset("icon.ico")):
             self.shortcut_status.setText(t("setup.shortcut.failed"))
             return
         self._update_shortcut()

@@ -22,8 +22,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from livesubs.core.profiles import OverlayDisplay, OverlayPlacement, OverlaySettings
+from livesubs.core.profiles import OverlayDisplay, OverlayPlacement, OverlaySettings, OverlayStyle
 from livesubs.i18n import t
+from livesubs.ui.overlay import apply_style
 
 PLACEMENTS = (
     OverlayPlacement.ABOVE,
@@ -60,6 +61,13 @@ class AppearanceTab(QWidget):
         super().__init__()
         self.settings = settings
         form = QFormLayout()
+
+        self.style_combo = QComboBox()
+        for style in OverlayStyle:
+            self.style_combo.addItem(t(f"appearance.style.{style}"), style)
+        self.style_combo.setToolTip(t("appearance.style_hint"))
+        self.style_combo.currentIndexChanged.connect(self._on_style)
+        form.addRow(t("appearance.style"), self.style_combo)
 
         self.placement = QComboBox()
         for placement in PLACEMENTS:
@@ -132,7 +140,7 @@ class AppearanceTab(QWidget):
         self.preview.toggled.connect(self.preview_toggled)
         hint = QLabel(t("appearance.hint"))
         hint.setWordWrap(True)
-        hint.setStyleSheet("color: #9a9a9a;")
+        hint.setProperty("hint", True)  # muted, styled by the theme
 
         layout = QVBoxLayout(self)
         layout.addLayout(form)
@@ -150,6 +158,7 @@ class AppearanceTab(QWidget):
         """Show the current settings (e.g. after the overlay was moved in calibration mode)."""
         s = self.settings
         widgets = (
+            self.style_combo,
             self.placement,
             self.background,
             self.opacity,
@@ -163,6 +172,7 @@ class AppearanceTab(QWidget):
         )
         for widget in widgets:
             widget.blockSignals(True)
+        self.style_combo.setCurrentIndex(self.style_combo.findData(s.style))
         self.placement.setCurrentIndex(PLACEMENTS.index(s.placement))
         # On a chosen monitor (Profiles tab) the translation sits where it was moved to.
         on_monitor = s.display == OverlayDisplay.MONITOR
@@ -186,6 +196,11 @@ class AppearanceTab(QWidget):
 
     def _set(self, field: str, value: object) -> None:
         setattr(self.settings, field, value)  # validated by the settings model
+        self.changed.emit()
+
+    def _on_style(self, index: int) -> None:
+        apply_style(self.settings, self.style_combo.itemData(index))
+        self.refresh()
         self.changed.emit()
 
     def _on_background(self, enabled: bool) -> None:

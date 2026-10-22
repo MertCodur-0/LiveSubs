@@ -22,6 +22,7 @@ foreach ($folder in $folders) {
     $shortcut = $shell.CreateShortcut((Join-Path $folder '{name}.lnk'))
     $shortcut.TargetPath = '{target}'
     $shortcut.WorkingDirectory = '{folder}'
+    if ('{icon}') { $shortcut.IconLocation = '{icon},0' }
     $shortcut.Save()
 }
 """
@@ -33,9 +34,13 @@ def packaged_exe() -> Path | None:
     return exe if exe.name.lower() == PACKAGED_EXE else None
 
 
-def create_shortcuts(target: Path) -> bool:
-    """Shortcuts to ``target`` on the desktop and in the Start menu; False when it failed."""
+def create_shortcuts(target: Path, icon: Path | None = None) -> bool:
+    """Shortcuts to ``target`` on the desktop and in the Start menu; False when it failed.
+
+    ``icon`` (an .ico) replaces the exe's own icon: LiveSubs.exe is a signed pythonw.exe.
+    """
     script = _SCRIPT.replace("{name}", APP_NAME)
+    script = script.replace("{icon}", _quoted(icon) if icon and icon.is_file() else "")
     script = script.replace("{target}", _quoted(target)).replace("{folder}", _quoted(target.parent))
     try:
         result = subprocess.run(

@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="256" height="256" viewBox="0 0 256 256">
+  <!-- LiveSubs app icon: a striped sunset sun, a palm and two subtitle lines. Own artwork, MIT. -->
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="256" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1A0B3A"/>
+      <stop offset="0.55" stop-color="#4A1670"/>
+      <stop offset="1" stop-color="#B8246C"/>
+    </linearGradient>
+    <linearGradient id="sun" x1="0" y1="58" x2="0" y2="188" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFE14D"/>
+      <stop offset="0.5" stop-color="#FF9A3C"/>
+      <stop offset="1" stop-color="#FF2E88"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="url(#sky)"/>
+  <circle cx="128" cy="123" r="65" fill="url(#sun)"/>
+  <!-- Stripes cut the lower half of the sun, painted with the sky's own gradient. -->
+  <g fill="url(#sky)">
+    <rect x="56" y="134" width="144" height="5"/>
+    <rect x="56" y="148" width="144" height="7"/>
+    <rect x="56" y="164" width="144" height="9"/>
+    <rect x="56" y="181" width="144" height="12"/>
+  </g>
+  <g fill="#14072A">
+    <path d="M200 205 C196 160 188 125 176 96 L182 94 C195 124 204 160 208 205 Z"/>
+    <path d="M179 94 C160 80 135 82 120 100 C140 90 160 90 179 98 Z"/>
+    <path d="M179 94 C165 70 145 62 128 66 C148 70 165 80 179 97 Z"/>
+    <path d="M179 94 C188 68 205 58 224 60 C206 68 192 80 181 97 Z"/>
+    <path d="M179 94 C200 84 222 88 236 106 C218 96 200 94 181 99 Z"/>
+    <path d="M179 94 C168 100 158 115 154 130 C162 116 172 106 181 98 Z"/>
+    <path d="M179 94 C194 100 204 114 208 130 C199 116 190 106 180 99 Z"/>
+  </g>
+  <rect x="40" y="200" width="176" height="15" rx="7.5" fill="#00E5FF"/>
+  <rect x="72" y="223" width="112" height="15" rx="7.5" fill="#FFFFFF"/>
+</svg>

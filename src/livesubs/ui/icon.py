@@ -1,37 +1,56 @@
-"""The app icon, drawn in code until the SVG artwork lands (step 16)."""
+"""The app icon, rendered from ``assets/icon.svg``; ``write_ico`` makes the shortcut icon.
+
+Rendered by hand rather than through ``QIcon(path)`` so it does not depend on Qt's SVG icon
+engine plugin. The packaged LiveSubs.exe is a signed pythonw.exe whose own icon cannot change;
+windows get this icon from Qt, shortcuts from ``icon.ico``.
+"""
 
 from __future__ import annotations
 
-from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QIcon, QLinearGradient, QPainter, QPixmap
+import struct
+from pathlib import Path
+
+from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QRectF, Qt
+from PySide6.QtGui import QIcon, QImage, QPainter, QPixmap
+from PySide6.QtSvg import QSvgRenderer
+
+from livesubs.ui import theme
 
 SIZES = (16, 24, 32, 48, 64, 256)
 
 
-def _pixmap(size: int) -> QPixmap:
-    pixmap = QPixmap(size, size)
-    pixmap.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(pixmap)
+def render(size: int) -> QImage:
+    image = QImage(size, size, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(image)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    gradient = QLinearGradient(0, 0, size, size)
-    gradient.setColorAt(0.0, QColor("#FF2E88"))  # neon pink -> sunset orange
-    gradient.setColorAt(1.0, QColor("#FF9A3C"))
-    painter.setBrush(gradient)
-    painter.setPen(Qt.PenStyle.NoPen)
-    radius = size * 0.22
-    painter.drawRoundedRect(QRectF(0, 0, size, size), radius, radius)
-    font = QFont("Segoe UI")
-    font.setBold(True)
-    font.setPixelSize(round(size * 0.46))
-    painter.setFont(font)
-    painter.setPen(QColor("#1A1030"))
-    painter.drawText(QRectF(0, 0, size, size), Qt.AlignmentFlag.AlignCenter, "TR")
+    QSvgRenderer(str(theme.asset("icon.svg"))).render(painter, QRectF(0, 0, size, size))
     painter.end()
-    return pixmap
+    return image
 
 
 def app_icon() -> QIcon:
     icon = QIcon()
     for size in SIZES:
-        icon.addPixmap(_pixmap(size))
+        icon.addPixmap(QPixmap.fromImage(render(size)))
     return icon
+
+
+def write_ico(path: Path) -> None:
+    """An .ico holding a PNG per size (supported since Windows Vista)."""
+    images = []
+    for size in SIZES:
+        data = QByteArray()
+        buffer = QBuffer(data)
+        buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+        render(size).save(buffer, "PNG")
+        images.append((size, bytes(data.data())))
+    header = struct.pack("<HHH", 0, 1, len(images))
+    offset = len(header) + 16 * len(images)
+    entries, blobs = b"", b""
+    for size, png in images:
+        side = 0 if size >= 256 else size  # 0 means 256 in an ICONDIRENTRY
+        entries += struct.pack("<BBBBHHII", side, side, 0, 0, 1, 32, len(png), offset)
+        blobs += png
+        offset += len(png)
+    path.write_bytes(header + entries + blobs)

@@ -27,6 +27,7 @@ def main() -> int:
     # Imported here: the engine child process imports this module but never needs the UI.
     from livesubs.engine.process import EngineProcess
     from livesubs.platform import win32
+    from livesubs.ui import theme
     from livesubs.ui.main_window import MainWindow
 
     win32.set_app_user_model_id(f"{APP_NAME}.App")
@@ -34,6 +35,7 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(__version__)
+    theme.prepare(app)
 
     window = MainWindow(EngineProcess())
     window.show()

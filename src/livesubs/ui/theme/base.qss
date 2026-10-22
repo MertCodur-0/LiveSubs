@@ -1,0 +1,280 @@
+/* LiveSubs style sheet template: {{token}} is replaced from the theme's token file.
+   Fonts and colors that QSS does not reach come from the palette (see theme/__init__.py). */
+
+QMainWindow, QDialog {
+    background: {{window}};
+}
+
+QToolTip {
+    background: {{surface_alt}};
+    color: {{text}};
+    border: 1px solid {{border}};
+    padding: 4px;
+}
+
+QLabel[hint="true"] {
+    color: {{text_muted}};
+}
+
+QStatusBar {
+    color: {{text_muted}};
+}
+
+/* --- header ------------------------------------------------------------------------------- */
+
+QLabel#logo {
+    font-family: "{{font_logo}}";
+    font-size: {{logo_size}};
+    color: {{logo}};
+    background: transparent;
+}
+
+QLabel#tagline {
+    font-family: "{{font_heading}}";
+    font-size: 10pt;
+    color: {{accent_2}};
+    background: transparent;
+}
+
+/* --- tabs and groups ---------------------------------------------------------------------- */
+
+QTabWidget::pane {
+    border: 1px solid {{border}};
+    border-radius: 8px;
+    top: -1px;
+}
+
+QTabBar::tab {
+    font-family: "{{font_heading}}";
+    background: transparent;
+    color: {{text_muted}};
+    padding: 8px 16px;
+    border: none;
+    border-bottom: 2px solid transparent;
+}
+
+QTabBar::tab:selected {
+    color: {{text}};
+    border-bottom: 2px solid {{accent}};
+}
+
+QTabBar::tab:hover:!selected {
+    color: {{accent_2}};
+}
+
+QGroupBox {
+    font-family: "{{font_heading}}";
+    color: {{accent_2}};
+    border: 1px solid {{border}};
+    border-radius: 8px;
+    margin-top: 12px;
+    padding: 12px 8px 8px 8px;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 10px;
+    padding: 0 4px;
+}
+
+/* --- buttons ------------------------------------------------------------------------------ */
+
+QPushButton {
+    background: {{surface_alt}};
+    color: {{text}};
+    border: 1px solid {{border}};
+    border-radius: 6px;
+    padding: 5px 14px;
+}
+
+QPushButton:hover {
+    border-color: {{accent_2}};
+}
+
+QPushButton:pressed, QPushButton:checked {
+    background: {{selection}};
+    border-color: {{accent}};
+}
+
+QPushButton:disabled {
+    color: {{text_muted}};
+    background: {{surface}};
+    border-color: {{surface_alt}};
+}
+
+QPushButton#startButton {
+    font-family: "{{font_heading}}";
+    font-size: 16pt;
+    color: {{accent_text}};
+    border: 2px solid transparent;
+    border-radius: 10px;
+    background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0,
+        stop: 0 {{accent}}, stop: 0.55 {{accent_3}}, stop: 1 {{gradient_end}});
+}
+
+QPushButton#startButton:hover {
+    border-color: {{text}};
+}
+
+QPushButton#startButton[running="true"] {
+    color: {{accent_2}};
+    background: {{surface}};
+    border: 2px solid {{accent_2}};
+}
+
+/* --- inputs ------------------------------------------------------------------------------- */
+
+QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QPlainTextEdit, QTextEdit, QKeySequenceEdit {
+    background: {{surface}};
+    color: {{text}};
+    border: 1px solid {{border}};
+    border-radius: 6px;
+    padding: 3px 6px;
+    selection-background-color: {{selection}};
+    selection-color: {{text}};
+}
+
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus,
+QPlainTextEdit:focus, QTextEdit:focus {
+    border-color: {{accent_2}};
+}
+
+QAbstractSpinBox {
+    padding-right: 20px;
+}
+
+QAbstractSpinBox::up-button, QAbstractSpinBox::down-button {
+    subcontrol-origin: border;
+    width: 18px;
+    border: none;
+    border-left: 1px solid {{border}};
+}
+
+QAbstractSpinBox::up-button {
+    subcontrol-position: top right;
+    border-top-right-radius: 6px;
+}
+
+QAbstractSpinBox::down-button {
+    subcontrol-position: bottom right;
+    border-bottom-right-radius: 6px;
+}
+
+QAbstractSpinBox::up-button:hover, QAbstractSpinBox::down-button:hover {
+    background: {{selection}};
+}
+
+QAbstractSpinBox::up-arrow {
+    image: url({{assets}}/arrow_up.svg);
+    width: 10px;
+    height: 10px;
+}
+
+QAbstractSpinBox::down-arrow {
+    image: url({{assets}}/arrow_down.svg);
+    width: 10px;
+    height: 10px;
+}
+
+QComboBox QAbstractItemView {
+    background: {{surface}};
+    border: 1px solid {{border}};
+    selection-background-color: {{selection}};
+    selection-color: {{text}};
+}
+
+QTableWidget, QTableView, QListView {
+    background: {{surface}};
+    alternate-background-color: {{surface_alt}};
+    border: 1px solid {{border}};
+    border-radius: 6px;
+    gridline-color: {{border}};
+    selection-background-color: {{selection}};
+    selection-color: {{text}};
+}
+
+QHeaderView::section {
+    background: {{surface_alt}};
+    color: {{text_muted}};
+    border: none;
+    border-right: 1px solid {{border}};
+    border-bottom: 1px solid {{border}};
+    padding: 4px 6px;
+}
+
+QProgressBar {
+    background: {{surface}};
+    border: 1px solid {{border}};
+    border-radius: 6px;
+    text-align: center;
+    color: {{text}};
+}
+
+QProgressBar::chunk {
+    border-radius: 5px;
+    background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0,
+        stop: 0 {{accent}}, stop: 1 {{accent_3}});
+}
+
+QSlider::groove:horizontal {
+    height: 4px;
+    background: {{border}};
+    border-radius: 2px;
+}
+
+QSlider::sub-page:horizontal {
+    background: {{accent}};
+    border-radius: 2px;
+}
+
+QSlider::handle:horizontal {
+    background: {{accent_2}};
+    width: 14px;
+    margin: -6px 0;
+    border-radius: 7px;
+}
+
+/* --- scroll bars and menus ---------------------------------------------------------------- */
+
+QScrollBar:vertical {
+    background: transparent;
+    width: 10px;
+}
+
+QScrollBar:horizontal {
+    background: transparent;
+    height: 10px;
+}
+
+QScrollBar::handle {
+    background: {{border}};
+    border-radius: 5px;
+    min-height: 24px;
+    min-width: 24px;
+}
+
+QScrollBar::handle:hover {
+    background: {{accent}};
+}
+
+QScrollBar::add-line, QScrollBar::sub-line, QScrollBar::add-page, QScrollBar::sub-page {
+    width: 0;
+    height: 0;
+    background: none;
+}
+
+QMenu {
+    background: {{surface}};
+    color: {{text}};
+    border: 1px solid {{border}};
+    padding: 4px;
+}
+
+QMenu::item {
+    padding: 5px 18px;
+    border-radius: 4px;
+}
+
+QMenu::item:selected {
+    background: {{selection}};
+}

@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1200" height="120" viewBox="0 0 1200 120">
+  <!-- Header banner: night sky, striped sunset over a neon grid, palms. Own artwork, MIT.
+       Drawn right-aligned and scaled to the header's height; the left side fades into the
+       window color (#140B2A) so the logo stays readable. -->
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="92" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#140B2A"/>
+      <stop offset="0.5" stop-color="#2E1158"/>
+      <stop offset="0.85" stop-color="#7A1D6E"/>
+      <stop offset="1" stop-color="#C2306F"/>
+    </linearGradient>
+    <linearGradient id="sun" x1="0" y1="30" x2="0" y2="92" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFE14D"/>
+      <stop offset="0.55" stop-color="#FF9A3C"/>
+      <stop offset="1" stop-color="#FF2E88"/>
+    </linearGradient>
+    <linearGradient id="fade" x1="0" y1="0" x2="620" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#140B2A" stop-opacity="1"/>
+      <stop offset="0.45" stop-color="#140B2A" stop-opacity="1"/>
+      <stop offset="1" stop-color="#140B2A" stop-opacity="0"/>
+    </linearGradient>
+    <g id="palm" fill="#0E0620">
+      <path d="M200 205 C196 160 188 125 176 96 L182 94 C195 124 204 160 208 205 Z"/>
+      <path d="M179 94 C160 80 135 82 120 100 C140 90 160 90 179 98 Z"/>
+      <path d="M179 94 C165 70 145 62 128 66 C148 70 165 80 179 97 Z"/>
+      <path d="M179 94 C188 68 205 58 224 60 C206 68 192 80 181 97 Z"/>
+      <path d="M179 94 C200 84 222 88 236 106 C218 96 200 94 181 99 Z"/>
+      <path d="M179 94 C168 100 158 115 154 130 C162 116 172 106 181 98 Z"/>
+      <path d="M179 94 C194 100 204 114 208 130 C199 116 190 106 180 99 Z"/>
+    </g>
+  </defs>
+  <rect width="1200" height="92" fill="url(#sky)"/>
+  <g fill="#FFFFFF" fill-opacity="0.55">
+    <circle cx="640" cy="14" r="1"/>
+    <circle cx="712" cy="30" r="0.8"/>
+    <circle cx="790" cy="10" r="1.1"/>
+    <circle cx="1105" cy="18" r="0.9"/>
+    <circle cx="1170" cy="40" r="1"/>
+    <circle cx="560" cy="34" r="0.8"/>
+  </g>
+  <circle cx="930" cy="92" r="62" fill="url(#sun)"/>
+  <g fill="url(#sky)">
+    <rect x="860" y="62" width="140" height="3"/>
+    <rect x="860" y="71" width="140" height="4"/>
+    <rect x="860" y="80" width="140" height="5"/>
+  </g>
+  <rect y="92" width="1200" height="28" fill="#12072A"/>
+  <g stroke="#FF2E88" stroke-opacity="0.75" stroke-width="1" fill="none">
+    <line x1="0" y1="92.5" x2="1200" y2="92.5" stroke="#FF9A3C" stroke-opacity="1" stroke-width="1.5"/>
+    <line x1="0" y1="96" x2="1200" y2="96"/>
+    <line x1="0" y1="101" x2="1200" y2="101"/>
+    <line x1="0" y1="108" x2="1200" y2="108"/>
+    <line x1="0" y1="118" x2="1200" y2="118"/>
+    <line x1="930" y1="92" x2="210" y2="120"/>
+    <line x1="930" y1="92" x2="450" y2="120"/>
+    <line x1="930" y1="92" x2="690" y2="120"/>
+    <line x1="930" y1="92" x2="930" y2="120"/>
+    <line x1="930" y1="92" x2="1170" y2="120"/>
+    <line x1="930" y1="92" x2="1410" y2="120"/>
+  </g>
+  <use xlink:href="#palm" transform="translate(907 -43.5) scale(0.7)"/>
+  <use xlink:href="#palm" transform="translate(942 -23) scale(-0.6 0.6)"/>
+  <rect width="620" height="120" fill="url(#fade)"/>
+</svg>

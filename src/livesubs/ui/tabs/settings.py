@@ -27,6 +27,7 @@ from livesubs.core.config import AppConfig, HotkeySettings
 from livesubs.core.profiles import Profile
 from livesubs.i18n import t
 from livesubs.platform import hotkeys
+from livesubs.ui.theme import THEMES
 
 KEEP_ALIVE = ("5m", "30m", "2h", "-1")  # Ollama durations; -1 keeps the model loaded
 HOTKEY_ACTIONS = ("calibration", "toggle_overlay", "pause")
@@ -42,7 +43,7 @@ def hotkey_text(sequence: QKeySequence) -> str:
 
 def _hint(text: str) -> QLabel:
     label = QLabel(text, wordWrap=True)
-    label.setStyleSheet("color: #9a9a9a;")
+    label.setProperty("hint", True)  # muted, styled by the theme
     return label
 
 
@@ -51,6 +52,7 @@ class SettingsTab(QWidget):
     profile_changed = Signal()
     hotkeys_changed = Signal()
     recording_changed = Signal(bool)
+    theme_changed = Signal(str)
     clear_cache_requested = Signal()
     open_logs_requested = Signal()
 
@@ -122,6 +124,12 @@ class SettingsTab(QWidget):
     def _window_box(self) -> QGroupBox:
         box = QGroupBox(t("settings.window"))
         form = QFormLayout(box)
+        self.theme = QComboBox()
+        for name in THEMES:
+            self.theme.addItem(t(f"settings.theme.{name}"), name)
+        self.theme.setCurrentIndex(max(self.theme.findData(self.config.theme), 0))
+        self.theme.currentIndexChanged.connect(self._on_theme)
+        form.addRow(t("settings.theme"), self.theme)
         self.minimize_to_tray = QCheckBox(t("settings.minimize_to_tray"))
         self.minimize_to_tray.setChecked(self.config.minimize_to_tray)
         self.minimize_to_tray.toggled.connect(self._on_tray)
@@ -168,6 +176,11 @@ class SettingsTab(QWidget):
     def _on_fps(self, fps: int) -> None:
         self.profile.capture.fps = fps
         self.profile_changed.emit()
+
+    def _on_theme(self, index: int) -> None:
+        self.config.theme = self.theme.itemData(index)
+        self.config_changed.emit()
+        self.theme_changed.emit(self.config.theme)
 
     def _on_tray(self, on: bool) -> None:
         self.config.minimize_to_tray = on

@@ -38,7 +38,7 @@ GAME_LOCATIONS = (None, True, False)  # VramSettings.game_on_this_pc: auto, this
 
 def _hint(text: str) -> QLabel:
     label = QLabel(text, wordWrap=True)
-    label.setStyleSheet("color: #9a9a9a;")
+    label.setProperty("hint", True)  # muted, styled by the theme
     return label
 
 

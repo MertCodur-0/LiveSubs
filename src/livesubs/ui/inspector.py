@@ -132,7 +132,7 @@ class Inspector(QWidget):
 
         hint = QLabel(t("inspector.hint"))
         hint.setWordWrap(True)
-        hint.setStyleSheet("color: #9a9a9a;")
+        hint.setProperty("hint", True)  # muted, styled by the theme
         form.addRow(hint)
         return box
 

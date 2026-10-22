@@ -110,7 +110,7 @@ def cpu_share(url: str, model: str) -> float | None:
 
 def _hint(text: str = "") -> QLabel:
     label = QLabel(text, wordWrap=True)
-    label.setStyleSheet("color: #9a9a9a;")
+    label.setProperty("hint", True)  # muted, styled by the theme
     return label
 
 

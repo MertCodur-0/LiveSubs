@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from PySide6.QtCore import QCoreApplication, QEvent, QObject, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QCloseEvent, QDesktopServices, QFont, QGuiApplication
+from PySide6.QtGui import QCloseEvent, QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
@@ -71,6 +72,8 @@ from livesubs.i18n import t
 from livesubs.ollama.client import DEFAULT_URL, InstalledModel, list_models, start_ollama
 from livesubs.platform import win32
 from livesubs.ui import screens
+from livesubs.ui import theme as themes
+from livesubs.ui.header import Header
 from livesubs.ui.hotkeys import HotkeyManager
 from livesubs.ui.icon import app_icon
 from livesubs.ui.inspector import Inspector
@@ -171,11 +174,12 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle(f"{APP_NAME} {__version__}")
         self.setWindowIcon(app_icon())
-        self.resize(980, 640)
+        self.resize(1000, 720)
         self._engine = engine
         self._config = config or load_config()
         self._store = store or ProfileStore()
         self._profile_id, self._profile = self._initial_profile()
+        self._theme = themes.apply_theme(self._config.theme)
         self._sources: list[SourceOption] = []
         self._state = EngineState.IDLE
         self._frame: FrameInfo | None = None
@@ -278,12 +282,9 @@ class MainWindow(QMainWindow):
         grid.setColumnStretch(1, 1)
         layout.addLayout(grid)
 
-        self.start_button = QPushButton(t("start"), clicked=self.toggle)
-        self.start_button.setMinimumHeight(48)
-        font = QFont(self.start_button.font())
-        font.setPointSize(14)
-        font.setBold(True)
-        self.start_button.setFont(font)
+        self.start_button = QPushButton(t("start"), clicked=self.toggle, objectName="startButton")
+        self.start_button.setMinimumHeight(52)
+        themes.set_glow(self.start_button, self._theme)
         self.calibrate_button = QPushButton(
             t("calibration.button"), checkable=True, clicked=self.set_calibration
         )
@@ -328,6 +329,7 @@ class MainWindow(QMainWindow):
         self.settings.profile_changed.connect(self._save_later)
         self.settings.hotkeys_changed.connect(lambda: self._register_hotkeys(changed=True))
         self.settings.recording_changed.connect(self._on_recording_changed)
+        self.settings.theme_changed.connect(self.set_theme)
         self.settings.clear_cache_requested.connect(self.clear_cache)
         self.settings.open_logs_requested.connect(self._open_logs)
 
@@ -347,11 +349,28 @@ class MainWindow(QMainWindow):
         self.profiles.rename_requested.connect(self.rename_profile)
         self.profiles.delete_requested.connect(self.delete_profile)
 
-        self.tabs.addTab(self.appearance, t("tab.appearance"))
-        self.tabs.addTab(self.profiles, t("tab.profiles"))
-        self.tabs.addTab(self.settings, t("tab.settings"))
+        # Long tabs scroll instead of squeezing their rows on short screens.
+        for page, title in (
+            (self.appearance, "tab.appearance"),
+            (self.profiles, "tab.profiles"),
+            (self.settings, "tab.settings"),
+        ):
+            scroll = QScrollArea(widgetResizable=True, frameShape=QScrollArea.Shape.NoFrame)
+            scroll.setWidget(page)
+            self.tabs.addTab(scroll, t(title))
         self._fill_profile_combo()
-        self.setCentralWidget(self.tabs)
+
+        self.header = Header(self._theme)
+        central = QWidget()
+        column = QVBoxLayout(central)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(0)
+        column.addWidget(self.header)
+        body = QVBoxLayout()
+        body.setContentsMargins(10, 8, 10, 4)
+        body.addWidget(self.tabs)
+        column.addLayout(body, 1)
+        self.setCentralWidget(central)
 
     # --- settings tab, tray and warnings ----------------------------------------------------------
 
@@ -365,6 +384,11 @@ class MainWindow(QMainWindow):
         self.settings.show_hotkey_result(failed, changed=changed)
         if failed:
             self.statusBar().showMessage(t("hotkey.failed", keys=", ".join(failed)), 15000)
+
+    def set_theme(self, name: str) -> None:
+        self._theme = themes.apply_theme(name)
+        self.header.set_theme(self._theme)
+        themes.set_glow(self.start_button, self._theme)
 
     def _on_recording_changed(self, on: bool) -> None:
         self._overlay.set_capture_visible(on)
@@ -702,7 +726,7 @@ class MainWindow(QMainWindow):
         )
         if self._calibrating:
             self._engine.send(SetDebug(True))
-        self.start_button.setText(t("stop"))
+        self._show_running(True)
 
     # --- engine events ---------------------------------------------------------------------------
 
@@ -731,6 +755,12 @@ class MainWindow(QMainWindow):
                 if self._inspector.isVisible():
                     self._inspector.show_frame(event)
 
+    def _show_running(self, running: bool) -> None:
+        self.start_button.setText(t("stop") if running else t("start"))
+        if self.start_button.property("running") != running:
+            self.start_button.setProperty("running", running)  # restyled by the theme
+            themes.repolish(self.start_button)
+
     def _set_state(self, state: EngineState, detail: str) -> None:
         self._state = state
         self._paused = state == EngineState.PAUSED
@@ -738,7 +768,7 @@ class MainWindow(QMainWindow):
         if state == EngineState.RUNNING and self._reads == 0:
             text = t("state.waiting")
         self.state_label.setText(text)
-        self.start_button.setText(t("stop") if state in ACTIVE_STATES else t("start"))
+        self._show_running(state in ACTIVE_STATES)
         self.tray.set_running(state in ACTIVE_STATES)
         self.models.set_busy(state in ACTIVE_STATES)
         if state in (EngineState.PAUSED, EngineState.STOPPED) and not self._calibrating:

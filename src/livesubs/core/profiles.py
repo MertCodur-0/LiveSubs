@@ -116,7 +116,7 @@ class OverlaySettings(SettingsModel):
     # CUSTOM placement (and video devices): normalized to ``monitor_device`` (else the primary).
     rect: NormRect = NormRect(x=0.1, y=0.62, width=0.8, height=0.14)
     style: OverlayStyle = OverlayStyle.CLASSIC
-    font_family: str = "Segoe UI"
+    font_family: str = "Inter"  # bundled (assets/fonts); any installed font works
     font_size_pt: int = Field(26, ge=8, le=96)
     text_color: HexColor = "#FFFFFF"
     outline_color: HexColor = "#000000"

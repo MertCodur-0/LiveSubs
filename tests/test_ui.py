@@ -39,6 +39,7 @@ from livesubs.core.profiles import (
     WindowSource,
 )
 from livesubs.engine.translate.cache import TranslationCache
+from livesubs.i18n import t
 from livesubs.platform import hotkeys, win32
 from livesubs.platform.win32 import MonitorInfo, WindowInfo
 from livesubs.ui.inspector import Inspector
@@ -864,3 +865,25 @@ def test_translation_can_go_to_another_monitor(window: MainWindow) -> None:
     assert monitor.rect.intersects(physical)
     window.profiles.display.setCurrentIndex(0)
     assert window._profile.overlay.display == OverlayDisplay.AUTO
+
+
+def test_theme_switch_from_settings(window: MainWindow) -> None:
+    app = QGuiApplication.instance()
+    combo = window.settings.theme
+    try:
+        combo.setCurrentIndex(combo.findData("dark"))
+        assert window._config.theme == "dark"
+        assert window.header._theme.name == "dark"
+        assert window.start_button.graphicsEffect() is None  # no glow in the plain theme
+        assert app.palette().window().color().name() == "#17181c"
+    finally:
+        combo.setCurrentIndex(combo.findData("vice"))
+    assert window.start_button.graphicsEffect() is not None
+
+
+def test_start_button_shows_the_running_state(window: MainWindow) -> None:
+    window.handle(StateChanged(EngineState.RUNNING, "m"))
+    assert window.start_button.property("running") is True
+    assert window.start_button.text() == t("stop")
+    window.handle(StateChanged(EngineState.STOPPED, ""))
+    assert window.start_button.property("running") is False

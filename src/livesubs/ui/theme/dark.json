@@ -1,0 +1,22 @@
+{
+  "header_art": false,
+  "tokens": {
+    "window": "#17181C",
+    "surface": "#1F2126",
+    "surface_alt": "#292C33",
+    "border": "#3A3E48",
+    "text": "#E8EAED",
+    "text_muted": "#9AA0A6",
+    "accent": "#4C8DFF",
+    "accent_2": "#4C8DFF",
+    "accent_3": "#4C8DFF",
+    "gradient_end": "#4C8DFF",
+    "accent_text": "#FFFFFF",
+    "selection": "#2B4A7E",
+    "logo": "#E8EAED",
+    "glow": "",
+    "font_heading": "Inter",
+    "font_logo": "Audiowide",
+    "logo_size": "22pt"
+  }
+}

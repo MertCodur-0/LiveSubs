@@ -2,7 +2,9 @@
 
 Hidden from screen capture (``WDA_EXCLUDEFROMCAPTURE``), so OCR never reads our own text even
 when the overlay covers the subtitle region. Text is drawn as a ``QPainterPath``: outline first,
-fill on top, so it stays readable on any background.
+fill on top, so it stays readable on any background. Styles are presets of the look fields;
+"vice" also draws a thin cyan halo around the translation's pink outline (the small original
+keeps a plain black outline: neon edges on small text hurt readability).
 
 In edit mode (calibration) it takes the mouse: drag to move, drag an edge or corner to resize;
 ``edited`` reports the new geometry when the mouse is released.
@@ -27,7 +29,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QWidget
 
 from livesubs.core.geometry import Rect
-from livesubs.core.profiles import OverlaySettings
+from livesubs.core.profiles import OverlaySettings, OverlayStyle
 from livesubs.i18n import t
 from livesubs.platform import win32
 from livesubs.ui.movable import MoveResize
@@ -39,6 +41,43 @@ MIN_FONT_PT = 12
 ORIGINAL_SCALE = 0.55  # English original under the translation, relative to its font size
 ORIGINAL_MAX_LINES = 2
 _PADDING = 10
+VICE_HALO = "#00E5FF"
+VICE_HALO_PX = 1.5  # outside the outline
+
+STYLE_PRESETS: dict[OverlayStyle, dict[str, object]] = {
+    OverlayStyle.CLASSIC: {
+        "text_color": "#FFFFFF",
+        "outline_color": "#000000",
+        "outline_px": 3.0,
+        "shadow": True,
+        "background": True,
+        "background_opacity": 0.55,
+    },
+    # Readability first: white text, thin neon edges around it, a box behind.
+    OverlayStyle.VICE: {
+        "text_color": "#FFFFFF",
+        "outline_color": "#FF2E88",
+        "outline_px": 2.0,
+        "shadow": True,
+        "background": True,
+        "background_opacity": 0.45,
+    },
+    OverlayStyle.BOX: {
+        "text_color": "#FFFFFF",
+        "outline_color": "#000000",
+        "outline_px": 0.0,
+        "shadow": False,
+        "background": True,
+        "background_opacity": 0.8,
+    },
+}
+
+
+def apply_style(settings: OverlaySettings, style: OverlayStyle) -> None:
+    """Set the look fields to the style's preset; each can still be changed afterwards."""
+    settings.style = style
+    for field, value in STYLE_PRESETS[style].items():
+        setattr(settings, field, value)
 
 
 def wrap(text: str, width_of: Callable[[str], float], max_width: float) -> list[str]:
@@ -226,13 +265,22 @@ class Overlay(QWidget):
             small_path.addText(QPointF(self._x(area, small, line), y), small_font, line)
             y += small.lineSpacing()
 
-        for p, outline in ((path, s.outline_px), (small_path, s.outline_px * ORIGINAL_SCALE)):
+        vice = s.style == OverlayStyle.VICE
+        for p, scale in ((path, 1.0), (small_path, ORIGINAL_SCALE)):
             if p.isEmpty():
                 continue
+            outline = s.outline_px * scale
+            color = QColor(s.outline_color)
             if s.shadow:
                 painter.fillPath(p.translated(2, 2), QColor(0, 0, 0, 160))
+            if vice and p is path:
+                halo = QPen(QColor(VICE_HALO), (outline + VICE_HALO_PX) * 2)
+                halo.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+                painter.strokePath(p, halo)
+            elif vice:
+                color = QColor("#000000")
             if outline > 0:
-                pen = QPen(QColor(s.outline_color), outline * 2)
+                pen = QPen(color, outline * 2)
                 pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
                 painter.strokePath(p, pen)
         painter.fillPath(path, QColor(s.text_color))

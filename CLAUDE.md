@@ -313,6 +313,14 @@ Text drawn with `QPainterPath` (outline/shadow). Styles incl. "Vice" (pink/cyan 
 readability first. Optional small English original underneath. Adjustable: position, size, font,
 font size, text color, outline/shadow, background opacity, max lines shown.
 
+- Styles (step 16): `OverlayStyle` CLASSIC / VICE / BOX are presets of the look fields
+  (`overlay.STYLE_PRESETS`, `apply_style`; the "Hazır stil" combo on the Görünüm tab), each field
+  still editable afterwards. CLASSIC = the defaults (white, black 3 px outline, shadow, box 55 %).
+  VICE: white text, pink 2 px outline + a 1.5 px cyan halo (`VICE_HALO`), box 45 %; the small
+  English original keeps a black outline (neon edges on small text were hard to read — a 3 px
+  pink outline was too, both rendered and judged). BOX: no outline, no shadow, box 80 %.
+  Default overlay font **Inter** (bundled); old profiles keep their saved font.
+
 ### Main window
 
 Source + profile pick, Ollama status (connected, model loaded), names of the models in use, big
@@ -334,7 +342,6 @@ remaining size, cancel. Minimizes to tray.
   per start), open the log folder. **Tray** (`ui/tray.py`): show, Start/Stop, hide/show the
   translation, quit; minimizing hides the window when the setting is on (one notice per session).
   **Fullscreen warning**: every 3 s while running, once per occurrence (status bar + tray).
-  Temporary app icon drawn in code (`ui/icon.py`) until step 16.
 
 ### Other
 
@@ -353,29 +360,46 @@ remaining size, cancel. Minimizes to tray.
   desktop + Start menu shortcuts for the packaged exe (`platform/shortcuts.py`, WScript.Shell via
   PowerShell), settings export/import (`core/backup.py`: zip of `config.json` + `profiles/*.json`;
   import takes only those names, then offers a restart and stops saving the old settings).
-- Theme: `ui/theme/base.qss` template + token files (`vice.json` default, `dark.json`).
-  Fonts (OFL, Google Fonts): Monoton or Neonderthaw (logo), Audiowide (headings), Inter (body);
-  font licenses listed in the README. Palette: dark purple/night-blue base; neon pink/magenta,
-  cyan, sunset orange accents; pink -> orange -> purple gradients. Animations light.
-  Own SVG icon/header (palms + sunset). No Rockstar/GTA logos, fonts, art or names.
-  Glow (`QGraphicsDropShadowEffect`) only on logo and Start button — it is expensive.
+- Theme (step 16, done 2026-10-22): `ui/theme/` — `base.qss` template with `{{token}}`
+  placeholders (comments stripped first; `{{assets}}` = the assets folder for `url(...)`), token
+  files `vice.json` (default) and `dark.json` ("Sade koyu": same token set, a test enforces it).
+  `theme.prepare(app)` (in `app.py`, before any widget): Fusion + bundled fonts; `apply_theme(name)`
+  sets palette (from the tokens, so popups/dialogs/check boxes match), app font (Inter 10 pt) and
+  the style sheet — switchable live from Ayarlar -> Tema. Muted hint labels use the dynamic
+  property `hint=true` (no inline colors); Start/Stop = `#startButton` with `running` property
+  (pink -> orange -> purple gradient; cyan outline while running). Long tabs (Görünüm, Profiller,
+  Ayarlar) sit in scroll areas; window 1000x720.
+  Fonts in `src/livesubs/assets/fonts/` (OFL texts next to them; Google Fonts repo / Inter 4.1
+  release statics): **Monoton** (logo), **Audiowide** (tabs, group titles, Start), **Inter**
+  Regular/SemiBold/Bold (body, overlay). All cover Turkish (test). List them in the README.
+  Palette: dark purple/night-blue base; neon pink/magenta, cyan, sunset orange accents.
+  Own SVG art in `src/livesubs/assets/`: `icon.svg` (striped sunset sun, palm, two subtitle
+  bars), `header.svg` (night sky, striped sun over a neon grid, palms; right-aligned at the
+  header's height, its left side fades into the window color behind the logo; the dark theme has
+  no art), `arrow_up/down.svg` (spin boxes). `ui/icon.py` renders the SVG itself (no SVG icon
+  engine plugin needed) and writes `icon.ico` (PNG-in-ICO) via `scripts/make_icon.py` — rerun it
+  after editing the SVG. The packaged exe keeps pythonw's own icon (changing it would break the
+  signature), so shortcuts get `IconLocation = icon.ico` (setup dialog + `create_shortcut.ps1`).
+  No Rockstar/GTA logos, fonts, art or names.
+  Glow (`QGraphicsDropShadowEffect`, `theme.set_glow`) only on the logo and Start button, and
+  only when the theme has a `glow` token.
 - Packaging (`scripts/build_exe.ps1`, replaces PyInstaller 2026-10-22): the official **embeddable
   Python** of the venv's exact version; its PSF-signed `pythonw.exe` (signature checked) renamed to
   `LiveSubs.exe`; `python313._pth` adds `Lib\site-packages` + `import site`; runtime deps + app via
   `pip install --target` (wheels only); `scripts/embedded/sitecustomize.py` runs the app when the
   exe has no arguments (the engine child gets `-c ... --multiprocessing-fork`, so it is skipped);
   unused Qt parts trimmed (QML/Quick, Designer, tools, translations, opengl32sw: 421 -> 265 MB);
-  `scripts/embedded/smoke_test.py` run through the packaged exe (Qt, SVG, OpenCV, WinRT OCR,
-  windows-capture, app modules); then `dist/LiveSubs-<version>-win64.zip` (~160 MB) for
+  `scripts/embedded/smoke_test.py` run through the packaged exe (Qt, theme + bundled fonts + SVG
+  icon, OpenCV, WinRT OCR, windows-capture, app modules); then `dist/LiveSubs-<version>-win64.zip` (~160 MB) for
   GitHub Releases. Taskbar grouping via `SetCurrentProcessExplicitAppUserModelID`.
   Do an early smoke build — winrt / windows-capture native modules may need spec tweaks.
 
 ## Project layout (target)
 
 ```
-assets/        icon.svg, header.svg, fonts/ (+ OFL licenses)
 src/livesubs/
   app.py, __main__.py, i18n/
+  assets/      icon.svg, icon.ico, header.svg, arrow_*.svg, fonts/ (+ OFL licenses) — package data
   core/        config.py, profiles.py, paths.py, jsonio.py, geometry.py, messages.py, backup.py
   engine/      process.py, pipeline.py
     capture/   base.py, wgc.py, mss_fallback.py, factory.py, video_device.py (phase 2)
@@ -385,12 +409,12 @@ src/livesubs/
     translate/ base.py, ollama.py, orchestrator.py, prompt.py, cache.py
   ollama/      client.py, catalog.py, install.py, vram.py, compare.py
   platform/    win32.py, hotkeys.py, shortcuts.py, gpu.py
-  ui/          main_window.py, overlay.py, region_frame.py, inspector.py, tray.py,
-               setup_check.py, tabs/, theme/
+  ui/          main_window.py, header.py, icon.py, overlay.py, region_frame.py, inspector.py,
+               tray.py, setup_check.py, tabs/, theme/ (base.qss, vice.json, dark.json)
   web/         server.py, static/
 tests/         samples/ (+ samples.json), helpers/, test_*.py
 scripts/       build_exe.ps1, embedded/ (sitecustomize.py, smoke_test.py), create_shortcut.ps1,
-               bench_pipeline.py, compare_models.py
+               make_icon.py, bench_pipeline.py, compare_models.py
 ```
 
 ## Plan and progress
@@ -418,7 +442,7 @@ Phase 2 — features
 - [x] 14. Settings tab (incl. recording mode + overlap warning), tray, fullscreen warning,
   startup checks (setup dialog) — 2026-10-22
 - [ ] 15. Video device source (capture card): enumerate, resolution/fps, busy/HDCP errors, inspector region pick (done as 9b)
-- [ ] 16. Vice theme, fonts, SVG icon/header, overlay styles
+- [x] 16. Vice theme, fonts, SVG icon/header, overlay styles — 2026-10-22
 - [ ] 17. Web output + QR (+ Screen Wake Lock)
 
 Phase 3 — release
@@ -432,8 +456,7 @@ Phase 3 — release
 
 First **finish the app** (each step committed and pushed; no new release unless asked):
 1. ~~Step 12 — Models tab~~ (done 2026-10-22; the text-only experiment deferred by the user).
-2. Step 16 — Vice theme, fonts, SVG icon/header (replaces the temporary `ui/icon.py`), overlay
-   styles.
+2. ~~Step 16 — Vice theme, fonts, SVG icon/header, overlay styles~~ (done 2026-10-22).
 3. Step 17 — web/phone output + QR + Screen Wake Lock, incl. the profile's "web only" display
    target (`OverlayDisplay.WEB_ONLY`).
 4. Step 19 — README (EN + TR), screenshots; then make the GitHub repo public (user's call).
@@ -573,7 +596,7 @@ First **finish the app** (each step committed and pushed; no new release unless 
   captured region, the OCR input, text-pixel share, change verdict and the last read with the
   filter verdict (`DebugFrame`, only while `SetDebug`, ≤5 fps, ≤720 px wide), and edits text
   colors (white / yellow / custom), color tolerance and local contrast live (`SetVision`).
-  Default overlay font "Segoe UI" until Inter is bundled (step 16).
+  Default overlay font "Segoe UI" until Inter is bundled (step 16; now Inter).
 - 2026-10-21: **Smart App Control** is on (enforced, `VerifiedAndReputablePolicyState` = 1) on the
   dev machine and blocked a fresh `LiveSubs.exe` ("Uygulama Denetimi ilkesi bu dosyayı engelledi",
   CodeIntegrity events 3033/3077); earlier builds happened to pass the cloud reputation check.
@@ -646,3 +669,9 @@ First **finish the app** (each step committed and pushed; no new release unless 
   translategemma, 3 lines): load 2.9 / 3.4 s, median 428 / 339 ms, both unloaded afterwards.
   Tests: two UI tests failed whenever a LiveSubs instance was open (it holds F8-F10, the test
   window's "hotkeys taken" notice filled the status bar); the fixture now clears that notice.
+- 2026-10-22 (step 16): Vice theme, bundled fonts, own SVG icon/header, overlay style presets
+  (see Other -> Theme, Overlay -> Styles). Two traps found on the way: (1) PySide's
+  `QRawFont.supportsCharacter(str)` reports **every** non-ASCII character as missing — use the
+  code point (`ord(c)`); (2) a screenshot script that dropped `MainWindow._hotkeys` freed the
+  Python native event filter Qt still called -> random access violations that looked like a theme
+  bug for a while. Never drop the `HotkeyManager` while its window lives.

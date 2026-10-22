@@ -17,6 +17,7 @@ $shortcut = $shell.CreateShortcut($path)
 $shortcut.TargetPath = $pythonw
 $shortcut.Arguments = "-m livesubs"
 $shortcut.WorkingDirectory = $root
+$shortcut.IconLocation = (Join-Path $root "src\livesubs\assets\icon.ico") + ",0"
 $shortcut.Description = "LiveSubs - oyun altyazilarini yerelde Turkceye cevirir"
 $shortcut.Save()
 Write-Host "Created $path"

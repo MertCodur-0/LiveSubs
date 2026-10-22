@@ -65,7 +65,15 @@ version = { attr = "livesubs.__version__" }
 where = ["src"]
 
 [tool.setuptools.package-data]
-livesubs = ["**/*.json", "**/*.qss", "**/*.svg", "**/*.ttf", "**/*.html"]
+livesubs = [
+    "**/*.json",
+    "**/*.qss",
+    "**/*.svg",
+    "**/*.ttf",
+    "**/*.ico",
+    "**/*.html",
+    "assets/fonts/*.txt",  # font licenses (OFL)
+]
 
 [tool.ruff]
 line-length = 100
