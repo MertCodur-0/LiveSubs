@@ -28,8 +28,7 @@
     user-select: none;
     -webkit-tap-highlight-color: transparent;
   }
-  /* A log from the top down. Once it is taller than the screen, script shifts it up so the
-     newest line stays at the bottom. */
+  /* Newest line at the top, older ones pushed down; the oldest leave over the bottom edge. */
   #stack {
     position: fixed;
     left: 0;
@@ -50,7 +49,7 @@
     overflow-wrap: anywhere;
     transition: opacity 0.6s ease, transform 0.6s cubic-bezier(0.22, 0.8, 0.3, 1);
   }
-  .line.enter { opacity: 0; transform: translateY(0.5em); }
+  .line.enter { opacity: 0; transform: translateY(-0.5em); }
   .line.p1 { opacity: 0.5; }
   .line.p2 { opacity: 0.4; }
   .line.p3 { opacity: 0.32; }
@@ -85,18 +84,11 @@ const DIM_STEPS = 3;
 const lines = new Map();  // key -> element, in screen order
 let state = { history: [], current: null };
 
-// Keep the newest line on screen: a log taller than the screen is shifted up, the oldest lines
-// leave over the top edge.
-function fit() {
-  const overflow = stack.offsetHeight - window.innerHeight;
-  stack.style.transform = overflow > 0 ? `translateY(${-overflow}px)` : "";
-}
-
 function render(next) {
   state = next;
   const wanted = [
-    ...next.history.map((line, i) => ({ ...line, age: next.history.length - i })),
     ...(next.current ? [{ ...next.current, age: 0 }] : []),
+    ...next.history.map((line, i) => ({ ...line, age: next.history.length - i })).reverse(),
   ];
   // FLIP: remember where every line is, change the layout, then animate from there.
   const before = new Map();
@@ -105,7 +97,7 @@ function render(next) {
   const keep = new Set(wanted.map((line) => line.key));
   for (const [key, el] of lines) {
     if (keep.has(key)) continue;
-    lines.delete(key);  // the oldest line, long gone over the top edge
+    lines.delete(key);  // the oldest line, long gone over the bottom edge
     el.remove();
   }
   const fresh = [];
@@ -123,8 +115,6 @@ function render(next) {
     for (let i = 1; i <= DIM_STEPS; i++) el.classList.toggle(`p${i}`, line.age === i);
     if (line.age > DIM_STEPS) el.classList.add(`p${DIM_STEPS}`);
   }
-  fit();
-
   for (const [key, top] of before) {
     const el = lines.get(key);
     if (!el) continue;
@@ -182,8 +172,6 @@ document.addEventListener("click", () => {
   if (!document.fullscreenElement && page.requestFullscreen) page.requestFullscreen().catch(() => {});
   keepAwake();
 });
-window.addEventListener("resize", fit);
-document.fonts.ready.then(fit);
 
 if (!("wakeLock" in navigator)) showHint(hint.dataset.timeout);
 else keepAwake().then((ok) => { if (!ok) showHint(hint.dataset.tap); });
