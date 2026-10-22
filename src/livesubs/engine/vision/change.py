@@ -38,8 +38,9 @@ def iou(a: np.ndarray, b: np.ndarray) -> float:
 class ChangeDetector:
     """Feed it one mask per read; it says what happened since the previous one."""
 
-    def __init__(self, min_text_fraction: float = 0.001, min_iou: float = 0.75) -> None:
-        """``min_text_fraction``: mask coverage below which the region counts as empty.
+    def __init__(self, min_text_fraction: float = 0.0002, min_iou: float = 0.75) -> None:
+        """``min_text_fraction``: mask coverage below which the region counts as empty. 0.02 %,
+        not 0.1 %: a short reply ("No.") covers only ~0.05 % of a tall region and was never read.
         ``min_iou``: thumbnail overlap at or above which two masks show the same subtitle.
         """
         self.min_text_fraction = min_text_fraction

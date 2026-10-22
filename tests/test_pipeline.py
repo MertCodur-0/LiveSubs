@@ -4,6 +4,7 @@ import threading
 import time
 from collections.abc import Iterator
 
+import cv2
 import numpy as np
 import pytest
 
@@ -308,3 +309,45 @@ def test_debug_frames_and_live_vision_changes(
     time.sleep(0.8)
     assert recorder.of(DebugFrame)[-1].text_fraction < 0.001
     pipeline.stop()
+
+
+def test_short_reply_between_long_lines_reaches_the_screen(
+    two_lines_and_a_gap: tuple[list[Sample], list[tuple[np.ndarray, float]]],
+) -> None:
+    """User report: short replies after long lines were skipped. A short reply is on screen for
+    less time than a translation takes; it must still be read and translated, in order."""
+    (a, _), scenes = two_lines_and_a_gap
+    frame_a, frame_b = scenes[0][0], scenes[2][0]
+    short = frame_a.copy()
+    r = a.region.to_pixels(short.shape[1], short.shape[0])
+    short[r.y : r.bottom, r.x : r.right] = 30  # the long caption is gone...
+    cv2.putText(  # ...and a short reply is up instead
+        short,
+        "Yeah.",
+        (r.x + r.width // 2 - 40, r.bottom - 20),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.9,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
+
+    class Slow(UpperCaseBackend):
+        def translate(self, request: TranslationRequest, cancel: CancelToken) -> TranslationResult:
+            time.sleep(0.8)  # longer than the short reply stays on screen
+            return super().translate(request, cancel)
+
+    source = ScriptedSource([(frame_a, 1.5), (short, 0.6), (frame_b, 1.5), (scenes[1][0], 1.5)])
+    recorder = Recorder()
+    pipeline = Pipeline(
+        start_command(a),
+        recorder,
+        open_source=lambda spec: (source.open(), source)[1],
+        backend_factory=lambda start: Slow(),
+    )
+    run(pipeline, source)
+
+    reads = [e.text for e in recorder.of(SubtitleRead) if not e.upgrade]
+    translated = [e.source for e in recorder.of(SubtitleTranslated)]
+    assert len(reads) == 3 and reads[1] == "Yeah."
+    assert translated == reads  # every line translated, in reading order

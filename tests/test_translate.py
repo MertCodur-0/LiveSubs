@@ -341,32 +341,68 @@ def test_translates_and_then_serves_from_cache(
     assert len(fake.requests) == 1
 
 
-def test_newest_line_wins(
+def test_short_reply_between_long_lines_is_translated(
     orchestrator: TranslationOrchestrator, fake: FakeBackend, events: Events
 ) -> None:
+    """Regression: a new line used to cancel the one in flight, so a short reply that is on
+    screen for less time than a translation takes was never translated or shown."""
     fake.release.clear()
-    orchestrator.submit(1, "First line.")
-    assert fake.started.acquire(timeout=5)  # line 1 is in flight
-    orchestrator.submit(2, "Second line.")  # cancels line 1, waits in the pending slot
-    orchestrator.submit(3, "Third line.")  # replaces line 2 before it ever started
-    fake.release.set()
-
-    translated = events.wait_for(1)
-    assert [e.line_id for e in translated] == [3]
-    assert [r.text for r in fake.requests] == ["First line.", "Third line."]
-
-
-def test_late_result_never_overwrites_a_newer_line(
-    orchestrator: TranslationOrchestrator, fake: FakeBackend, events: Events
-) -> None:
-    fake.ignore_cancel = True  # a backend that finishes even though it was cancelled
-    fake.release.clear()
-    orchestrator.submit(1, "Old line.")
+    orchestrator.submit(1, "I mean, look at Lori's Snapmatic. Looks like they're loving it.")
     assert fake.started.acquire(timeout=5)
-    orchestrator.submit(2, "New line.")
     fake.release.set()
-    assert [e.line_id for e in events.wait_for(1)] == [2]
-    assert [e.line_id for e in events.items] == [2]
+    events.wait_for(1)
+    fake.release.clear()
+    orchestrator.submit(2, "Yeah.")
+    assert fake.started.acquire(timeout=5)  # the short reply is in flight...
+    orchestrator.submit(3, "Who is this guy? You know, besides Brian's old cellmate.")
+    fake.release.set()  # ...when the next line arrives
+    assert [e.line_id for e in events.wait_for(3)] == [1, 2, 3]
+    assert events.items[1].result.text == "YEAH."
+
+
+def test_lines_are_published_in_reading_order(
+    orchestrator: TranslationOrchestrator, fake: FakeBackend, events: Events
+) -> None:
+    orchestrator.submit(1, "Cached line.")
+    events.wait_for(1)
+    fake.release.clear()
+    orchestrator.submit(2, "A slow line.")
+    assert fake.started.acquire(timeout=5)
+    orchestrator.submit(3, "Cached line.")  # a cache hit must not jump ahead of line 2
+    fake.release.set()
+    published = events.wait_for(3)
+    assert [e.line_id for e in published] == [1, 2, 3]
+    assert published[2].result.cached
+
+
+def test_backlog_is_bounded(fake: FakeBackend, events: Events) -> None:
+    orch = TranslationOrchestrator(fake, TranslationCache(), events, max_backlog=2)
+    try:
+        fake.release.clear()
+        orch.submit(1, "One.")
+        assert fake.started.acquire(timeout=5)
+        for line_id, text in ((2, "Two."), (3, "Three."), (4, "Four.")):
+            orch.submit(line_id, text)  # only the 2 newest may wait: line 2 is skipped
+        fake.release.set()
+        assert [e.line_id for e in events.wait_for(3)] == [1, 3, 4]
+    finally:
+        orch.close()
+
+
+def test_upgrade_replaces_its_own_line_only(
+    orchestrator: TranslationOrchestrator, fake: FakeBackend, events: Events
+) -> None:
+    fake.release.clear()
+    orchestrator.submit(1, "know, besides Brian's old cellmate.")
+    assert fake.started.acquire(timeout=5)
+    orchestrator.submit(1, "You know, besides Brian's old cellmate.")  # better reading
+    orchestrator.submit(2, "Look what the law chased in.")
+    fake.release.set()
+    published = events.wait_for(2)
+    assert [(e.line_id, e.source) for e in published] == [
+        (1, "You know, besides Brian's old cellmate."),
+        (2, "Look what the law chased in."),
+    ]
 
 
 def test_history_feeds_the_next_request(

@@ -123,7 +123,7 @@ UI process (PySide6)                                  Engine process (multiproce
   every threshold is tunable. Cost: 1.1–2.2 ms for a 1066x106 sample region; live 1536x216 at
   1080p p50 5.0 ms / p95 5.8 ms.
 - Change detection (`engine/vision/change.py`) compares only the **text mask**: shrunk to a
-  96-px-wide thumbnail, IoU >= 0.75 = same line; coverage < 0.1 % = empty. Background motion never
+  96-px-wide thumbnail, IoU >= 0.75 = same line; coverage < 0.02 % = empty. Background motion never
   triggers. Empty mask = subtitle gone (`CLEARED`); the overlay clears after a configurable delay.
 - OCR (`engine/ocr/winrt_ocr.py`): `WinRtOcr.recognize(image) -> OcrResult` (lines with boxes,
   `text` = lines joined by spaces, `elapsed_ms`). Gray8 `SoftwareBitmap` filled through a WinRT
@@ -203,7 +203,7 @@ Designed from the start for three source kinds; video device lands in phase 2.
   `OllamaBackend` (httpx, `/api/chat` streaming, `think: false`, `options.num_ctx` default 2048,
   `options.num_gpu`, `keep_alive`). Cancel = close the stream. More backends (llama.cpp, own
   fine-tune) plug in later.
-- Orchestrator: **GPU lane** (one in flight, newest-wins pending slot). **CPU quality lane**
+- Orchestrator: **GPU lane** (one in flight, a short FIFO behind it; see Implementation). **CPU quality lane**
   (default off): after the GPU result, if the subtitle is still on screen, run the quality model
   with `num_gpu: 0` (default `qwen3:30b-a3b`) and replace the text; cancel when the subtitle changes.
   When disabled the CPU model is never loaded (unload with `keep_alive: 0`). CPU model and its
@@ -227,11 +227,13 @@ Implementation (step 7, `engine/translate/`):
   later ones 100-600 ms — so translation start runs one tiny real translation.
 - `cache.py`: LRU (2000) + SQLite WAL (`cache_dir()/translations.sqlite3`), key = (model, profile,
   `normalize.key(text)`), `clear(model)`.
-- `orchestrator.py`: GPU lane worker thread; `submit(line_id, text)` cancels the request in flight,
-  keeps one pending job (newest wins), answers cache hits at once; a result is published only if
-  its sequence number is still the newest (a late answer never overwrites a newer line). History
-  (default 3 lines) updated on publish; an upgrade (same `line_id`) replaces its own entry and
-  never sees itself as context. Events: `LineTranslated` / `LineFailed`.
+- `orchestrator.py`: GPU lane worker thread; **every line is translated, in reading order**: a
+  new line never cancels the one in flight; waiting lines form a FIFO of at most `MAX_BACKLOG` (3,
+  the oldest waiting line is dropped beyond that); cache hits go through the queue too (instant
+  when their turn comes), so publishing order = reading order. An upgrade (same `line_id`)
+  replaces its own waiting job or cancels its own in-flight request. History (default 3 lines)
+  updated on publish; an upgrade replaces its own entry and never sees itself as context.
+  Events: `LineTranslated` / `LineFailed`. (Was "newest wins" until 2026-10-22, see log.)
 - `scripts/compare_models.py`: sample lines (expected EN) through several models next to the
   user's `reference_tr`, with warm-up time, VRAM fit (`/api/ps` size_vram vs size) and latency.
   `bench_pipeline.py` now runs stabilizer + orchestrator and reports **appear -> translated**.
@@ -511,3 +513,12 @@ Phase 3 — release
   a text-only model without the vision encoder ~0.8-1 GB) and would gain an estimated ~10-15 %
   (1.33 -> ~1.2 s), if Ollama places partial experts at all. **Deferred to step 12** by the user:
   try a text-only Modelfile (`FROM` the text GGUF blob) there.
+- 2026-10-22 (user report: "short replies after long lines are skipped, never translated or
+  shown"): two causes, both reproduced in tests before fixing. (1) The orchestrator's "newest
+  wins" rule cancelled the line in flight whenever a new one was read — a short reply stays on
+  screen for less than a translation takes (~1.3 s), so it was cancelled by the next line every
+  time. Now every line is translated in reading order (FIFO, backlog 3). (2) The change
+  detector's "is there text" threshold (0.1 % of the mask) was above a short reply's coverage in
+  a tall region ("No." = 0.05-0.11 %), so the line was never read at all; now 0.02 %. End-to-end
+  regression test plays long line -> 0.6 s "Yeah." -> long line through the real pipeline with a
+  slow fake model; it fails on the old code.

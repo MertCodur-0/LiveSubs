@@ -212,3 +212,15 @@ def test_samples_differ_from_each_other() -> None:
         assert detector.update(preprocess(sample.load_region(), sample.vision).mask) is (
             Change.CHANGED
         ), sample.name
+
+
+@pytest.mark.parametrize("height", [160, 260, 360])
+@pytest.mark.parametrize("word", ["No.", "Ok.", "Yeah.", "Huh?"])
+def test_short_replies_count_as_text(word: str, height: int) -> None:
+    """Regression: in a tall region a short reply covered ~0.05 % of the mask, below the old
+    0.1 % threshold, so it never counted as a subtitle and was never read."""
+    region = np.full((height, 1570, 3), 40, np.uint8)
+    cv2.putText(region, word, (740, height - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255,) * 3, 2)
+    detector = ChangeDetector()
+    assert detector.has_text(preprocess(region, VisionSettings()).mask)
+    assert not detector.has_text(preprocess(np.full_like(region, 40), VisionSettings()).mask)
