@@ -1,6 +1,5 @@
-"""Ollama client for the UI: is it installed and running, which models it has; start it, pull.
-
-The full model manager (delete, VRAM estimates) comes with the Models tab.
+"""Ollama client for the UI: is it installed and running, which models it has and which are
+loaded; start it, pull, inspect and delete models.
 """
 
 from __future__ import annotations
@@ -13,6 +12,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import httpx
 
@@ -25,6 +25,18 @@ class InstalledModel:
     size_bytes: int
     parameter_size: str
     quantization: str
+    digest: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class LoadedModel:
+    name: str
+    size_bytes: int  # all of the loaded model
+    vram_bytes: int  # the part on the GPU
+
+
+class OllamaError(Exception):
+    """Ollama refused a request; the message is Ollama's own."""
 
 
 def list_models(url: str = DEFAULT_URL, timeout: float = 3.0) -> list[InstalledModel] | None:
@@ -43,9 +55,45 @@ def list_models(url: str = DEFAULT_URL, timeout: float = 3.0) -> list[InstalledM
                 size_bytes=entry.get("size", 0),
                 parameter_size=details.get("parameter_size", ""),
                 quantization=details.get("quantization_level", ""),
+                digest=entry.get("digest", ""),
             )
         )
     return sorted(models, key=lambda m: m.name)
+
+
+def loaded_models(url: str = DEFAULT_URL, timeout: float = 3.0) -> list[LoadedModel] | None:
+    """Models in memory right now (``/api/ps``), or None when Ollama does not answer."""
+    try:
+        response = httpx.get(f"{url}/api/ps", timeout=timeout)
+        response.raise_for_status()
+    except httpx.HTTPError:
+        return None
+    return [
+        LoadedModel(entry["name"], entry.get("size", 0), entry.get("size_vram", 0))
+        for entry in response.json().get("models", [])
+    ]
+
+
+def model_info(name: str, url: str = DEFAULT_URL, timeout: float = 10.0) -> dict[str, Any]:
+    """``/api/show``'s ``model_info``: architecture, layer and attention sizes, experts."""
+    try:
+        response = httpx.post(f"{url}/api/show", json={"model": name}, timeout=timeout)
+    except httpx.HTTPError as exc:
+        raise OllamaError(str(exc) or type(exc).__name__) from exc
+    if response.status_code != 200:
+        raise OllamaError(_error_text(response.text) or f"HTTP {response.status_code}")
+    return response.json().get("model_info", {})
+
+
+def delete_model(name: str, url: str = DEFAULT_URL, timeout: float = 30.0) -> None:
+    try:
+        response = httpx.request(
+            "DELETE", f"{url}/api/delete", json={"model": name}, timeout=timeout
+        )
+    except httpx.HTTPError as exc:
+        raise OllamaError(str(exc) or type(exc).__name__) from exc
+    if response.status_code != 200:
+        raise OllamaError(_error_text(response.text) or f"HTTP {response.status_code}")
 
 
 def _install_dir() -> Path | None:

@@ -169,8 +169,11 @@ class FakeEngine:
 def window(qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> MainWindow:
     monkeypatch.setenv("LIVESUBS_HOME", str(tmp_path))
     monkeypatch.setattr("livesubs.ui.main_window.list_models", lambda url: None)
+    monkeypatch.setattr("livesubs.ui.main_window.cpu_share", lambda url, model: None)
     win = MainWindow(FakeEngine(), config=AppConfig(), store=ProfileStore(tmp_path / "profiles"))
     qtbot.addWidget(win)
+    # A LiveSubs running on this PC holds F8-F10; its "hotkeys taken" notice is not under test.
+    win.statusBar().clearMessage()
     return win
 
 
@@ -564,6 +567,44 @@ def test_imported_settings_are_not_overwritten(
 def test_missing_ocr_language_opens_setup(window: MainWindow) -> None:
     window.handle(EngineError(ErrorKind.OCR_UNAVAILABLE, "no English", fatal=True))
     assert window.setup.isVisible()
+
+
+# --- models tab ---------------------------------------------------------------------------------
+
+
+def test_models_tab_follows_the_engine_and_the_model_choice(window: MainWindow) -> None:
+    window.handle(StateChanged(EngineState.RUNNING))
+    assert window.models._busy
+    assert not window.models.compare_button.isEnabled()
+    window.handle(StateChanged(EngineState.STOPPED))
+    assert not window.models._busy
+
+    window.model_combo.addItems(["gemma4:12b-it-qat", "qwen3:8b"])
+    window.model_combo.setCurrentIndex(1)
+    window.model_combo.activated.emit(1)
+    assert window._config.ollama.gpu_model == "qwen3:8b"
+    assert load_config().ollama.gpu_model == "qwen3:8b"
+
+    window.models.model_selected.emit("gemma4:12b-it-qat")
+    assert window._config.ollama.gpu_model == "gemma4:12b-it-qat"
+
+
+def test_model_spilling_to_the_cpu_is_reported_once_per_start(window: MainWindow) -> None:
+    window.source_combo.setCurrentIndex(window.source_combo.count() - 1)
+    window.set_region(NormRect(x=0.1, y=0.8, width=0.8, height=0.15))
+    window.toggle()
+    window.handle(StateChanged(EngineState.RUNNING))
+    window._on_spill("gemma4:12b-it-qat", 0.28)
+    assert "%72" in window.statusBar().currentMessage()
+    window.statusBar().clearMessage()
+    window._on_spill("gemma4:12b-it-qat", 0.28)
+    assert window.statusBar().currentMessage() == ""
+
+    window.handle(StateChanged(EngineState.STOPPED))
+    window.toggle()  # a new start: worth one more warning
+    window.handle(StateChanged(EngineState.RUNNING))
+    window._on_spill("gemma4:12b-it-qat", 0.28)
+    assert "%72" in window.statusBar().currentMessage()
 
 
 # --- settings tab, tray, warnings ---------------------------------------------------------------

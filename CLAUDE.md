@@ -245,16 +245,41 @@ Implementation (step 7, `engine/translate/`):
   overhead. Label **fits / borderline / doesn't fit** against the budget
   `total VRAM − active profile's game VRAM reserve` (see Profiles). Runtime check: `/api/ps`
   `size_vram < size` -> warning.
+- Implemented (step 12, 2026-10-22): **Modeller** tab (`ui/tabs/models.py`), second tab.
+  - Status: Ollama running / stopped (start) / missing (setup dialog); the card and the budget
+    in words. Total VRAM from **DXGI** (`platform/gpu.py`, `IDXGIFactory1::EnumAdapters1`, the
+    adapter with the most dedicated memory; WMI's `AdapterRAM` caps at 4 GB and WMI must stay
+    out of the engine), `config.total_vram_gb` overrides it.
+  - `ollama/vram.py`: KV cache per layer, f16: kv heads x (key + value length) x 2 bytes x
+    tokens; sliding-window layers (Gemma 4 pattern list; Gemma 3 every 6th layer global) hold
+    `min(num_ctx, window + 512)` tokens. Estimate = download size + KV + 0.3 GB. Budget = card
+    − **1.0 GB desktop share** − game reserve. Labels: fits (<= 90 % of the budget), borderline,
+    too big (dense: layers spill to the CPU), **MoE split** (over budget but MoE: experts in
+    RAM by design, stays fast — shown as OK), unknown. Calibrated with nvidia-smi on the dev PC
+    (see decision log). Shapes from `/api/show` are cached per digest.
+  - Table (name, file size, parameters + quant, estimated memory, fit with tooltip, state: "in
+    use" + "loaded, N % on GPU" from `/api/ps`, refreshed every 5 s while the tab is visible);
+    use (double-click) / delete (confirm; never the live model while translating) / refresh.
+  - Download: editable combo with the catalog models (their description) or any ollama.com name,
+    free-disk check for catalog models, progress with done / total / left, cancel (resumes).
+  - **Test/compare** (`ollama/compare.py`): two installed models (second optional), editable
+    lines (default `TEST_LINES`, our own, never from tests/samples), the live prompt with the
+    active profile's context + glossary + previous lines; models run **one after the other**
+    (warm-up timed apart, GPU share from `/api/ps`), each unloaded afterwards except the live
+    model; results as a table with per-model load time / GPU share / median ms; stop button;
+    disabled while translation runs (it needs the GPU).
+  - Runtime: while RUNNING the main window's 5 s Ollama check also asks `/api/ps`; a **dense**
+    live model with < 99 % on the GPU -> status-bar warning once per Start (MoE never warns).
+  - Live tab model combo now writes `gpu_model` at once (the Models tab marks the model in use).
 - Recommended models live in `ollama/catalog.py` (`RECOMMENDED`, used by the setup dialog;
   verify tags on ollama.com): `gemma4:26b-a4b-it-qat` (best Turkish, needs 24 GB+ RAM — the
   recommendation on the dev PC) and `gemma4:12b-it-qat` (code default). Measured and weaker:
   `qwen3:8b`, `translategemma`. The CPU lane (`qwen3:30b-a3b`) was dropped (step 13).
-- Test/compare: fixed set of sample game lines through two models side by side with ms.
-- Two models loaded at once needs `OLLAMA_MAX_LOADED_MODELS >= 2` — check and explain (only
-  relevant for the side-by-side comparison now that the CPU lane is gone).
-- **Step 12 experiment (deferred by the user, see decision log 2026-10-21):** a text-only
-  gemma4:26b via a Modelfile (`FROM` the text GGUF blob, without the ~0.8-1 GB vision encoder),
-  to free VRAM for more experts on the GPU; estimated gain ~10-15 % (1.33 -> ~1.2 s per line).
+- Test/compare: runs the models one after the other, so `OLLAMA_MAX_LOADED_MODELS` does not
+  matter (the CPU lane that needed two loaded models is gone).
+- **Experiment, deferred again by the user (2026-10-22, not part of step 12 any more):** a
+  text-only gemma4:26b via a Modelfile (`FROM` the text GGUF blob, without the ~0.8-1 GB vision
+  encoder), to free VRAM for more experts on the GPU; estimated gain ~10-15 % (1.33 -> ~1.2 s).
 
 ### Config and profiles — `%APPDATA%\LiveSubs\config.json` + `profiles\*.json`
 
@@ -358,8 +383,8 @@ src/livesubs/
     ocr/       winrt_ocr.py, language.py
     text/      normalize.py, filters.py, stabilizer.py
     translate/ base.py, ollama.py, orchestrator.py, prompt.py, cache.py
-  ollama/      client.py, catalog.py, install.py, vram.py
-  platform/    win32.py, hotkeys.py, shortcuts.py
+  ollama/      client.py, catalog.py, install.py, vram.py, compare.py
+  platform/    win32.py, hotkeys.py, shortcuts.py, gpu.py
   ui/          main_window.py, overlay.py, region_frame.py, inspector.py, tray.py,
                setup_check.py, tabs/, theme/
   web/         server.py, static/
@@ -387,8 +412,8 @@ Phase 1 — working core (source -> region -> OCR -> GPU translation -> overlay)
 Phase 2 — features
 - [x] 10. Calibration mode (F8): movable region frame, Inspector, overlay move/resize; hotkeys (+ appearance tab, user request)
 - [x] 11. Profiles (incl. per-profile VRAM reserve, overlay display target) — 2026-10-22
-- [ ] 12. Models tab (list, VRAM labels vs active profile, pull/cancel, delete, recommended, test/compare)
-  + the text-only gemma4:26b experiment (see Model management)
+- [x] 12. Models tab (list, VRAM labels vs active profile, pull/cancel, delete, recommended,
+  test/compare) — 2026-10-22; the text-only gemma4:26b experiment deferred (see Model management)
 - [~] 13. CPU quality mode — dropped by the user (2026-10-22)
 - [x] 14. Settings tab (incl. recording mode + overlap warning), tray, fullscreen warning,
   startup checks (setup dialog) — 2026-10-22
@@ -406,7 +431,7 @@ Phase 3 — release
 ### Next up (order agreed with the user, 2026-10-22)
 
 First **finish the app** (each step committed and pushed; no new release unless asked):
-1. Step 12 — Models tab + the text-only gemma4:26b experiment.
+1. ~~Step 12 — Models tab~~ (done 2026-10-22; the text-only experiment deferred by the user).
 2. Step 16 — Vice theme, fonts, SVG icon/header (replaces the temporary `ui/icon.py`), overlay
    styles.
 3. Step 17 — web/phone output + QR + Screen Wake Lock, incl. the profile's "web only" display
@@ -422,7 +447,6 @@ First **finish the app** (each step committed and pushed; no new release unless 
 ## Known risks
 
 - DPI scaling: Qt logical coordinates vs. physical capture pixels — handle from step 2, test it.
-- Two models loaded at once needs `OLLAMA_MAX_LOADED_MODELS >= 2` (app checks and explains).
 - RAM: gemma4:26b keeps ~10 GB of experts in RAM; on a PC that also runs the game, 32 GB is
   tight — the setup dialog recommends it only from 24 GB of RAM (12b otherwise).
 - Packaging: the build's smoke test must keep covering every native module (Qt trim!).
@@ -609,3 +633,16 @@ First **finish the app** (each step committed and pushed; no new release unless 
   setup dialog left open). `closeEvent` now calls `QCoreApplication.quit()`; regression test.
   The dev launcher `.venv\Scripts\pythonw.exe` starts the real interpreter as a child process:
   find the app's window by the child's PID.
+- 2026-10-22 (step 12): **User: skip the text-only gemma4:26b experiment for now; finish the
+  app's other steps first.** VRAM estimate calibrated with nvidia-smi (memory used before vs
+  after loading, num_ctx 2048; Windows + apps already held 1.18 GB with no model loaded):
+  qwen3:8b 5.42 GB (download 5.23 + KV 0.30), translategemma 3.80 GB (3.30 + 0.22), gemma4:12b
+  did not fit (6.13 of Ollama's 8.52 GB on the GPU). `/api/ps` `size` is no ground truth: it
+  reported 5.28 for qwen3 and 2.88 for translategemma (less than its file). Hence overhead
+  0.3 GB (not the 0.8 the 12b's `/api/ps` suggested) and a 1.0 GB desktop share in the budget.
+  DXGI reports 8.33 GB for the RTX 4070 Laptop (nvidia-smi 8188 MiB). Labels on the dev PC with
+  a capture-card profile (budget 6.8 GB): 12b too big, 26b MoE split, qwen3 and translategemma
+  fit — all four match what was measured. Live comparison through the tab (qwen3:8b vs
+  translategemma, 3 lines): load 2.9 / 3.4 s, median 428 / 339 ms, both unloaded afterwards.
+  Tests: two UI tests failed whenever a LiveSubs instance was open (it holds F8-F10, the test
+  window's "hotkeys taken" notice filled the status bar); the fixture now clears that notice.

@@ -81,6 +81,7 @@ from livesubs.ui.region_frame import RegionFrame
 from livesubs.ui.region_select import RegionPicker
 from livesubs.ui.setup_check import SetupDialog
 from livesubs.ui.tabs.appearance import AppearanceTab
+from livesubs.ui.tabs.models import ModelsTab, cpu_share
 from livesubs.ui.tabs.profiles import ProfilesTab
 from livesubs.ui.tabs.settings import SettingsTab
 from livesubs.ui.tray import Tray
@@ -160,6 +161,7 @@ class _Bridge(QObject):
     """Carries results from worker threads to the UI thread."""
 
     models = Signal(object)  # list[InstalledModel] | None
+    spill = Signal(str, float)  # model, part of it that runs on the CPU
 
 
 class MainWindow(QMainWindow):
@@ -186,6 +188,7 @@ class MainWindow(QMainWindow):
         self._overlay.set_capture_visible(self._config.recording_mode)
         self._warned_overlap = False
         self._warned_fullscreen = False
+        self._warned_spill = False
         self._region_frame = RegionFrame()
         self._region_frame.edited.connect(self._on_region_edited)
         self._inspector = Inspector(self._profile.vision)
@@ -195,6 +198,7 @@ class MainWindow(QMainWindow):
         self._paused = False
         self._bridge = _Bridge()
         self._bridge.models.connect(self._on_models)
+        self._bridge.spill.connect(self._on_spill)
         self._discard_changes = False  # settings were imported: never write the old ones back
         self.setup = SetupDialog(self._config, self)
         self.setup.model_selected.connect(self._on_model_selected)
@@ -259,6 +263,7 @@ class MainWindow(QMainWindow):
         grid.addWidget(self.region_button, 2, 2)
 
         self.model_combo = QComboBox()
+        self.model_combo.activated.connect(self._on_model_combo)
         self.ollama_label = QLabel(t("ollama.checking"))
         self.ollama_button = QPushButton(t("ollama.start"), clicked=self._start_ollama)
         self.ollama_button.hide()
@@ -326,8 +331,15 @@ class MainWindow(QMainWindow):
         self.settings.clear_cache_requested.connect(self.clear_cache)
         self.settings.open_logs_requested.connect(self._open_logs)
 
+        self.models = ModelsTab(self._config, self._profile)
+        self.models.model_selected.connect(self._on_model_selected)
+        self.models.models_changed.connect(self.check_ollama)
+        self.models.start_ollama_requested.connect(self._start_ollama)
+        self.models.setup_requested.connect(self.open_setup)
+
         self.tabs = QTabWidget()
         self.tabs.addTab(live, t("tab.live"))
+        self.tabs.addTab(self.models, t("tab.models"))
         self.profiles = ProfilesTab(self._profile)
         self.profiles.changed.connect(self._on_profile_edited)
         self.profiles.new_requested.connect(self.new_profile)
@@ -461,6 +473,7 @@ class MainWindow(QMainWindow):
         self.appearance.set_settings(profile.overlay)
         self.settings.set_profile(profile)
         self.profiles.set_profile(profile)
+        self.models.set_profile(profile)
         self._fill_profile_combo()
         self.refresh_sources()
         self._update_region_label()
@@ -508,6 +521,7 @@ class MainWindow(QMainWindow):
         self._save_timer.start()
         self._place_overlay()  # the display monitor may have changed
         self.appearance.refresh()
+        self.models.set_profile(self._profile)  # the game's VRAM reserve may have changed
 
     # --- source & region -------------------------------------------------------------------------
 
@@ -584,9 +598,16 @@ class MainWindow(QMainWindow):
 
     def check_ollama(self) -> None:
         url = self._config.ollama.url or DEFAULT_URL
-        threading.Thread(
-            target=lambda: self._bridge.models.emit(list_models(url)), daemon=True
-        ).start()
+        # While translating: is the model slowed down by running partly on the CPU?
+        watch = self._state == EngineState.RUNNING and not self._warned_spill
+        model = self._config.ollama.gpu_model if watch else ""
+
+        def work() -> None:
+            self._bridge.models.emit(list_models(url))
+            if model and (share := cpu_share(url, model)) is not None:
+                self._bridge.spill.emit(model, share)
+
+        threading.Thread(target=work, daemon=True).start()
 
     def _on_models(self, models: list[InstalledModel] | None) -> None:
         if models is None:
@@ -602,6 +623,18 @@ class MainWindow(QMainWindow):
             self.model_combo.addItems(names)
         if current in names:
             self.model_combo.setCurrentText(current)
+
+    def _on_spill(self, model: str, cpu: float) -> None:
+        if self._warned_spill or self._state not in ACTIVE_STATES:
+            return
+        self._warned_spill = True  # once per Start
+        text = t("warning.model_spill", model=model, percent=round((1 - cpu) * 100))
+        self.statusBar().showMessage(text, 30000)
+
+    def _on_model_combo(self, index: int) -> None:
+        self._config.ollama.gpu_model = self.model_combo.itemText(index)
+        self._save()
+        self.models.mark_in_use()
 
     def _start_ollama(self) -> None:
         if not start_ollama():
@@ -623,6 +656,7 @@ class MainWindow(QMainWindow):
     def _on_model_selected(self, name: str) -> None:
         self._config.ollama.gpu_model = name
         self._save()
+        self.models.mark_in_use()
         self.model_combo.clear()  # refilled by the check with the new model selected
         self.check_ollama()
 
@@ -658,6 +692,7 @@ class MainWindow(QMainWindow):
             self._config.ollama.gpu_model = self.model_combo.currentText()
         self._save()
         self._reads = 0
+        self._warned_spill = False
         self._engine.send(
             StartPipeline(
                 profile=self._profile.model_copy(deep=True),
@@ -705,6 +740,7 @@ class MainWindow(QMainWindow):
         self.state_label.setText(text)
         self.start_button.setText(t("stop") if state in ACTIVE_STATES else t("start"))
         self.tray.set_running(state in ACTIVE_STATES)
+        self.models.set_busy(state in ACTIVE_STATES)
         if state in (EngineState.PAUSED, EngineState.STOPPED) and not self._calibrating:
             self._overlay.clear()
         if state == EngineState.STOPPED and not (self._calibrating or self._previewing):
@@ -944,6 +980,7 @@ class MainWindow(QMainWindow):
         if self._hotkeys is not None:
             self._hotkeys.close()
         self.setup.shutdown()
+        self.models.shutdown()
         self.setup.close()
         self._region_frame.close()
         self._inspector.close()

@@ -218,6 +218,101 @@ STRINGS: dict[str, str] = {
         "seçerken bu dikkate alınır. Oyunu TV'de oynayıp çeviriyi bilgisayar ekranında okumak "
         "için o ekranı seçin ve F8 ayar modunda çeviriyi istediğiniz yere taşıyın."
     ),
+    # Models tab
+    "tab.models": "Modeller",
+    "models.status": "Ollama ve ekran kartı",
+    "models.ollama_ok": "✔ Ollama çalışıyor — {count} model yüklü",
+    "models.ollama_offline": (
+        "✘ Ollama kurulu ama çalışmıyor. Başlatın; ilk açılışta 1 dakikayı bulabilir."
+    ),
+    "models.ollama_missing": (
+        "✘ Ollama kurulu değil. Çeviri için gerekli: Kurulum… penceresinden tek tıkla kurun."
+    ),
+    "models.budget": (
+        "Ekran kartı: {gpu}, {total:.1f} GB. Windows ve diğer uygulamalara ~{desktop:.1f} GB, "
+        "oyuna {reserve:.1f} GB (profil “{profile}”) ayrılınca modele kalan: <b>{budget:.1f} GB</b>"
+    ),
+    "models.gpu_configured": "ayarlardan",
+    "models.no_gpu": (
+        "Ekran kartı bulunamadı: modeller işlemcide çalışır (yavaş). Sığma tahmini yapılamıyor."
+    ),
+    "models.installed": "Yüklü modeller",
+    "models.column.name": "Model",
+    "models.column.size": "Dosya",
+    "models.column.parameters": "Parametre",
+    "models.column.memory": "Gereken bellek",
+    "models.column.fit": "Ekran kartına",
+    "models.column.state": "Durum",
+    "models.fit.fits": "✔ Sığar",
+    "models.fit.borderline": "≈ Sınırda",
+    "models.fit.too_big": "✘ Sığmaz",
+    "models.fit.moe_split": "✔ Kısmen (MoE)",
+    "models.fit.unknown": "?",
+    "models.fit_tip.fits": "Model tamamen ekran kartında çalışır: en hızlısı.",
+    "models.fit_tip.borderline": (
+        "Ancak sığar; ekran kartını kullanan başka bir uygulama açılırsa bir kısmı işlemciye "
+        "taşar ve çeviri yavaşlar."
+    ),
+    "models.fit_tip.too_big": (
+        "Ekran kartına sığmaz: taşan katmanlar işlemcide çalışır, çeviri belirgin yavaşlar."
+    ),
+    "models.fit_tip.moe_split": (
+        "MoE modeli: uzman katmanları RAM'de, dikkat katmanları ekran kartında durur. "
+        "Bu modellerde bu normaldir ve çeviri hızlı kalır; yeterli RAM gerekir."
+    ),
+    "models.fit_tip.unknown": "Model bilgisi okunamadı ya da ekran kartı bulunamadı.",
+    "models.fit_hint": (
+        "Gereken bellek bir tahmindir. Çeviri için kullanmak istediğiniz modele çift tıklayın."
+    ),
+    "models.in_use": "Çeviride kullanılıyor",
+    "models.loaded": "Bellekte, %{percent} ekran kartında",
+    "models.use": "Çeviri için kullan",
+    "models.now_in_use": "{model} artık çeviri modeli (bir sonraki Başlat'ta geçerli olur).",
+    "models.delete": "Sil",
+    "models.delete_confirm": (
+        "{model} silinsin mi? Tekrar kullanmak için yeniden indirmeniz gerekir."
+    ),
+    "models.delete_in_use": "Bu model şu an çeviri modeli; silinirse başka bir model seçmelisiniz.",
+    "models.delete_busy": "Çeviride kullanılan model çalışırken silinemez; önce çeviriyi durdurun.",
+    "models.deleted": "{model} silindi.",
+    "models.delete_failed": "Silinemedi: {detail}",
+    "models.download": "Model indir",
+    "models.pull_placeholder": "Model adı, ör. gemma4:12b-it-qat",
+    "models.pull_hint": (
+        "ollama.com/library'deki herhangi bir modelin adını yazabilirsiniz. İndirme yarıda "
+        "kalırsa tekrar İndir'e basınca kaldığı yerden sürer."
+    ),
+    "models.pull_progress": "{status}: {done:.1f} / {total:.1f} GB (kalan {left:.1f} GB)",
+    "models.pulled": "{model} indirildi.",
+    "models.already_installed": "{model} zaten yüklü.",
+    "models.compare": "Modelleri dene ve karşılaştır",
+    "models.compare_hint": (
+        "Aynı cümleler iki modelle sırayla çevrilir (önce biri, sonra diğeri); kalite ve süre "
+        "yan yana görünür. Etkin profilin oyun bilgisi ve sözlüğü kullanılır. Kendi "
+        "cümlelerinizi her satıra bir tane olacak şekilde yazabilirsiniz."
+    ),
+    "models.compare_a": "Model 1",
+    "models.compare_b": "Model 2",
+    "models.compare_none": "— (yalnızca Model 1)",
+    "models.compare_start": "Karşılaştır",
+    "models.compare_stop": "Durdur",
+    "models.compare_busy": "Çeviri çalışırken karşılaştırma yapılamaz (ekran kartı kullanımda).",
+    "models.compare_loading": "{model} yükleniyor… (büyük modellerde 30 sn'yi bulabilir)",
+    "models.compare_running": "{model} çeviriyor…",
+    "models.compare_stopping": "Durduruluyor…",
+    "models.compare_failed": "{model} çalışmadı: {detail}",
+    "models.compare_line_failed": "Hata: {detail}",
+    "models.compare_warm": "yükleme {seconds:.1f} sn",
+    "models.compare_median": "ortanca {ms:.0f} ms",
+    "models.compare_gpu": "%{percent} ekran kartında",
+    "models.compare_done": (
+        "Bitti. Denenen modeller bellekten çıkarıldı (çeviride kullanılan hariç)."
+    ),
+    "models.compare_cancelled": "Durduruldu.",
+    "warning.model_spill": (
+        "{model} ekran kartına sığmadı: %{percent}'i ekran kartında, gerisi işlemcide; çeviri "
+        "yavaşlar. Modeller sekmesinden sığan bir model seçebilirsiniz."
+    ),
     # Settings tab
     "tab.settings": "Ayarlar",
     "settings.translation": "Çeviri ve okuma",
