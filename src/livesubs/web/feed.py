@@ -1,4 +1,4 @@
-"""What the phone page shows: the current translation in the middle, a few older ones above it.
+"""What the phone page shows: a log of translations from the top down, the newest at the end.
 
 Pure state, owned by the UI thread (the server snapshots it under its lock). The page receives the
 whole state each time and animates the difference itself, so the rules live only here.
@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 
-HISTORY = 4  # older lines kept above the current one, dimmer the older they are
+HISTORY = 30  # older lines kept above the current one: enough to fill a tall screen
 
 
 @dataclass

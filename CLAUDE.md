@@ -350,15 +350,17 @@ remaining size, cancel. Minimizes to tray.
 - Web output (step 17, done 2026-10-23; page design by the user): `web/server.py` — stdlib
   `ThreadingHTTPServer` in the UI process (0.0.0.0, `config.web.port`, default 8765), routes `/`
   (page), `/font.ttf` (bundled Inter SemiBold), `/events` (SSE, keep-alive comment every 15 s).
-  `web/feed.py` `WebFeed` holds the state (current line + 4 older ones, keyed per page, line ids
+  `web/feed.py` `WebFeed` holds the state (current line + 30 older ones, keyed per page, line ids
   forgotten on a new Start); **every change sends the whole state**, so a reconnecting phone is
   right at once and the page only diffs it. Rules: new line -> current moves up; upgrade (same
   line id) -> text replaced in place; subtitle cleared (after `clear_delay_ms`, also on
   stop/pause) -> current moves up too; a repeat right after a clear comes back to the middle.
   Page `web/static/index.html` (`{{web.*}}` placeholders filled from i18n): **plain black, no
-  Vice theme** (user), white text centred on the screen, older lines above it, dimmer with age
-  (opacity .42/.24/.13/.06); FLIP animation: a new line fades in from slightly below, the others
-  slide up 0.6 s. Screen Wake Lock (needs a secure context, so over plain http on the LAN it is
+  Vice theme** (user), a **log from the top down** (user, 2026-10-23, replaced "current line in
+  the middle"): the first translation at the top, each new one below the last; once the log
+  reaches the bottom edge it shifts up so the newest stays at the bottom and the oldest leave
+  over the top. Newest white, older ones dimmed (opacity .5/.4/.32); FLIP animation: a new line
+  fades in from slightly below, the others slide 0.6 s. Screen Wake Lock (needs a secure context, so over plain http on the LAN it is
   usually missing -> "extend the screen timeout" hint); a tap asks for fullscreen + the lock.
   Settings tab group **Telefonda göster**: on/off, port, address + client count, QR
   (`ui/qr.py`, painted from `qrcode`'s matrix, no PIL), Wi-Fi/firewall hint, and **"show the

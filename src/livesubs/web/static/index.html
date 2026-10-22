@@ -28,18 +28,19 @@
     user-select: none;
     -webkit-tap-highlight-color: transparent;
   }
-  /* Bottom-anchored at the middle of the screen; script shifts it so the current line is centred
-     and older lines sit above it. */
+  /* A log from the top down. Once it is taller than the screen, script shifts it up so the
+     newest line stays at the bottom. */
   #stack {
     position: fixed;
     left: 0;
     right: 0;
-    bottom: 50%;
+    top: 0;
+    box-sizing: border-box;
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 0.55em;
-    padding: 0 max(6vw, env(safe-area-inset-left), env(safe-area-inset-right));
+    padding: max(5vh, env(safe-area-inset-top)) max(6vw, env(safe-area-inset-left), env(safe-area-inset-right)) max(5vh, env(safe-area-inset-bottom));
     font-size: clamp(22px, min(7vw, 10vh), 72px);
     line-height: 1.25;
   }
@@ -50,11 +51,9 @@
     transition: opacity 0.6s ease, transform 0.6s cubic-bezier(0.22, 0.8, 0.3, 1);
   }
   .line.enter { opacity: 0; transform: translateY(0.5em); }
-  .line.p1 { opacity: 0.42; }
-  .line.p2 { opacity: 0.24; }
-  .line.p3 { opacity: 0.13; }
-  .line.p4 { opacity: 0.06; }
-  .line.leave { opacity: 0; }
+  .line.p1 { opacity: 0.5; }
+  .line.p2 { opacity: 0.4; }
+  .line.p3 { opacity: 0.32; }
   .note {
     position: fixed;
     left: 0;
@@ -82,17 +81,15 @@ const stack = document.getElementById("stack");
 const idle = document.getElementById("idle");
 const statusNote = document.getElementById("status");
 const hint = document.getElementById("hint");
-const LINE_EM = 1.25, GAP_EM = 0.55, DIM_STEPS = 4;
+const DIM_STEPS = 3;
 const lines = new Map();  // key -> element, in screen order
 let state = { history: [], current: null };
 
-// Shift the stack so the current line sits in the middle. Without one, the space it would take
-// stays empty, so the line that just moved up does not drop back down when the next one comes.
-function center() {
-  const current = state.current ? lines.get(state.current.key) : null;
-  const size = parseFloat(getComputedStyle(stack).fontSize);
-  const shift = current ? current.offsetHeight / 2 : -(size * LINE_EM / 2 + size * GAP_EM);
-  stack.style.transform = `translateY(${shift}px)`;
+// Keep the newest line on screen: a log taller than the screen is shifted up, the oldest lines
+// leave over the top edge.
+function fit() {
+  const overflow = stack.offsetHeight - window.innerHeight;
+  stack.style.transform = overflow > 0 ? `translateY(${-overflow}px)` : "";
 }
 
 function render(next) {
@@ -108,9 +105,8 @@ function render(next) {
   const keep = new Set(wanted.map((line) => line.key));
   for (const [key, el] of lines) {
     if (keep.has(key)) continue;
-    lines.delete(key);  // the oldest line: it is at the top, so fading it moves nothing else
-    el.className = "line leave";
-    setTimeout(() => el.remove(), 700);
+    lines.delete(key);  // the oldest line, long gone over the top edge
+    el.remove();
   }
   const fresh = [];
   for (const line of wanted) {
@@ -127,7 +123,7 @@ function render(next) {
     for (let i = 1; i <= DIM_STEPS; i++) el.classList.toggle(`p${i}`, line.age === i);
     if (line.age > DIM_STEPS) el.classList.add(`p${DIM_STEPS}`);
   }
-  center();
+  fit();
 
   for (const [key, top] of before) {
     const el = lines.get(key);
@@ -186,8 +182,8 @@ document.addEventListener("click", () => {
   if (!document.fullscreenElement && page.requestFullscreen) page.requestFullscreen().catch(() => {});
   keepAwake();
 });
-window.addEventListener("resize", center);
-document.fonts.ready.then(center);
+window.addEventListener("resize", fit);
+document.fonts.ready.then(fit);
 
 if (!("wakeLock" in navigator)) showHint(hint.dataset.timeout);
 else keepAwake().then((ok) => { if (!ok) showHint(hint.dataset.tap); });
