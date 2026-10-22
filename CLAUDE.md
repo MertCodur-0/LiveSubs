@@ -467,8 +467,12 @@ Phase 3 — release
 - [x] 18. Release: build script (embeddable signed Python, runs under Smart App Control), first-run
   setup, **v0.1.0 GitHub Release** with the zip (2026-10-22). Repeat for later versions: bump
   `__version__`, `.\scripts\build_exe.ps1`, `gh release create vX.Y.Z dist\LiveSubs-X.Y.Z-win64.zip`
-- [ ] 19. README (architecture diagram, install, GIF slot), screenshots; must explain Smart App
-  Control (why LiveSubs.exe is a renamed, signed pythonw.exe) and the setup dialog
+- [x] 19. README (architecture diagram, install, GIF slot), screenshots; must explain Smart App
+  Control (why LiveSubs.exe is a renamed, signed pythonw.exe) and the setup dialog — 2026-10-23,
+  with **v0.2.0** released (theme, Models tab, profiles, settings, phone output). Screenshots in
+  `docs/images/` are rendered offscreen with fake sources/lines (never game footage, never the
+  user's window titles); the phone image comes from headless Edge with transitions off. Still
+  open: `docs/images/demo.gif` (commented-out slot; the user records it in recording mode)
 
 ### Next up (order agreed with the user, 2026-10-22)
 
@@ -476,7 +480,8 @@ First **finish the app** (each step committed and pushed; no new release unless 
 1. ~~Step 12 — Models tab~~ (done 2026-10-22; the text-only experiment deferred by the user).
 2. ~~Step 16 — Vice theme, fonts, SVG icon/header, overlay styles~~ (done 2026-10-22).
 3. ~~Step 17 — web/phone output + QR + Screen Wake Lock, phone-only mode~~ (done 2026-10-23).
-4. Step 19 — README (EN + TR), screenshots; then make the GitHub repo public (user's call).
+4. ~~Step 19 — README (EN + TR), screenshots~~ (done 2026-10-23, v0.2.0 released). Making the
+   GitHub repo public is the user's call (still private; the README's CI badge needs it public).
 
 **Afterwards:**
 - **Claude API translation backend** — a second `TranslationBackend` next to Ollama (the
