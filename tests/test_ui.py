@@ -31,6 +31,7 @@ from livesubs.core.messages import (
 )
 from livesubs.core.profiles import (
     MonitorSource,
+    OverlayDisplay,
     OverlayPlacement,
     Profile,
     ProfileStore,
@@ -41,12 +42,13 @@ from livesubs.engine.translate.cache import TranslationCache
 from livesubs.platform import hotkeys, win32
 from livesubs.platform.win32 import MonitorInfo, WindowInfo
 from livesubs.ui.inspector import Inspector
-from livesubs.ui.main_window import PROFILE_ID, MainWindow
+from livesubs.ui.main_window import DEFAULT_PROFILE_ID, MainWindow
 from livesubs.ui.overlay import Overlay, wrap
 from livesubs.ui.pick import resolve
 from livesubs.ui.placement import GAP_PX, custom_geometry, monitor_at, overlay_geometry
 from livesubs.ui.region_select import RegionPicker
 from livesubs.ui.screens import ScreenMap, current_screens, from_qrect, to_logical, to_physical
+from livesubs.ui.tabs.profiles import ProfilesTab
 from livesubs.ui.tabs.settings import SettingsTab, hotkey_text
 
 # The developer's desk: 1080p at 100 % and a 1440p laptop panel at 150 %, up and to the right.
@@ -198,8 +200,11 @@ def test_start_sends_the_profile_and_saves_it(window: MainWindow, tmp_path: Path
     assert isinstance(command, StartPipeline)
     assert command.profile.region == NormRect(x=0.1, y=0.8, width=0.8, height=0.15)
     assert command.profile.source is not None
-    assert command.profile_id == PROFILE_ID
-    assert ProfileStore(tmp_path / "profiles").load(PROFILE_ID).region == command.profile.region
+    assert command.profile_id == DEFAULT_PROFILE_ID
+    assert (
+        ProfileStore(tmp_path / "profiles").load(DEFAULT_PROFILE_ID).region
+        == command.profile.region
+    )
 
 
 def test_events_drive_the_feed_and_overlay(window: MainWindow, qtbot: QtBot) -> None:
@@ -364,8 +369,8 @@ def test_appearance_edits_apply_to_the_profile(window: MainWindow, qtbot: QtBot)
 
     # Saved shortly after (debounced).
     def saved() -> None:
-        assert window._store.ids() == [PROFILE_ID]
-        assert window._store.load(PROFILE_ID).overlay.font_size_pt == 40
+        assert window._store.ids() == [DEFAULT_PROFILE_ID]
+        assert window._store.load(DEFAULT_PROFILE_ID).overlay.font_size_pt == 40
 
     qtbot.waitUntil(saved, timeout=2000)
 
@@ -624,7 +629,7 @@ def test_settings_are_saved(window: MainWindow, qtbot: QtBot) -> None:
     qtbot.waitUntil(
         lambda: paths.config_file().exists() and load_config().ollama.context_lines == 6
     )
-    assert window._store.load(PROFILE_ID).capture.fps == 12
+    assert window._store.load(DEFAULT_PROFILE_ID).capture.fps == 12
 
 
 def test_recording_mode_lets_capture_see_the_overlay(window: MainWindow) -> None:
@@ -700,3 +705,121 @@ def test_closing_from_the_tray_quits_the_app(
     window.tray.quit.emit()
     assert quits == [True]
     assert engine_of(window).stopped
+
+
+# --- profiles -----------------------------------------------------------------------------------
+
+
+def make_window(qtbot: QtBot, tmp_path: Path, config: AppConfig | None = None) -> MainWindow:
+    win = MainWindow(
+        FakeEngine(), config=config or AppConfig(), store=ProfileStore(tmp_path / "profiles")
+    )
+    qtbot.addWidget(win)
+    return win
+
+
+def test_startup_uses_the_last_profile(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("LIVESUBS_HOME", str(tmp_path))
+    monkeypatch.setattr("livesubs.ui.main_window.list_models", lambda url: None)
+    store = ProfileStore(tmp_path / "profiles")
+    store.save(Profile(name="GTA"), "gta")
+    store.save(Profile(name="Mafia"), "mafia")
+    assert make_window(qtbot, tmp_path, AppConfig(last_profile="mafia"))._profile.name == "Mafia"
+    assert make_window(qtbot, tmp_path, AppConfig(last_profile="gone"))._profile.name == "GTA"
+
+
+def test_new_profile_becomes_active_everywhere(window: MainWindow) -> None:
+    window._profile.overlay.font_size_pt = 40
+    window.new_profile("Vice City Gece")
+    assert window._profile_id == "vice-city-gece"
+    assert window._profile.overlay.font_size_pt == 26  # a fresh profile
+    assert window._overlay.settings is window._profile.overlay
+    assert window.appearance.settings is window._profile.overlay
+    assert window._inspector.vision is window._profile.vision
+    assert window.settings.profile is window._profile
+    assert window._store.ids() == [DEFAULT_PROFILE_ID, "vice-city-gece"]
+    assert [window.profile_combo.itemText(i) for i in range(2)] == ["Varsayılan", "Vice City Gece"]
+    assert window.profile_combo.currentData() == "vice-city-gece"
+    assert window._config.last_profile == "vice-city-gece"
+
+    window.switch_profile(DEFAULT_PROFILE_ID)
+    assert window._profile.overlay.font_size_pt == 40
+    assert window.appearance.size.value() == 40
+
+
+def test_switching_while_running_follows_the_new_profile(window: MainWindow) -> None:
+    running_with_region(window)
+    window.source_combo.setCurrentIndex(window.source_combo.count() - 1)  # a monitor
+    window._profile.source = window.selected_source().spec
+    window.copy_profile("Kopya")  # same source and region: restarts with the copy
+    command = engine_of(window).sent[-1]
+    assert isinstance(command, StartPipeline)
+    assert command.profile_id == "kopya"
+    assert command.profile.name == "Kopya"
+    window.new_profile("Boş")  # no source or region yet: stops
+    assert isinstance(engine_of(window).sent[-1], StopPipeline)
+
+
+def test_rename_keeps_the_file_and_delete_moves_on(
+    window: MainWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window.delete_profile()
+    assert window.statusBar().currentMessage() == "Son profil silinemez."
+    window.new_profile("Mafia")
+    window.rename_profile("Mafia II")
+    assert window._store.load("mafia").name == "Mafia II"
+    assert window.profile_combo.currentText() == "Mafia II"
+    window.delete_profile()
+    assert window._store.ids() == [DEFAULT_PROFILE_ID]
+    assert window._profile_id == DEFAULT_PROFILE_ID
+
+
+def test_profiles_tab_edits_the_translation_hints(qtbot: QtBot) -> None:
+    profile = Profile(name="GTA", source=WindowSource(exe_name="RemotePlay.exe"))
+    tab = ProfilesTab(profile, monitors=lambda: [])
+    qtbot.addWidget(tab)
+    with qtbot.waitSignal(tab.changed):
+        tab.context.setPlainText("Gritty 1980s crime story.")
+    assert profile.translation.context == "Gritty 1980s crime story."
+
+    tab._add_term()
+    tab.glossary.item(0, 0).setText("Vice City")
+    assert profile.translation.glossary == {}  # needs both columns
+    tab.glossary.item(0, 1).setText("Vice City")
+    assert profile.translation.glossary == {"Vice City": "Vice City"}
+    tab.glossary.selectRow(0)
+    tab._remove_terms()
+    assert profile.translation.glossary == {}
+
+
+def test_profiles_tab_game_location_and_vram_reserve(qtbot: QtBot) -> None:
+    profile = Profile(name="PS5", source=WindowSource(exe_name="RemotePlay.exe"))
+    tab = ProfilesTab(profile, monitors=lambda: [])
+    qtbot.addWidget(tab)
+    assert "başka cihazda" in tab.location.itemText(0)  # guessed from the streaming client
+    assert tab.reserve.value() == 0.5
+    tab.location.setCurrentIndex(1)  # this PC
+    assert profile.vram.game_on_this_pc is True
+    assert tab.reserve.value() == 2.0  # the automatic reserve follows
+    tab.reserve_auto.setChecked(False)
+    tab.reserve.setValue(3.5)
+    assert profile.game_vram_reserve_gb() == 3.5
+    tab.reserve_auto.setChecked(True)
+    assert profile.vram.game_reserve_gb is None
+
+
+def test_translation_can_go_to_another_monitor(window: MainWindow) -> None:
+    """Game on the TV, translation on the PC screen next to it."""
+    monitor = win32.list_monitors()[-1]
+    running_with_region(window)
+    index = window.profiles.display.findData(monitor.device_name)
+    window.profiles.display.setCurrentIndex(index)
+    assert window._profile.overlay.display == OverlayDisplay.MONITOR
+    assert window._profile.overlay.monitor_device == monitor.device_name
+    assert not window.appearance.placement.isEnabled()
+    physical = to_physical(from_qrect(window._overlay.geometry()), current_screens())
+    assert monitor.rect.intersects(physical)
+    window.profiles.display.setCurrentIndex(0)
+    assert window._profile.overlay.display == OverlayDisplay.AUTO

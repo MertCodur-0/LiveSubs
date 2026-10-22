@@ -58,6 +58,7 @@ from livesubs.core.messages import (
 )
 from livesubs.core.profiles import (
     MonitorSource,
+    OverlayDisplay,
     OverlayPlacement,
     Profile,
     ProfileStore,
@@ -80,10 +81,11 @@ from livesubs.ui.region_frame import RegionFrame
 from livesubs.ui.region_select import RegionPicker
 from livesubs.ui.setup_check import SetupDialog
 from livesubs.ui.tabs.appearance import AppearanceTab
+from livesubs.ui.tabs.profiles import ProfilesTab
 from livesubs.ui.tabs.settings import SettingsTab
 from livesubs.ui.tray import Tray
 
-PROFILE_ID = "varsayilan"
+DEFAULT_PROFILE_ID = "varsayilan"
 FEED_LIMIT = 200
 OLLAMA_CHECK_MS = 5000
 FOLLOW_MS = 300
@@ -171,7 +173,7 @@ class MainWindow(QMainWindow):
         self._engine = engine
         self._config = config or load_config()
         self._store = store or ProfileStore()
-        self._profile = self._load_profile()
+        self._profile_id, self._profile = self._initial_profile()
         self._sources: list[SourceOption] = []
         self._state = EngineState.IDLE
         self._frame: FrameInfo | None = None
@@ -236,31 +238,38 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(live)
         grid = QGridLayout()
 
+        self.profile_combo = QComboBox()
+        self.profile_combo.activated.connect(
+            lambda i: self.switch_profile(self.profile_combo.itemData(i))
+        )
+        grid.addWidget(QLabel(t("profile.label")), 0, 0)
+        grid.addWidget(self.profile_combo, 0, 1)
+
         self.source_combo = QComboBox()
         self.source_combo.setPlaceholderText(t("source.none"))
         refresh = QPushButton(t("source.refresh"), clicked=self.refresh_sources)
-        grid.addWidget(QLabel(t("source.label")), 0, 0)
-        grid.addWidget(self.source_combo, 0, 1)
-        grid.addWidget(refresh, 0, 2)
+        grid.addWidget(QLabel(t("source.label")), 1, 0)
+        grid.addWidget(self.source_combo, 1, 1)
+        grid.addWidget(refresh, 1, 2)
 
         self.region_label = QLabel()
         self.region_button = QPushButton(t("region.select"), clicked=self.select_region)
-        grid.addWidget(QLabel(" "), 1, 0)
-        grid.addWidget(self.region_label, 1, 1)
-        grid.addWidget(self.region_button, 1, 2)
+        grid.addWidget(QLabel(" "), 2, 0)
+        grid.addWidget(self.region_label, 2, 1)
+        grid.addWidget(self.region_button, 2, 2)
 
         self.model_combo = QComboBox()
         self.ollama_label = QLabel(t("ollama.checking"))
         self.ollama_button = QPushButton(t("ollama.start"), clicked=self._start_ollama)
         self.ollama_button.hide()
         self.setup_button = QPushButton(t("setup.button"), clicked=self.open_setup)
-        grid.addWidget(QLabel(t("model.label")), 2, 0)
-        grid.addWidget(self.model_combo, 2, 1)
-        grid.addWidget(self.ollama_label, 2, 2)
+        grid.addWidget(QLabel(t("model.label")), 3, 0)
+        grid.addWidget(self.model_combo, 3, 1)
+        grid.addWidget(self.ollama_label, 3, 2)
         ollama_buttons = QHBoxLayout()
         ollama_buttons.addWidget(self.ollama_button)
         ollama_buttons.addWidget(self.setup_button)
-        grid.addLayout(ollama_buttons, 3, 2)
+        grid.addLayout(ollama_buttons, 4, 2)
         grid.setColumnStretch(1, 1)
         layout.addLayout(grid)
 
@@ -319,8 +328,17 @@ class MainWindow(QMainWindow):
 
         self.tabs = QTabWidget()
         self.tabs.addTab(live, t("tab.live"))
+        self.profiles = ProfilesTab(self._profile)
+        self.profiles.changed.connect(self._on_profile_edited)
+        self.profiles.new_requested.connect(self.new_profile)
+        self.profiles.copy_requested.connect(self.copy_profile)
+        self.profiles.rename_requested.connect(self.rename_profile)
+        self.profiles.delete_requested.connect(self.delete_profile)
+
         self.tabs.addTab(self.appearance, t("tab.appearance"))
+        self.tabs.addTab(self.profiles, t("tab.profiles"))
         self.tabs.addTab(self.settings, t("tab.settings"))
+        self._fill_profile_combo()
         self.setCentralWidget(self.tabs)
 
     # --- settings tab, tray and warnings ----------------------------------------------------------
@@ -389,20 +407,107 @@ class MainWindow(QMainWindow):
 
     # --- profile ---------------------------------------------------------------------------------
 
-    def _load_profile(self) -> Profile:
-        try:
-            return self._store.load(PROFILE_ID)
-        except (FileNotFoundError, ValueError):
-            return Profile(
-                name="Varsayılan", vision=VisionSettings(text_colors=DEFAULT_TEXT_COLORS)
-            )
+    @staticmethod
+    def _blank_profile(name: str) -> Profile:
+        return Profile(name=name, vision=VisionSettings(text_colors=DEFAULT_TEXT_COLORS))
+
+    def _initial_profile(self) -> tuple[str, Profile]:
+        """The profile used last, else any saved one, else a new default profile."""
+        profiles = self._store.load_all()
+        last = self._config.last_profile
+        if last in profiles:
+            return last, profiles[last]
+        if profiles:
+            first = min(profiles)
+            return first, profiles[first]
+        return DEFAULT_PROFILE_ID, self._blank_profile("Varsayılan")
 
     def _save(self) -> None:
         if self._discard_changes:
             return
-        self._store.save(self._profile, PROFILE_ID)
-        self._config.last_profile = PROFILE_ID
+        self._store.save(self._profile, self._profile_id)
+        self._config.last_profile = self._profile_id
         save_config(self._config)
+
+    def _fill_profile_combo(self) -> None:
+        names = {pid: p.name for pid, p in self._store.load_all().items()}
+        names[self._profile_id] = self._profile.name  # also before its first save
+        self.profile_combo.clear()
+        for profile_id, name in sorted(names.items(), key=lambda item: item[1].casefold()):
+            self.profile_combo.addItem(name, profile_id)
+        self.profile_combo.setCurrentIndex(self.profile_combo.findData(self._profile_id))
+
+    def switch_profile(self, profile_id: str) -> None:
+        """Make another saved profile the active one; a running pipeline follows it."""
+        if profile_id == self._profile_id:
+            return
+        try:
+            profile = self._store.load(profile_id)
+        except (FileNotFoundError, ValueError) as exc:
+            self.statusBar().showMessage(t("error.internal", detail=exc), 8000)
+            self._fill_profile_combo()
+            return
+        self._flush_save()
+        self._activate(profile_id, profile)
+
+    def _activate(self, profile_id: str, profile: Profile) -> None:
+        was_active = self._state in ACTIVE_STATES
+        self._profile_id, self._profile = profile_id, profile
+        self._save()
+        self._overlay.settings = profile.overlay
+        self._overlay.clear()
+        self._overlay.update()
+        self._inspector.set_vision(profile.vision)
+        self.appearance.set_settings(profile.overlay)
+        self.settings.set_profile(profile)
+        self.profiles.set_profile(profile)
+        self._fill_profile_combo()
+        self.refresh_sources()
+        self._update_region_label()
+        if was_active:
+            if self.selected_source() is not None and profile.region is not None:
+                self._send_start()
+            else:
+                self._engine.send(StopPipeline())
+        self._place_overlay()
+        if self._calibrating:
+            self._place_region_frame()
+
+    def _flush_save(self) -> None:
+        """Save now, also a profile never saved yet (the default one before its first edit)."""
+        self._save_timer.stop()
+        self._save()
+
+    def new_profile(self, name: str) -> None:
+        self._flush_save()
+        self._activate(self._store.new_id(name), self._blank_profile(name))
+
+    def copy_profile(self, name: str) -> None:
+        self._flush_save()
+        copy = self._profile.model_copy(deep=True)
+        copy.name = name
+        self._activate(self._store.new_id(name), copy)
+
+    def rename_profile(self, name: str) -> None:
+        """The id (file name) stays: it only has to be unique, not match the name."""
+        self._profile.name = name
+        self._save()
+        self.profiles.refresh()
+        self._fill_profile_combo()
+
+    def delete_profile(self) -> None:
+        others = sorted(set(self._store.ids()) - {self._profile_id})
+        if not others:
+            self.statusBar().showMessage(t("profiles.last_one"), 5000)
+            return
+        self._save_timer.stop()
+        self._store.delete(self._profile_id)
+        self._activate(others[0], self._store.load(others[0]))
+
+    def _on_profile_edited(self) -> None:
+        self._save_timer.start()
+        self._place_overlay()  # the display monitor may have changed
+        self.appearance.refresh()
 
     # --- source & region -------------------------------------------------------------------------
 
@@ -557,7 +662,7 @@ class MainWindow(QMainWindow):
             StartPipeline(
                 profile=self._profile.model_copy(deep=True),
                 ollama=self._config.ollama,
-                profile_id=PROFILE_ID,
+                profile_id=self._profile_id,
             )
         )
         if self._calibrating:
@@ -719,7 +824,8 @@ class MainWindow(QMainWindow):
             if area is not None and region is not None
             else None
         )
-        if s.placement == OverlayPlacement.CUSTOM or subtitle is None:
+        on_monitor = s.display == OverlayDisplay.MONITOR  # e.g. the PC screen beside the TV
+        if on_monitor or s.placement == OverlayPlacement.CUSTOM or subtitle is None:
             monitor = next(
                 (m for m in monitors if m.device_name == s.monitor_device),
                 next(m for m in monitors if m.is_primary),
@@ -765,8 +871,10 @@ class MainWindow(QMainWindow):
             monitor.rect.width,
             monitor.rect.height,
         )
-        s.placement = OverlayPlacement.CUSTOM
+        if s.display == OverlayDisplay.AUTO:
+            s.placement = OverlayPlacement.CUSTOM
         self.appearance.refresh()
+        self.profiles.refresh()  # it may have been dragged to another monitor
         self._save_timer.start()
 
     def _row_for(self, line_id: int) -> int:
@@ -832,9 +940,7 @@ class MainWindow(QMainWindow):
         self._follow_timer.stop()
         self._fullscreen_timer.stop()
         self.tray.hide()
-        if self._save_timer.isActive():
-            self._save_timer.stop()
-            self._save()
+        self._flush_save()
         if self._hotkeys is not None:
             self._hotkeys.close()
         self.setup.shutdown()

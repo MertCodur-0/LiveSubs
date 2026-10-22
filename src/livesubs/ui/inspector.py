@@ -50,6 +50,7 @@ class Inspector(QWidget):
         self.setWindowTitle(t("inspector.title"))
         self.resize(760, 640)
         self.vision = vision
+        self._loading = False  # showing settings: no change events
 
         self.region_image = QLabel(t("inspector.waiting"))
         self.ocr_image = QLabel()
@@ -71,6 +72,29 @@ class Inspector(QWidget):
         layout.addWidget(self.last_read)
         layout.addWidget(self._settings_box())
         layout.addStretch(1)
+        self.refresh()
+
+    def set_vision(self, vision: VisionSettings) -> None:
+        """Edit another profile's settings."""
+        self.vision = vision
+        self.refresh()
+
+    def refresh(self) -> None:
+        self._loading = True
+        try:
+            v = self.vision
+            others = [c for c in v.text_colors if c not in (WHITE, YELLOW)]
+            if others:
+                self._custom = others[0]
+            self._paint_custom()
+            self.white.setChecked(WHITE in v.text_colors)
+            self.yellow.setChecked(YELLOW in v.text_colors)
+            self.custom.setChecked(bool(others))
+            self.tolerance.slider.setValue(v.color_tolerance)
+            self.contrast.setChecked(v.local_contrast)
+            self.min_contrast.slider.setValue(v.min_local_contrast)
+        finally:
+            self._loading = False
 
     # --- settings --------------------------------------------------------------------------------
 
@@ -84,12 +108,7 @@ class Inspector(QWidget):
         self.custom_color = QPushButton()
         self.custom_color.setFixedWidth(48)
         self.custom_color.clicked.connect(self._pick_custom)
-        others = [c for c in self.vision.text_colors if c not in (WHITE, YELLOW)]
-        self._custom = others[0] if others else "#00E5FF"
-        self._paint_custom()
-        self.white.setChecked(WHITE in self.vision.text_colors)
-        self.yellow.setChecked(YELLOW in self.vision.text_colors)
-        self.custom.setChecked(bool(others))
+        self._custom = "#00E5FF"
         for box_ in (self.white, self.yellow, self.custom):
             box_.toggled.connect(self._colors_changed)
         row = QHBoxLayout()
@@ -102,7 +121,6 @@ class Inspector(QWidget):
         form.addRow(t("inspector.tolerance"), self.tolerance)
 
         self.contrast = QCheckBox(t("inspector.local_contrast"))
-        self.contrast.setChecked(self.vision.local_contrast)
         self.contrast.toggled.connect(lambda v: self._set("local_contrast", v))
         self.min_contrast = self._slider(
             10, 160, self.vision.min_local_contrast, "min_local_contrast"
@@ -134,10 +152,14 @@ class Inspector(QWidget):
         return container
 
     def _set(self, field: str, value: object) -> None:
+        if self._loading:
+            return
         setattr(self.vision, field, value)
         self.vision_changed.emit()
 
     def _colors_changed(self) -> None:
+        if self._loading:
+            return
         colors = [c for c, box in ((WHITE, self.white), (YELLOW, self.yellow)) if box.isChecked()]
         if self.custom.isChecked():
             colors.append(self._custom)

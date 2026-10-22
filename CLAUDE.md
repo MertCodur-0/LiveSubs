@@ -262,6 +262,17 @@ loaded at startup. Pydantic models with a schema version.
   computed against the **active** profile.
 - **Overlay display target** (mainly for video-device sources, where the game monitor may not be
   connected to the PC): a specific monitor on this PC, or web/phone output only.
+- Implemented (step 11, 2026-10-22): profile combo on the Live tab (switch), **Profiller** tab
+  (`ui/tabs/profiles.py`): new / copy / rename (the id = file name stays) / delete (never the
+  last one); for the active profile: game context, glossary table (rows need both columns),
+  where the game runs (auto shows the guess from the source), VRAM reserve (auto follows the
+  location), overlay display target (auto = next to the subtitle, or a monitor: the overlay then
+  sits at `overlay.rect` on that monitor, moved with F8; the placement combo is disabled).
+  `WEB_ONLY` waits for step 17. Switching rebinds overlay, Inspector (`set_vision`), Appearance
+  (`set_settings`) and Settings (`set_profile`); a running pipeline restarts with the new profile
+  (or stops when it has no source/region). Startup: `config.last_profile`, else the first saved
+  profile, else a new "Varsayılan" (id `varsayilan`). Before a switch the current profile is
+  always saved — a never-saved default profile was lost otherwise (caught by a test).
 
 ### Overlay
 
@@ -369,7 +380,7 @@ Phase 1 — working core (source -> region -> OCR -> GPU translation -> overlay)
 
 Phase 2 — features
 - [x] 10. Calibration mode (F8): movable region frame, Inspector, overlay move/resize; hotkeys (+ appearance tab, user request)
-- [ ] 11. Profiles (incl. per-profile VRAM reserve, overlay display target)
+- [x] 11. Profiles (incl. per-profile VRAM reserve, overlay display target) — 2026-10-22
 - [ ] 12. Models tab (list, VRAM labels vs active profile, pull/cancel, delete, recommended, test/compare)
 - [~] 13. CPU quality mode — dropped by the user (2026-10-22)
 - [x] 14. Settings tab (incl. recording mode + overlap warning), tray, fullscreen warning,

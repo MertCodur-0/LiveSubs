@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from livesubs.core.profiles import OverlayPlacement, OverlaySettings
+from livesubs.core.profiles import OverlayDisplay, OverlayPlacement, OverlaySettings
 from livesubs.i18n import t
 
 PLACEMENTS = (
@@ -141,6 +141,11 @@ class AppearanceTab(QWidget):
         layout.addStretch(1)
         self.refresh()
 
+    def set_settings(self, settings: OverlaySettings) -> None:
+        """Edit another profile's overlay."""
+        self.settings = settings
+        self.refresh()
+
     def refresh(self) -> None:
         """Show the current settings (e.g. after the overlay was moved in calibration mode)."""
         s = self.settings
@@ -159,6 +164,10 @@ class AppearanceTab(QWidget):
         for widget in widgets:
             widget.blockSignals(True)
         self.placement.setCurrentIndex(PLACEMENTS.index(s.placement))
+        # On a chosen monitor (Profiles tab) the translation sits where it was moved to.
+        on_monitor = s.display == OverlayDisplay.MONITOR
+        self.placement.setEnabled(not on_monitor)
+        self.placement.setToolTip(t("appearance.placement_on_monitor") if on_monitor else "")
         self.background.setChecked(s.background)
         self.opacity.setValue(round(s.background_opacity * 100))
         self.opacity.setEnabled(s.background)

@@ -145,6 +145,12 @@ class SettingsTab(QWidget):
         row.addWidget(self.upkeep_status, 1)
         return box
 
+    def set_profile(self, profile: Profile) -> None:
+        self.profile = profile
+        self.fps.blockSignals(True)
+        self.fps.setValue(profile.capture.fps)
+        self.fps.blockSignals(False)
+
     # --- edits -----------------------------------------------------------------------------------
 
     def _set_ollama(self, field: str, value: object) -> None:

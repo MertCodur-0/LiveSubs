@@ -38,6 +38,9 @@ STRINGS: dict[str, str] = {
     "appearance.placement.over": "Altyazının yerinde (İngilizcenin üstünü kaplar)",
     "appearance.placement.below": "Altyazının altında",
     "appearance.placement.custom": "Serbest (F8 ayar modunda taşıyıp boyutlandırın)",
+    "appearance.placement_on_monitor": (
+        "Profilde ayrı bir ekran seçili: çeviri o ekranda F8 ile taşındığı yerde durur."
+    ),
     "appearance.box": "Arka plan",
     "appearance.background": "Siyah kutu",
     "appearance.font": "Yazı tipi",
@@ -168,6 +171,53 @@ STRINGS: dict[str, str] = {
         "Şimdi yeniden başlatılsın mı?"
     ),
     "setup.close": "Kapat",
+    # Profiles
+    "profile.label": "Profil",
+    "tab.profiles": "Profiller",
+    "profiles.manage": "Profil",
+    "profiles.active": "Etkin profil: <b>{name}</b>",
+    "profiles.new": "Yeni…",
+    "profiles.copy": "Kopyala…",
+    "profiles.rename": "Yeniden adlandır…",
+    "profiles.delete": "Sil",
+    "profiles.name": "Profil adı:",
+    "profiles.copy_name": "{name} (kopya)",
+    "profiles.delete_confirm": "“{name}” profili silinsin mi? Bu geri alınamaz.",
+    "profiles.last_one": "Son profil silinemez.",
+    "profiles.hint": (
+        "Her oyun için ayrı profil açın: kaynak, altyazı bölgesi, renkler, görünüm ve çeviri "
+        "ayarları profilde saklanır. Profiller arasında Canlı sekmesindeki listeden geçilir."
+    ),
+    "profiles.translation": "Çeviri",
+    "profiles.context": "Oyun hakkında",
+    "profiles.context_placeholder": (
+        "Çevirmene oyunu anlatın (İngilizce ya da Türkçe), ör. \"1980'ler Miami'sinde geçen, "
+        'argolu bir suç hikâyesi. Tommy bir gangster."'
+    ),
+    "profiles.glossary": "Sözlük",
+    "profiles.glossary_add": "Satır ekle",
+    "profiles.glossary_remove": "Seçili satırları sil",
+    "profiles.translation_hint": (
+        "Sözlükteki kelimeler her zaman böyle çevrilir; çevrilmemesi gereken isimleri aynen "
+        "yazın (ör. Vice City → Vice City). Değişiklikler bir sonraki Başlat'ta geçerli olur."
+    ),
+    "profiles.game": "Oyun ve ekran",
+    "profiles.location": "Oyun nerede çalışıyor",
+    "profiles.location.auto": "Otomatik (kaynağa göre: {guess})",
+    "profiles.guess.this_pc": "bu bilgisayarda",
+    "profiles.guess.elsewhere": "başka cihazda",
+    "profiles.location.this_pc": "Bu bilgisayarda",
+    "profiles.location.elsewhere": "Başka cihazda (PS5, Remote Play, capture card)",
+    "profiles.reserve": "Oyuna ayrılan ekran kartı belleği",
+    "profiles.reserve_auto": "Otomatik",
+    "profiles.display": "Çevirinin gösterileceği ekran",
+    "profiles.display.auto": "Altyazının olduğu ekran (otomatik)",
+    "profiles.display.monitor": "{name} ({width}x{height}) — F8 ile konumlandırın",
+    "profiles.game_hint": (
+        "Oyun bu bilgisayarda çalışıyorsa ekran kartı belleğinin bir kısmı ona kalır; model "
+        "seçerken bu dikkate alınır. Oyunu TV'de oynayıp çeviriyi bilgisayar ekranında okumak "
+        "için o ekranı seçin ve F8 ayar modunda çeviriyi istediğiniz yere taşıyın."
+    ),
     # Settings tab
     "tab.settings": "Ayarlar",
     "settings.translation": "Çeviri ve okuma",
