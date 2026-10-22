@@ -37,4 +37,5 @@ def main() -> int:
 
     window = MainWindow(EngineProcess())
     window.show()
+    window.run_setup_check()
     return app.exec()

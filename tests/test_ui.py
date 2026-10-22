@@ -4,9 +4,11 @@ import numpy as np
 import pytest
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QGuiApplication
+from PySide6.QtWidgets import QMessageBox
 from pytestqt.qtbot import QtBot
 
-from livesubs.core.config import AppConfig
+from livesubs.core import paths
+from livesubs.core.config import AppConfig, load_config
 from livesubs.core.geometry import NormRect, Rect
 from livesubs.core.messages import (
     Command,
@@ -528,3 +530,29 @@ def test_calibration_drives_debug_frames_and_vision(window: MainWindow) -> None:
     window.set_calibration(False)
     assert SetDebug(False) in engine.sent
     assert not window._inspector.isVisible()
+
+
+# --- setup --------------------------------------------------------------------------------------
+
+
+def test_model_from_setup_becomes_the_translation_model(window: MainWindow) -> None:
+    window.setup.model_selected.emit("gemma4:26b-a4b-it-qat")
+    assert window._config.ollama.gpu_model == "gemma4:26b-a4b-it-qat"
+    assert load_config().ollama.gpu_model == "gemma4:26b-a4b-it-qat"
+
+
+def test_imported_settings_are_not_overwritten(
+    window: MainWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "livesubs.ui.main_window.QMessageBox.question",
+        lambda *args: QMessageBox.StandardButton.No,
+    )
+    window.setup.settings_imported.emit()
+    window.set_region(NormRect(x=0.1, y=0.8, width=0.8, height=0.1))
+    assert not paths.config_file().exists()
+
+
+def test_missing_ocr_language_opens_setup(window: MainWindow) -> None:
+    window.handle(EngineError(ErrorKind.OCR_UNAVAILABLE, "no English", fatal=True))
+    assert window.setup.isVisible()

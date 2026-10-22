@@ -490,3 +490,33 @@ def set_app_user_model_id(app_id: str) -> bool:
     """Groups the process's windows under ``app_id`` on the taskbar instead of under the Python
     interpreter that runs it (the packaged LiveSubs.exe is a renamed pythonw.exe)."""
     return _SetCurrentProcessExplicitAppUserModelID(app_id) == 0
+
+
+# --- System --------------------------------------------------------------------------------------
+
+
+class _MEMORYSTATUSEX(ctypes.Structure):
+    _fields_ = (
+        ("dwLength", _DWORD),
+        ("dwMemoryLoad", _DWORD),
+        ("ullTotalPhys", ctypes.c_uint64),
+        ("ullAvailPhys", ctypes.c_uint64),
+        ("ullTotalPageFile", ctypes.c_uint64),
+        ("ullAvailPageFile", ctypes.c_uint64),
+        ("ullTotalVirtual", ctypes.c_uint64),
+        ("ullAvailVirtual", ctypes.c_uint64),
+        ("ullAvailExtendedVirtual", ctypes.c_uint64),
+    )
+
+
+_GlobalMemoryStatusEx = _fn(
+    _kernel32, "GlobalMemoryStatusEx", _BOOL, ctypes.POINTER(_MEMORYSTATUSEX)
+)
+
+
+def total_ram_bytes() -> int:
+    """Physical memory usable by Windows (a "32 GB" machine reports a little less)."""
+    status = _MEMORYSTATUSEX(dwLength=ctypes.sizeof(_MEMORYSTATUSEX))
+    if not _GlobalMemoryStatusEx(ctypes.byref(status)):
+        _raise_last_error()
+    return status.ullTotalPhys

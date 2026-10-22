@@ -103,6 +103,71 @@ STRINGS: dict[str, str] = {
     "ollama.offline": "Ollama çalışmıyor",
     "ollama.start": "Ollama'yı başlat",
     "ollama.not_installed": "Ollama kurulu değil (ollama.com)",
+    # Setup (first run, fresh Windows install)
+    "setup.button": "Kurulum…",
+    "setup.title": "LiveSubs — Kurulum",
+    "setup.intro": (
+        "LiveSubs'ın çalışması için gerekenler aşağıda. Eksik olanları buradan kurabilirsiniz; "
+        "hepsi yeşil olunca pencereyi kapatıp Başlat'a basın."
+    ),
+    "setup.ocr": "İngilizce OCR",
+    "setup.ocr.ok": "✔ Yüklü ({language})",
+    "setup.ocr.missing": "✘ Yüklü değil — altyazılar okunamaz",
+    "setup.ocr.install": "Yükle (yönetici izni)",
+    "setup.ocr.installing": "Kuruluyor… Açılan PowerShell penceresi kapanınca hazır olur.",
+    "setup.ocr.declined": "Yönetici izni verilmedi.",
+    "setup.ocr.restart": "Hâlâ görünmüyor: kurulum bittiyse LiveSubs'ı yeniden başlatın.",
+    "setup.ollama": "Ollama",
+    "setup.ollama.ok": "✔ Kurulu ve çalışıyor",
+    "setup.ollama.stopped": "✘ Kurulu ama çalışmıyor",
+    "setup.ollama.missing": "✘ Kurulu değil — çeviri yapılamaz",
+    "setup.ollama.install": "Kur",
+    "setup.ollama.start": "Başlat",
+    "setup.ollama.installing": "Ollama indirilip kuruluyor (~1 GB, birkaç dakika sürebilir)…",
+    "setup.ollama.starting": "Ollama başlatılıyor (ilk açılışta 1 dakikayı bulabilir)…",
+    "setup.ollama.failed": "Kurulum başarısız: {detail}. İndirme sayfası açılıyor.",
+    "setup.ollama.no_winget": "winget bulunamadı; Ollama indirme sayfası açıldı.",
+    "setup.model": "Çeviri modeli",
+    "setup.model.ok": "✔ {model} yüklü",
+    "setup.model.missing": "✘ Seçili model ({model}) yüklü değil — aşağıdan indirin ya da seçin",
+    "setup.model.needs_ollama": "Önce Ollama gerekli",
+    "setup.model.download": "İndir",
+    "setup.model.use": "Bunu kullan",
+    "setup.model.in_use": "Kullanılıyor",
+    "setup.model.cancel": "İptal",
+    "setup.model.progress": "{status}: {done:.1f} / {total:.1f} GB",
+    "setup.model.progress_unknown": "{status}…",
+    "setup.model.cancelled": "İndirme durduruldu; tekrar İndir'e basınca kaldığı yerden sürer.",
+    "setup.model.failed": "İndirme başarısız: {detail}",
+    "setup.model.no_space": (
+        "Diskte yer yok: {need:.1f} GB gerekli, {free:.1f} GB boş ({folder})."
+    ),
+    "setup.model.recommended": " (bu bilgisayar için önerilen)",
+    "catalog.gemma4_26b": "En iyi çeviri, ~1,3 sn/satır, 32 GB RAM ister — {size:.1f} GB",
+    "catalog.gemma4_12b": "Çok iyi çeviri, ~1,2 sn/satır, 16 GB RAM yeter — {size:.1f} GB",
+    "setup.shortcut": "Kısayol",
+    "setup.shortcut.ok": "✔ Masaüstünde ve Başlat menüsünde",
+    "setup.shortcut.missing": "Masaüstü ve Başlat menüsü kısayolu yok",
+    "setup.shortcut.create": "Oluştur",
+    "setup.shortcut.recreate": "Bu kopyaya yeniden oluştur",
+    "setup.shortcut.failed": "Kısayol oluşturulamadı.",
+    "setup.backup": "Ayarlar",
+    "setup.backup.hint": "Format öncesi dışa aktarın, kurulumdan sonra içe aktarın.",
+    "setup.export": "Dışa aktar…",
+    "setup.import": "İçe aktar…",
+    "setup.export.title": "Ayarları dışa aktar",
+    "setup.import.title": "Ayarları içe aktar",
+    "setup.backup.filter": "LiveSubs ayarları (*.zip)",
+    "setup.backup.default_name": "LiveSubs-ayarlar.zip",
+    "setup.export.done": "{count} dosya kaydedildi: {path}",
+    "setup.import.done": "{count} dosya içe aktarıldı.",
+    "setup.backup.failed": "İşlem başarısız: {detail}",
+    "setup.restart.title": "Yeniden başlatma",
+    "setup.restart.text": (
+        "İçe aktarılan ayarlar LiveSubs yeniden başlayınca geçerli olur. "
+        "Şimdi yeniden başlatılsın mı?"
+    ),
+    "setup.close": "Kapat",
     # Engine states
     "state.idle": "Hazır",
     "state.starting": "Kaynak açılıyor…",
@@ -115,8 +180,7 @@ STRINGS: dict[str, str] = {
     "error.source_unavailable": "Kaynak açılamadı. Pencere kapalı ya da simge durumunda olabilir.",
     "error.source_lost": "Kaynak kapandı.",
     "error.ocr_unavailable": (
-        "İngilizce OCR paketi yüklü değil. Windows Ayarlar > Saat ve dil > Dil'den "
-        "İngilizce (ABD) ekleyin."
+        "İngilizce OCR paketi yüklü değil: Kurulum… penceresinden tek tıkla yükleyebilirsiniz."
     ),
     "error.ollama_unavailable": "Ollama'ya ulaşılamıyor; yalnızca İngilizce gösteriliyor.",
     "error.model_not_found": "Model yüklü değil: {detail}",

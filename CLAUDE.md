@@ -292,8 +292,16 @@ remaining size, cancel. Minimizes to tray.
 - Web output: stdlib `ThreadingHTTPServer` + Server-Sent Events, QR via `qrcode`; firewall note
   in the UI. Page uses the Screen Wake Lock API so the phone screen stays on; if unsupported, show a
   "disable screen timeout" hint. Vice-themed, large readable text, works in portrait and landscape.
-- Startup checks: Ollama installed/running, models present, en-US OCR (button runs
-  `Add-WindowsCapability -Online -Name Language.OCR~~~en-US~0.0.1.0` elevated).
+- Startup checks (`ui/setup_check.py`, done 2026-10-22): **Kurulum** dialog, opened at start only
+  when something is missing (and on `ocr_unavailable` / `model_not_found` engine errors, and from
+  the "Kurulum…" button): en-US OCR (elevated `Add-WindowsCapability`, then polls 10 min),
+  Ollama (installed? running? -> `winget install Ollama.Ollama --silent` (`ollama/install.py`),
+  start, `wait_until_running` 90 s; no winget -> download page), translation model
+  (`ollama/catalog.py`: gemma4:26b-a4b if total RAM >= 24 GB else gemma4:12b; free-disk check;
+  `client.pull_model` streams `/api/pull` with summed per-file progress, cancel, resumes),
+  desktop + Start menu shortcuts for the packaged exe (`platform/shortcuts.py`, WScript.Shell via
+  PowerShell), settings export/import (`core/backup.py`: zip of `config.json` + `profiles/*.json`;
+  import takes only those names, then offers a restart and stops saving the old settings).
 - Theme: `ui/theme/base.qss` template + token files (`vice.json` default, `dark.json`).
   Fonts (OFL, Google Fonts): Monoton or Neonderthaw (logo), Audiowide (headings), Inter (body);
   font licenses listed in the README. Palette: dark purple/night-blue base; neon pink/magenta,
@@ -317,15 +325,15 @@ remaining size, cancel. Minimizes to tray.
 assets/        icon.svg, header.svg, fonts/ (+ OFL licenses)
 src/livesubs/
   app.py, __main__.py, i18n/
-  core/        config.py, profiles.py, paths.py, jsonio.py, geometry.py, messages.py
+  core/        config.py, profiles.py, paths.py, jsonio.py, geometry.py, messages.py, backup.py
   engine/      process.py, pipeline.py
     capture/   base.py, wgc.py, mss_fallback.py, factory.py, video_device.py (phase 2)
     vision/    preprocess.py, change.py
     ocr/       winrt_ocr.py, language.py
     text/      normalize.py, filters.py, stabilizer.py
     translate/ base.py, ollama.py, orchestrator.py, prompt.py, cache.py
-  ollama/      client.py, catalog.py, vram.py, recommended_models.json
-  platform/    win32.py
+  ollama/      client.py, catalog.py, install.py, vram.py
+  platform/    win32.py, hotkeys.py, shortcuts.py
   ui/          main_window.py, overlay.py, region_frame.py, inspector.py, tray.py,
                setup_check.py, tabs/, theme/
   web/         server.py, static/
@@ -354,15 +362,16 @@ Phase 2 — features
 - [ ] 11. Profiles (incl. per-profile VRAM reserve, overlay display target)
 - [ ] 12. Models tab (list, VRAM labels vs active profile, pull/cancel, delete, recommended, test/compare)
 - [~] 13. CPU quality mode — dropped by the user (2026-10-22)
-- [ ] 14. Settings tab (incl. recording mode + overlap warning), startup checks, tray, fullscreen warning
+- [ ] 14. Settings tab (incl. recording mode + overlap warning), tray, fullscreen warning;
+  startup checks **done** (setup dialog, 2026-10-22)
 - [ ] 15. Video device source (capture card): enumerate, resolution/fps, busy/HDCP errors, inspector region pick (done as 9b)
 - [ ] 16. Vice theme, fonts, SVG icon/header, overlay styles
 - [ ] 17. Web output + QR (+ Screen Wake Lock)
 
 Phase 3 — release
-- [ ] 18. Release: build script **done** (embeddable signed Python, runs under Smart App Control,
-  2026-10-22); left: first-run setup for a fresh PC (user: "format atınca GitHub'dan indirip hızlıca
-  kurayım" — Ollama, model, en-US OCR; part of step 14), version bump, GitHub Release with the zip
+- [x] 18. Release: build script (embeddable signed Python, runs under Smart App Control), first-run
+  setup, **v0.1.0 GitHub Release** with the zip (2026-10-22). Repeat for later versions: bump
+  `__version__`, `.\scripts\build_exe.ps1`, `gh release create vX.Y.Z dist\LiveSubs-X.Y.Z-win64.zip`
 - [ ] 19. README (architecture diagram, install, GIF slot), screenshots
 
 ## Known risks
@@ -542,3 +551,10 @@ Phase 3 — release
   code signing certificate needed for now. User's goal for the exe: after reinstalling Windows,
   **download the zip from the GitHub repo and be running quickly** -> next: first-run setup that
   finds/installs what the app needs (Ollama, the model, en-US OCR), then a GitHub Release.
+- 2026-10-22: **First-run setup + v0.1.0 release** for the user's goal "after a Windows reinstall,
+  download from GitHub and be running quickly": unzip, double-click LiveSubs.exe, the Kurulum
+  dialog installs what is missing (OCR language, Ollama via winget, the model by RAM), creates
+  shortcuts, and imports the settings zip exported before the reinstall. Verified live: `/api/pull`
+  of an installed model (10 updates, 1.1 s, sizes summed per file), the shortcut script in a temp
+  folder, the dialog rendered from the packaged exe; a fresh-PC run (winget install, OCR install)
+  is not testable here. Sizes shown in GB = 10^9 like Ollama.

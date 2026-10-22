@@ -6,6 +6,8 @@ Talks to the engine process only through messages; polls its events every 30 ms 
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -22,6 +24,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QMainWindow,
+    QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -38,6 +41,7 @@ from livesubs.core.messages import (
     DebugFrame,
     EngineError,
     EngineState,
+    ErrorKind,
     Event,
     FrameInfo,
     SetDebug,
@@ -71,6 +75,7 @@ from livesubs.ui.pick import resolve
 from livesubs.ui.placement import custom_geometry, monitor_at, overlay_geometry
 from livesubs.ui.region_frame import RegionFrame
 from livesubs.ui.region_select import RegionPicker
+from livesubs.ui.setup_check import SetupDialog
 from livesubs.ui.tabs.appearance import AppearanceTab
 
 PROFILE_ID = "varsayilan"
@@ -90,6 +95,7 @@ TEXT_ALIGN = {
     OverlayPlacement.BELOW: Qt.AlignmentFlag.AlignTop,
     OverlayPlacement.CUSTOM: Qt.AlignmentFlag.AlignBottom,
 }
+SETUP_ERRORS = (ErrorKind.OCR_UNAVAILABLE, ErrorKind.MODEL_NOT_FOUND)
 # Games mostly use white subtitles, some speakers yellow.
 DEFAULT_TEXT_COLORS = ["#FFFFFF", "#FFFF00"]
 
@@ -177,6 +183,10 @@ class MainWindow(QMainWindow):
         self._paused = False
         self._bridge = _Bridge()
         self._bridge.models.connect(self._on_models)
+        self._discard_changes = False  # settings were imported: never write the old ones back
+        self.setup = SetupDialog(self._config, self)
+        self.setup.model_selected.connect(self._on_model_selected)
+        self.setup.settings_imported.connect(self._on_settings_imported)
 
         self._build()
         self.refresh_sources()
@@ -224,10 +234,14 @@ class MainWindow(QMainWindow):
         self.ollama_label = QLabel(t("ollama.checking"))
         self.ollama_button = QPushButton(t("ollama.start"), clicked=self._start_ollama)
         self.ollama_button.hide()
+        self.setup_button = QPushButton(t("setup.button"), clicked=self.open_setup)
         grid.addWidget(QLabel(t("model.label")), 2, 0)
         grid.addWidget(self.model_combo, 2, 1)
         grid.addWidget(self.ollama_label, 2, 2)
-        grid.addWidget(self.ollama_button, 3, 2)
+        ollama_buttons = QHBoxLayout()
+        ollama_buttons.addWidget(self.ollama_button)
+        ollama_buttons.addWidget(self.setup_button)
+        grid.addLayout(ollama_buttons, 3, 2)
         grid.setColumnStretch(1, 1)
         layout.addLayout(grid)
 
@@ -292,6 +306,8 @@ class MainWindow(QMainWindow):
             )
 
     def _save(self) -> None:
+        if self._discard_changes:
+            return
         self._store.save(self._profile, PROFILE_ID)
         self._config.last_profile = PROFILE_ID
         save_config(self._config)
@@ -393,6 +409,36 @@ class MainWindow(QMainWindow):
     def _start_ollama(self) -> None:
         if not start_ollama():
             self.ollama_label.setText(t("ollama.not_installed"))
+            self.open_setup()
+
+    # --- setup -----------------------------------------------------------------------------------
+
+    def run_setup_check(self) -> None:
+        """At startup: open the setup dialog when OCR, Ollama or the model is missing."""
+        self.setup.check_on_startup()
+
+    def open_setup(self) -> None:
+        self.setup.refresh()
+        self.setup.show()
+        self.setup.raise_()
+        self.setup.activateWindow()
+
+    def _on_model_selected(self, name: str) -> None:
+        self._config.ollama.gpu_model = name
+        self._save()
+        self.model_combo.clear()  # refilled by the check with the new model selected
+        self.check_ollama()
+
+    def _on_settings_imported(self) -> None:
+        self._discard_changes = True
+        answer = QMessageBox.question(self.setup, t("setup.restart.title"), t("setup.restart.text"))
+        if answer == QMessageBox.StandardButton.Yes:
+            self.restart()
+
+    def restart(self) -> None:
+        """Start a new instance (same interpreter and arguments) and close this one."""
+        subprocess.Popen([sys.executable, *sys.orig_argv[1:]], close_fds=True)
+        self.close()
 
     # --- start / stop ----------------------------------------------------------------------------
 
@@ -438,6 +484,8 @@ class MainWindow(QMainWindow):
                 self._set_state(state, detail)
             case EngineError(kind=kind, message=message):
                 self.statusBar().showMessage(t(f"error.{kind}", detail=message), 15000)
+                if kind in SETUP_ERRORS:  # missing on this PC: the setup dialog fixes it
+                    self.open_setup()
             case FrameInfo():
                 self._frame = event
                 self._place_overlay()
@@ -689,6 +737,8 @@ class MainWindow(QMainWindow):
             self._save()
         if self._hotkeys is not None:
             self._hotkeys.close()
+        self.setup.shutdown()
+        self.setup.close()
         self._region_frame.close()
         self._inspector.close()
         self._overlay.close()

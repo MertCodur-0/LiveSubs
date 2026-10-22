@@ -1,12 +1,16 @@
-"""Minimal Ollama client for the UI: is it running, which models are installed, start it.
+"""Ollama client for the UI: is it installed and running, which models it has; start it, pull.
 
-The full model manager (pull, delete, VRAM estimates) comes with the Models tab.
+The full model manager (delete, VRAM estimates) comes with the Models tab.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
+import threading
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -44,13 +48,27 @@ def list_models(url: str = DEFAULT_URL, timeout: float = 3.0) -> list[InstalledM
     return sorted(models, key=lambda m: m.name)
 
 
+def _install_dir() -> Path | None:
+    local = os.environ.get("LOCALAPPDATA")
+    return Path(local) / "Programs" / "Ollama" if local else None
+
+
 def ollama_app_path() -> Path | None:
     """The tray app installed by the Ollama installer (it starts the server)."""
-    local = os.environ.get("LOCALAPPDATA")
-    if not local:
-        return None
-    path = Path(local) / "Programs" / "Ollama" / "ollama app.exe"
-    return path if path.is_file() else None
+    folder = _install_dir()
+    path = folder / "ollama app.exe" if folder else None
+    return path if path is not None and path.is_file() else None
+
+
+def is_installed() -> bool:
+    return ollama_app_path() is not None
+
+
+def models_dir() -> Path:
+    """Where Ollama stores model files (``OLLAMA_MODELS`` moves them)."""
+    if custom := os.environ.get("OLLAMA_MODELS"):
+        return Path(custom)
+    return Path.home() / ".ollama" / "models"
 
 
 def start_ollama() -> bool:
@@ -61,3 +79,76 @@ def start_ollama() -> bool:
     flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
     subprocess.Popen([str(app)], creationflags=flags, close_fds=True)
     return True
+
+
+def wait_until_running(url: str = DEFAULT_URL, timeout: float = 90.0) -> bool:
+    """Wait for a starting server. Its GPU discovery alone took ~40 s once on the dev machine."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if list_models(url, timeout=2.0) is not None:
+            return True
+        time.sleep(1.0)
+    return False
+
+
+class PullError(Exception):
+    """The download failed (unknown model name, network, disk full); the message says why."""
+
+
+class PullCancelledError(Exception):
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class PullProgress:
+    status: str  # Ollama's status text, e.g. "pulling manifest", "verifying sha256 digest"
+    completed: int  # bytes, summed over the model's files
+    total: int  # 0 until the sizes are known
+
+
+def pull_model(
+    name: str,
+    on_progress: Callable[[PullProgress], None],
+    cancel: threading.Event,
+    url: str = DEFAULT_URL,
+) -> None:
+    """Download ``name`` through ``/api/pull``. Blocks; ``cancel`` stops it between updates.
+
+    Ollama keeps partial downloads, so pulling the same model again resumes it.
+    """
+    files: dict[str, tuple[int, int]] = {}  # digest -> (completed, total)
+    try:
+        with httpx.stream(
+            "POST",
+            f"{url}/api/pull",
+            json={"model": name, "stream": True},
+            timeout=httpx.Timeout(10.0, read=120.0),
+        ) as response:
+            if response.status_code != 200:
+                response.read()
+                raise PullError(_error_text(response.text) or f"HTTP {response.status_code}")
+            for line in response.iter_lines():
+                if cancel.is_set():
+                    raise PullCancelledError
+                if not line.strip():
+                    continue
+                update = json.loads(line)
+                if "error" in update:
+                    raise PullError(update["error"])
+                if digest := update.get("digest"):
+                    files[digest] = (update.get("completed", 0), update.get("total", 0))
+                completed = sum(done for done, _ in files.values())
+                total = sum(size for _, size in files.values())
+                on_progress(PullProgress(update.get("status", ""), completed, total))
+                if update.get("status") == "success":
+                    return
+    except httpx.HTTPError as exc:
+        raise PullError(str(exc) or type(exc).__name__) from exc
+    raise PullError("download ended without success")
+
+
+def _error_text(body: str) -> str:
+    try:
+        return json.loads(body).get("error", "")
+    except (ValueError, AttributeError):
+        return body.strip()
