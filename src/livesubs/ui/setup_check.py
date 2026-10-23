@@ -1,7 +1,8 @@
 """Setup: what LiveSubs needs on this PC, with one-click fixes (first run, fresh Windows install).
 
 Checks English OCR, Ollama (installed, running) and the translation model; installs Ollama with
-winget, downloads the model with progress, creates shortcuts for the packaged exe, and exports or
+winget, downloads the model with progress (then makes its text-only copy where the catalog names
+one), creates shortcuts for the packaged exe, and exports or
 imports the settings. Slow work runs on worker threads; results come back through signals.
 """
 
@@ -35,9 +36,11 @@ from livesubs.core.config import AppConfig
 from livesubs.i18n import t
 from livesubs.ollama import catalog, install
 from livesubs.ollama.client import (
+    OllamaError,
     PullCancelledError,
     PullError,
     PullProgress,
+    create_text_only,
     is_installed,
     list_models,
     models_dir,
@@ -106,6 +109,7 @@ class _Bridge(QObject):
     progress = Signal(object)  # PullProgress
     pull_finished = Signal(str, str)  # model, error ("" = done, CANCELLED)
     ollama_finished = Signal(str)  # error, "" = running
+    prepared = Signal(str, str)  # model to use, error making the text-only copy ("" = none)
 
 
 class SetupDialog(QDialog):
@@ -127,12 +131,14 @@ class SetupDialog(QDialog):
         self._checker = checker
         self._status: SetupStatus | None = None
         self._cancel: threading.Event | None = None
+        self._preparing = False
         self._ocr_polls = 0
         self._bridge = _Bridge()
         self._bridge.status.connect(self._on_status)
         self._bridge.progress.connect(self._on_progress)
         self._bridge.pull_finished.connect(self._on_pull_finished)
         self._bridge.ollama_finished.connect(self._on_ollama_finished)
+        self._bridge.prepared.connect(self._on_prepared)
         self._ocr_timer = QTimer(self, interval=OCR_POLL_MS, timeout=self._poll_ocr)
         ram = ram_gb if ram_gb is not None else win32.total_ram_bytes() / GB
         self._recommended = catalog.recommend(ram)
@@ -258,8 +264,10 @@ class SetupDialog(QDialog):
             self.ollama_button.show()
 
         model = self._config.ollama.gpu_model
-        if first and status.has_model(model) and (index := self.model_combo.findData(model)) >= 0:
-            self.model_combo.setCurrentIndex(index)  # later checks keep the user's choice
+        entry = catalog.entry_for(model)
+        if first and status.has_model(model) and entry is not None:
+            # Later checks keep the user's choice.
+            self.model_combo.setCurrentIndex(self.model_combo.findData(entry.name))
         if not status.ollama_running:
             self.model_status.setText(t("setup.model.needs_ollama"))
         elif status.has_model(model):
@@ -276,17 +284,29 @@ class SetupDialog(QDialog):
     def downloading(self) -> bool:
         return self._cancel is not None
 
+    @property
+    def busy(self) -> bool:
+        return self.downloading or self._preparing
+
+    def _entry(self) -> catalog.CatalogModel:
+        name = self.model_combo.currentData()
+        return next(m for m in catalog.RECOMMENDED if m.name == name)
+
     def _update_model_button(self) -> None:
-        status, name = self._status, self.model_combo.currentData()
-        installed = status is not None and status.has_model(name)
-        in_use = installed and catalog.same_model(name, self._config.ollama.gpu_model)
+        status, entry = self._status, self._entry()
+        installed = status is not None and status.has_model(entry.name)
+        in_use = (
+            installed
+            and status.has_model(entry.use_name)
+            and catalog.same_model(entry.use_name, self._config.ollama.gpu_model)
+        )
         if in_use:
             self.model_button.setText(t("setup.model.in_use"))
         else:
             self.model_button.setText(t("setup.model.use" if installed else "setup.model.download"))
         ready = status is not None and status.ollama_running
-        self.model_button.setEnabled(ready and not in_use and not self.downloading)
-        self.model_combo.setEnabled(not self.downloading)
+        self.model_button.setEnabled(ready and not in_use and not self.busy)
+        self.model_combo.setEnabled(not self.busy)
 
     # --- English OCR -----------------------------------------------------------------------------
 
@@ -349,12 +369,10 @@ class SetupDialog(QDialog):
     # --- model -----------------------------------------------------------------------------------
 
     def get_model(self) -> None:
-        name = self.model_combo.currentData()
-        if self._status is not None and self._status.has_model(name):
-            self.model_selected.emit(name)
-            self.refresh()
+        entry = self._entry()
+        if self._status is not None and self._status.has_model(entry.name):
+            self.use_model(entry)
             return
-        entry = next(m for m in catalog.RECOMMENDED if m.name == name)
         folder = models_dir()
         free = free_bytes(folder)
         if free < entry.download_bytes * 1.05:
@@ -367,7 +385,7 @@ class SetupDialog(QDialog):
                 )
             )
             return
-        self.start_download(name)
+        self.start_download(entry.name)
 
     def start_download(self, name: str) -> None:
         cancel = threading.Event()
@@ -419,7 +437,45 @@ class SetupDialog(QDialog):
             self.progress_label.setText(t("setup.model.failed", detail=error))
         else:
             self.progress_label.clear()
+            if (entry := catalog.entry_for(name)) is not None:
+                self.use_model(entry)
+                return
             self.model_selected.emit(name)
+        self._update_model_button()
+        self.refresh()
+
+    def use_model(self, entry: catalog.CatalogModel) -> None:
+        """Select an installed catalog model; first make its text-only copy if it has one."""
+        if not entry.text_only or (
+            self._status is not None and self._status.has_model(entry.text_only)
+        ):
+            self.model_selected.emit(entry.use_name)
+            self._update_model_button()
+            self.refresh()
+            return
+        self._preparing = True
+        self.progress_label.setText(t("setup.model.preparing"))
+        self._update_model_button()
+        url = self._config.ollama.url
+
+        def work() -> None:
+            try:
+                create_text_only(entry.name, entry.text_only, url)
+            except OllamaError as exc:
+                log.warning("Text-only copy of %s failed: %s", entry.name, exc)
+                self._bridge.prepared.emit(entry.name, str(exc))
+            else:
+                self._bridge.prepared.emit(entry.text_only, "")
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_prepared(self, model: str, error: str) -> None:
+        self._preparing = False
+        if error:
+            self.progress_label.setText(t("setup.model.text_only_failed", detail=error))
+        else:
+            self.progress_label.clear()
+        self.model_selected.emit(model)
         self._update_model_button()
         self.refresh()
 

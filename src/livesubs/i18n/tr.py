@@ -152,7 +152,11 @@ STRINGS: dict[str, str] = {
         "Diskte yer yok: {need:.1f} GB gerekli, {free:.1f} GB boş ({folder})."
     ),
     "setup.model.recommended": " (bu bilgisayar için önerilen)",
-    "catalog.gemma4_26b": "En iyi çeviri, ~1,3 sn/satır, 32 GB RAM ister — {size:.1f} GB",
+    "setup.model.preparing": "Modelin görüntü bölümü olmayan, daha hızlı kopyası hazırlanıyor…",
+    "setup.model.text_only_failed": (
+        "Hızlı kopya hazırlanamadı ({detail}); model olduğu gibi kullanılıyor."
+    ),
+    "catalog.gemma4_26b": "En iyi çeviri, ~1,15 sn/satır, 32 GB RAM ister — {size:.1f} GB",
     "catalog.gemma4_12b": "Çok iyi çeviri, ~1,2 sn/satır, 16 GB RAM yeter — {size:.1f} GB",
     "setup.shortcut": "Kısayol",
     "setup.shortcut.ok": "✔ Masaüstünde ve Başlat menüsünde",

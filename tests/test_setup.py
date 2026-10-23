@@ -16,9 +16,12 @@ from livesubs.core.config import AppConfig
 from livesubs.ollama import catalog
 from livesubs.ollama.client import (
     DEFAULT_URL,
+    OllamaError,
     PullCancelledError,
     PullError,
     PullProgress,
+    create_text_only,
+    parse_parameters,
     pull_model,
 )
 from livesubs.ollama.install import WINGET_ID, install_command
@@ -27,6 +30,7 @@ from livesubs.ui import setup_check
 from livesubs.ui.setup_check import SetupDialog, SetupStatus, free_bytes
 
 BIG, SMALL = (m.name for m in catalog.RECOMMENDED)
+BIG_TEXT = catalog.RECOMMENDED[0].text_only
 
 
 # --- catalog ------------------------------------------------------------------------------------
@@ -37,6 +41,14 @@ BIG, SMALL = (m.name for m in catalog.RECOMMENDED)
 )
 def test_recommendation_follows_ram(ram_gb: float, expected: str) -> None:
     assert catalog.recommend(ram_gb).name == expected
+
+
+def test_catalog_entries_are_found_by_their_text_only_copy() -> None:
+    assert BIG_TEXT
+    assert catalog.entry_for(BIG_TEXT).name == BIG
+    assert catalog.entry_for(BIG).use_name == BIG_TEXT
+    assert catalog.entry_for(SMALL).use_name == SMALL
+    assert catalog.entry_for("qwen3:8b") is None
 
 
 def test_untagged_names_mean_latest() -> None:
@@ -136,6 +148,63 @@ def test_pull_can_be_cancelled() -> None:
     with pytest.raises(PullCancelledError):
         pull_model("m", on_progress, cancel)
     assert len(seen) == 1
+
+
+# --- text-only copy -----------------------------------------------------------------------------
+
+
+def write_manifest(models: Path, name: str, layers: list[tuple[str, str]]) -> None:
+    model, tag = name.split(":")
+    path = models / "manifests" / "registry.ollama.ai" / "library" / model / tag
+    path.parent.mkdir(parents=True)
+    entries = [
+        {"mediaType": f"application/vnd.ollama.image.{kind}", "digest": digest}
+        for kind, digest in layers
+    ]
+    path.write_text(json.dumps({"layers": entries}), encoding="utf-8")
+
+
+def test_show_parameters_become_create_parameters() -> None:
+    text = 'temperature                    1\ntop_p     0.95\nstop "<a>"\nstop "<b>"\n'
+    assert parse_parameters(text) == {"temperature": 1, "top_p": 0.95, "stop": ["<a>", "<b>"]}
+
+
+@respx.mock
+def test_text_only_copy_reuses_the_weights_without_the_projector(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OLLAMA_MODELS", str(tmp_path))
+    write_manifest(tmp_path, BIG, [("model", "sha256:weights"), ("projector", "sha256:vision")])
+    respx.post(f"{DEFAULT_URL}/api/show").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "parameters": "temperature    1\ntop_k    64",
+                "template": "{{ .Prompt }}",
+                "renderer": "gemma4-large",
+                "parser": "gemma4",
+            },
+        )
+    )
+    create = respx.post(f"{DEFAULT_URL}/api/create").mock(
+        return_value=httpx.Response(200, json={"status": "success"})
+    )
+    create_text_only(BIG, BIG_TEXT)
+    assert json.loads(create.calls[0].request.content) == {
+        "model": BIG_TEXT,
+        "files": {"model.gguf": "sha256:weights"},
+        "parameters": {"temperature": 1, "top_k": 64},
+        "template": "{{ .Prompt }}",
+        "renderer": "gemma4-large",
+        "parser": "gemma4",
+        "stream": False,
+    }
+
+
+def test_text_only_copy_needs_the_manifest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OLLAMA_MODELS", str(tmp_path))
+    with pytest.raises(OllamaError):
+        create_text_only(BIG, BIG_TEXT)
 
 
 def test_free_space_of_a_folder_that_does_not_exist_yet(tmp_path: Path) -> None:
@@ -274,9 +343,13 @@ def fake_pull(updates: list[PullProgress], error: Exception | None = None) -> Ca
     return pull
 
 
-def test_download_shows_progress_and_selects_the_model(
+def test_download_shows_progress_and_selects_the_text_only_copy(
     qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    created: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        setup_check, "create_text_only", lambda name, new, url: created.append((name, new))
+    )
     monkeypatch.setattr(setup_check, "free_bytes", lambda folder: 10**12)
     monkeypatch.setattr(
         setup_check,
@@ -289,9 +362,50 @@ def test_download_shows_progress_and_selects_the_model(
     assert dlg.model_button.text() == "İndir"
     with qtbot.waitSignal(dlg.model_selected) as signal:
         dlg.model_button.click()
-    assert signal.args == [BIG]
-    assert not dlg.downloading
+    assert signal.args == [BIG_TEXT]
+    assert created == [(BIG, BIG_TEXT)]
+    assert not dlg.busy
     assert dlg.model_button.isEnabled()
+
+
+def test_installed_big_model_switches_to_its_text_only_copy(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A PC set up before the copy existed: the base model is installed and in use.
+    monkeypatch.setattr(setup_check, "create_text_only", lambda name, new, url: None)
+    dlg = dialog(qtbot, SetupStatus("en-US", True, (BIG,)), model=BIG)
+    dlg.refresh()
+    qtbot.waitUntil(lambda: dlg._status is not None)
+    assert dlg.model_combo.currentData() == BIG
+    assert dlg.model_button.text() == "Bunu kullan"
+    with qtbot.waitSignal(dlg.model_selected) as signal:
+        dlg.model_button.click()
+    assert signal.args == [BIG_TEXT]
+
+
+def test_failed_text_only_copy_falls_back_to_the_model(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail(name: str, new: str, url: str) -> None:
+        raise OllamaError("create refused")
+
+    monkeypatch.setattr(setup_check, "create_text_only", fail)
+    dlg = dialog(qtbot, SetupStatus("en-US", True, (BIG,)), model=SMALL)
+    dlg.refresh()
+    qtbot.waitUntil(lambda: dlg._status is not None)
+    dlg.model_combo.setCurrentIndex(0)
+    with qtbot.waitSignal(dlg.model_selected) as signal:
+        dlg.model_button.click()
+    assert signal.args == [BIG]
+    assert "create refused" in dlg.progress_label.text()
+
+
+def test_text_only_copy_in_use_needs_no_action(qtbot: QtBot) -> None:
+    dlg = dialog(qtbot, SetupStatus("en-US", True, (BIG, BIG_TEXT)), model=BIG_TEXT)
+    dlg.refresh()
+    qtbot.waitUntil(lambda: dlg._status is not None)
+    assert dlg.model_combo.currentData() == BIG
+    assert dlg.model_button.text() == "Kullanılıyor"
 
 
 def test_cancelled_download_says_it_resumes(qtbot: QtBot, monkeypatch: pytest.MonkeyPatch) -> None:

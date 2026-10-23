@@ -1,5 +1,5 @@
 """Ollama client for the UI: is it installed and running, which models it has and which are
-loaded; start it, pull, inspect and delete models.
+loaded; start it, pull, inspect, copy and delete models.
 """
 
 from __future__ import annotations
@@ -94,6 +94,75 @@ def delete_model(name: str, url: str = DEFAULT_URL, timeout: float = 30.0) -> No
         raise OllamaError(str(exc) or type(exc).__name__) from exc
     if response.status_code != 200:
         raise OllamaError(_error_text(response.text) or f"HTTP {response.status_code}")
+
+
+MODEL_LAYER = "application/vnd.ollama.image.model"
+
+
+def create_text_only(name: str, new_name: str, url: str = DEFAULT_URL) -> None:
+    """Make ``new_name``: ``name`` without its vision encoder (projector).
+
+    The copy points at the same weights file (Ollama copies nothing) and keeps the chat format
+    and parameters. The unused encoder held ~1.2 GB of VRAM for gemma4:26b; without it Ollama
+    puts more experts on the GPU and a line translates ~12 % faster (measured, see CLAUDE.md).
+    """
+    digest = _layer_digest(name, MODEL_LAYER)
+    try:
+        show = httpx.post(f"{url}/api/show", json={"model": name}, timeout=30.0)
+        if show.status_code != 200:
+            raise OllamaError(_error_text(show.text) or f"HTTP {show.status_code}")
+        info = show.json()
+        request: dict[str, Any] = {
+            "model": new_name,
+            "files": {"model.gguf": digest},
+            "parameters": parse_parameters(info.get("parameters", "")),
+            "stream": False,
+        }
+        for key in ("template", "renderer", "parser"):
+            if info.get(key):
+                request[key] = info[key]
+        response = httpx.post(f"{url}/api/create", json=request, timeout=120.0)
+    except httpx.HTTPError as exc:
+        raise OllamaError(str(exc) or type(exc).__name__) from exc
+    if response.status_code != 200:
+        raise OllamaError(_error_text(response.text) or f"HTTP {response.status_code}")
+
+
+def parse_parameters(text: str) -> dict[str, Any]:
+    """``/api/show``'s parameter lines ("top_k   64") as ``/api/create`` takes them."""
+    parameters: dict[str, Any] = {}
+    for line in text.splitlines():
+        key, _, raw = line.strip().partition(" ")
+        if not key:
+            continue
+        raw = raw.strip()
+        try:
+            value: Any = json.loads(raw)
+        except ValueError:
+            value = raw
+        if key in parameters:  # repeated keys ("stop") form a list
+            previous = parameters[key]
+            parameters[key] = (
+                [*previous, value] if isinstance(previous, list) else [previous, value]
+            )
+        else:
+            parameters[key] = value
+    return parameters
+
+
+def _layer_digest(name: str, media_type: str) -> str:
+    """The digest of a model's layer, read from its manifest in Ollama's model folder."""
+    model, _, tag = name.partition(":")
+    path = models_dir() / "manifests" / "registry.ollama.ai"
+    path = path / (model if "/" in model else f"library/{model}") / (tag or "latest")
+    try:
+        layers = json.loads(path.read_text(encoding="utf-8")).get("layers", [])
+    except (OSError, ValueError) as exc:
+        raise OllamaError(f"manifest of {name} not readable: {exc}") from exc
+    digest = next((layer["digest"] for layer in layers if layer.get("mediaType") == media_type), "")
+    if not digest:
+        raise OllamaError(f"{name} has no {media_type.rsplit('.', 1)[-1]} layer")
+    return digest
 
 
 def _install_dir() -> Path | None:

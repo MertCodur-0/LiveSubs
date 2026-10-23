@@ -279,7 +279,11 @@ Implementation (step 7, `engine/translate/`):
   matter (the CPU lane that needed two loaded models is gone).
 - **Text-only gemma4:26b, measured 2026-10-23** (see decision log): the vision projector is a
   separate 1.19 GB blob, so a Modelfile with only the text blob works (`gemma4-text:26b-a4b-it-qat`
-  on the dev PC, no extra disk); ~12 % faster. Not wired into the app yet (setup dialog / catalog).
+  on the dev PC, no extra disk); ~12 % faster. Wired in (2026-10-23): `CatalogModel.text_only`
+  names the copy; the setup dialog makes it (`client.create_text_only`: weights digest from the
+  manifest in `models_dir()`, template/renderer/parser/parameters from `/api/show`, `/api/create`)
+  after the download or on "Bunu kullan" for an installed 26b, and selects it; on failure it
+  falls back to the base model. The Models tab does not make the copy (setup dialog only).
 
 ### Config and profiles — `%APPDATA%\LiveSubs\config.json` + `profiles\*.json`
 
@@ -722,4 +726,4 @@ First **finish the app** (each step committed and pushed; no new release unless 
   runs in opposite order: original median 1307 / 1277 ms (max 1615 / 1651), text-only
   **1131 / 1151 ms** (max 1458 / 1448) = ~12 % faster, as estimated; load + warm-up about the
   same (16-19 s). Translations nearly identical (4 of 17 lines differ in wording, none worse).
-  Open: whether the app should create/recommend it (setup dialog after pulling the 26b).
+  User (same day): yes — the setup dialog now makes and selects it (see Model management).
