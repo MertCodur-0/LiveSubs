@@ -68,6 +68,15 @@ def test_minimal_messages() -> None:
     assert messages[-1] == {"role": "user", "content": "Hi."}
 
 
+def test_profile_examples_replace_the_built_in_ones() -> None:
+    examples = [("Yo, what the fuck?", "Lan, bu ne?")]
+    messages = build_messages(TranslationRequest("Hi.", examples=examples))
+    assert messages[1:-1] == [
+        {"role": "user", "content": "Yo, what the fuck?"},
+        {"role": "assistant", "content": "Lan, bu ne?"},
+    ]
+
+
 def test_examples_are_not_test_samples() -> None:
     """The few-shot examples must not leak the evaluation lines in tests/samples."""
     from sample_data import load_samples
@@ -339,6 +348,26 @@ def test_translates_and_then_serves_from_cache(
     assert second.result.cached
     assert second.result.text == "GET IN THE CAR."
     assert len(fake.requests) == 1
+
+
+def test_orchestrator_passes_the_profile_hints(fake: FakeBackend, events: Events) -> None:
+    orch = TranslationOrchestrator(
+        fake,
+        TranslationCache(),
+        events,
+        game_context="Vice City crime story.",
+        glossary={"Leonida": "Leonida"},
+        examples={"Copy.": "Anlaşıldı."},
+    )
+    try:
+        orch.submit(1, "Get in.")
+        events.wait_for(1)
+    finally:
+        orch.close()
+    request = fake.requests[0]
+    assert request.game_context == "Vice City crime story."
+    assert request.glossary == {"Leonida": "Leonida"}
+    assert request.examples == (("Copy.", "Anlaşıldı."),)
 
 
 def test_short_reply_between_long_lines_is_translated(

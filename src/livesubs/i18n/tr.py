@@ -207,10 +207,22 @@ STRINGS: dict[str, str] = {
     "profiles.glossary": "Sözlük",
     "profiles.glossary_add": "Satır ekle",
     "profiles.glossary_remove": "Seçili satırları sil",
+    "profiles.examples": "Örnek çeviriler",
     "profiles.translation_hint": (
         "Sözlükteki kelimeler her zaman böyle çevrilir; çevrilmemesi gereken isimleri aynen "
-        "yazın (ör. Vice City → Vice City). Değişiklikler bir sonraki Başlat'ta geçerli olur."
+        "yazın (ör. Vice City → Vice City). Örnek çeviriler modele oyunun dilini gösterir: "
+        "argoyu ve üslubu en iyi anlatan 5-10 replik yeterli (fazlası çeviriyi yavaşlatır); "
+        "boş bırakılırsa yerleşik örnekler kullanılır. Değişiklikler bir sonraki Başlat'ta "
+        "geçerli olur."
     ),
+    "profiles.import_pack": "Çeviri paketini içe aktar…",
+    "profiles.import_filter": "Çeviri paketi (*.json)",
+    "profiles.import_replace": (
+        "“{name}” profilinin oyun açıklaması, sözlüğü ve örnek çevirileri paketteki ile "
+        "değiştirilsin mi?"
+    ),
+    "profiles.import_failed": "Paket okunamadı: {error}",
+    "profiles.import_done": "Paket yüklendi: {terms} sözlük maddesi, {examples} örnek çeviri.",
     "profiles.game": "Oyun ve ekran",
     "profiles.location": "Oyun nerede çalışıyor",
     "profiles.location.auto": "Otomatik (kaynağa göre: {guess})",

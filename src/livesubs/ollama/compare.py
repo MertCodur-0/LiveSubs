@@ -3,7 +3,8 @@
 Models run one after the other, not side by side: two models loaded at once would need
 ``OLLAMA_MAX_LOADED_MODELS >= 2`` and, on an 8 GB card, would push each other out of VRAM and
 distort the timings. Each model is warmed up first (its load time is reported apart), then every
-line goes through the same prompt as live translation (game context, glossary, previous lines).
+line goes through the same prompt as live translation (game context, glossary, examples,
+previous lines).
 """
 
 from __future__ import annotations
@@ -89,6 +90,7 @@ def run_comparison(
     cancel: CancelToken,
     game_context: str = "",
     glossary: Mapping[str, str] | None = None,
+    examples: Mapping[str, str] | None = None,
     keep_loaded: str = "",
     backend_factory: Callable[[str, OllamaSettings], Backend] = _backend,
     share_of: Callable[[str, str], float | None] = _share,
@@ -99,6 +101,7 @@ def run_comparison(
     the comparison leaves the memory as it found it.
     """
     glossary = dict(glossary or {})
+    example_pairs = tuple((examples or {}).items())
     for model in models:
         if cancel.cancelled:
             return
@@ -121,6 +124,7 @@ def run_comparison(
                     else (),
                     game_context=game_context,
                     glossary=glossary,
+                    examples=example_pairs,
                 )
                 try:
                     result = backend.translate(request, cancel)

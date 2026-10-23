@@ -895,14 +895,50 @@ def test_profiles_tab_edits_the_translation_hints(qtbot: QtBot) -> None:
         tab.context.setPlainText("Gritty 1980s crime story.")
     assert profile.translation.context == "Gritty 1980s crime story."
 
-    tab._add_term()
-    tab.glossary.item(0, 0).setText("Vice City")
+    tab.glossary.add_row()
+    tab.glossary.table.item(0, 0).setText("Vice City")
     assert profile.translation.glossary == {}  # needs both columns
-    tab.glossary.item(0, 1).setText("Vice City")
+    tab.glossary.table.item(0, 1).setText("Vice City")
     assert profile.translation.glossary == {"Vice City": "Vice City"}
-    tab.glossary.selectRow(0)
-    tab._remove_terms()
+    tab.glossary.table.selectRow(0)
+    tab.glossary.remove_rows()
     assert profile.translation.glossary == {}
+
+    tab.examples.add_row()
+    tab.examples.table.item(0, 0).setText("Copy.")
+    tab.examples.table.item(0, 1).setText("Anlaşıldı.")
+    assert profile.translation.examples == {"Copy.": "Anlaşıldı."}
+    assert profile.translation.glossary == {}
+
+
+def test_profiles_tab_imports_a_translation_pack(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(QMessageBox, "information", lambda *args: None)
+    profile = Profile(name="GTA VI")
+    profile.translation.glossary = {"old": "eski"}
+    tab = ProfilesTab(profile, monitors=lambda: [])
+    qtbot.addWidget(tab)
+    pack = tmp_path / "gta6.json"
+    pack.write_text(
+        '{"game_context": "Set in Leonida.", "glossary": [{"en": "Lucia", "tr": "Lucia"}],'
+        ' "examples": [{"en": "Copy.", "tr": "Anlaşıldı."}], "test_lines": [{"en": "Hi."}]}',
+        encoding="utf-8",
+    )
+    with qtbot.waitSignal(tab.changed):
+        assert tab.import_pack(pack)
+    assert profile.translation.context == "Set in Leonida."
+    assert profile.translation.glossary == {"Lucia": "Lucia"}  # replaced, not merged
+    assert profile.translation.examples == {"Copy.": "Anlaşıldı."}
+    assert tab.context.toPlainText() == "Set in Leonida."
+    assert tab.examples.table.rowCount() == 1
+
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args: warnings.append(args[2]))
+    broken = tmp_path / "broken.json"
+    broken.write_text("{nope", encoding="utf-8")
+    assert not tab.import_pack(broken)
+    assert warnings and profile.translation.context == "Set in Leonida."
 
 
 def test_profiles_tab_game_location_and_vram_reserve(qtbot: QtBot) -> None:

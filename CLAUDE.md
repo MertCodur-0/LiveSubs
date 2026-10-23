@@ -305,7 +305,17 @@ loaded at startup. Pydantic models with a schema version.
   where the game runs (auto shows the guess from the source), VRAM reserve (auto follows the
   location), overlay display target (auto = next to the subtitle, or a monitor: the overlay then
   sits at `overlay.rect` on that monitor, moved with F8; the placement combo is disabled).
-  `WEB_ONLY` waits for step 17. Switching rebinds overlay, Inspector (`set_vision`), Appearance
+  `WEB_ONLY` waits for step 17.
+- **Example translations + translation packs** (2026-10-24): `TranslationSettings.examples`
+  (EN -> TR, a second table in the Profiles tab) replace the prompt's 5 built-in examples when
+  set (5-10 recommended: they cost prompt time on every line). **"Çeviri paketini içe aktar…"**
+  loads a JSON pack (`core/translation_pack.py`: `game_context`, `glossary`, `examples` as
+  `[{en, tr}]` or `{en: tr}`, `test_lines` as `[{en}]`) and *replaces* the active profile's
+  context, glossary and examples; `test_lines` only feed `scripts/compare_models.py --pack`
+  (with and without the pack, lines that are also examples skipped, `--limit` random but
+  repeatable, prompt token count vs `num_ctx` reported, `--html` side-by-side report). Packs
+  hold game dialogue: kept outside the repo. A "pre-translated lines" memory was proposed and
+  rejected by the user (the trailers cover 15 minutes of a 100-hour game). Switching rebinds overlay, Inspector (`set_vision`), Appearance
   (`set_settings`) and Settings (`set_profile`); a running pipeline restarts with the new profile
   (or stops when it has no source/region). Startup: `config.last_profile`, else the first saved
   profile, else a new "Varsayılan" (id `varsayilan`). Before a switch the current profile is
@@ -431,7 +441,8 @@ remaining size, cancel. Minimizes to tray.
 src/livesubs/
   app.py, __main__.py, i18n/
   assets/      icon.svg, icon.ico, header.svg, arrow_*.svg, fonts/ (+ OFL licenses) — package data
-  core/        config.py, profiles.py, paths.py, jsonio.py, geometry.py, messages.py, backup.py
+  core/        config.py, profiles.py, paths.py, jsonio.py, geometry.py, messages.py, backup.py,
+               translation_pack.py
   engine/      process.py, pipeline.py
     capture/   base.py, wgc.py, mss_fallback.py, factory.py, video_device.py (phase 2)
     vision/    preprocess.py, change.py

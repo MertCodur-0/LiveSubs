@@ -71,6 +71,7 @@ class TranslationOrchestrator:
         history_size: int = 3,
         game_context: str = "",
         glossary: Mapping[str, str] | None = None,
+        examples: Mapping[str, str] | None = None,
         max_backlog: int = MAX_BACKLOG,
     ) -> None:
         self._gpu = gpu
@@ -79,6 +80,7 @@ class TranslationOrchestrator:
         self._profile_id = profile_id
         self._game_context = game_context
         self._glossary = dict(glossary or {})
+        self._examples = tuple((examples or {}).items())
         self._history: deque[tuple[int, ContextLine]] = deque(maxlen=max(history_size, 1))
         self._history_enabled = history_size > 0
         self._max_backlog = max(max_backlog, 1)
@@ -160,6 +162,7 @@ class TranslationOrchestrator:
             history=history if self._history_enabled else [],
             game_context=self._game_context,
             glossary=self._glossary,
+            examples=self._examples,
         )
 
     def _publish(self, job: _Job, result: TranslationResult) -> None:

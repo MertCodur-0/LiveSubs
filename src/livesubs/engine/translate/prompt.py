@@ -1,8 +1,9 @@
 """The chat messages for a subtitle translation, and cleanup of what the model returns.
 
-A few fixed example turns (slang English -> natural Turkish) come first: on the sample lines they
-fixed literal slang ("dog" -> "köpek" became "kanka"). They are deliberately not taken from the
-test samples. Earlier lines of the dialogue follow as real user/assistant turns, so small models
+A few example turns (slang English -> natural Turkish) come first: on the sample lines they
+fixed literal slang ("dog" -> "köpek" became "kanka"). A profile may bring its own examples for
+its game; otherwise the fixed ones below are used, which are deliberately not taken from the test
+samples. Earlier lines of the dialogue follow as real user/assistant turns, so small models
 keep the tone and terms consistent and never translate the context lines themselves, which they
 tend to do when the context is pasted into one message.
 """
@@ -51,7 +52,7 @@ def build_messages(request: TranslationRequest) -> list[dict[str, str]]:
         terms = "\n".join(f"- {en} -> {tr}" for en, tr in request.glossary.items())
         system += f"\n\nAlways translate these terms this way:\n{terms}"
     messages = [{"role": "system", "content": system}]
-    for source, translation in EXAMPLES:
+    for source, translation in request.examples or EXAMPLES:
         messages.append({"role": "user", "content": source})
         messages.append({"role": "assistant", "content": translation})
     for line in request.history:

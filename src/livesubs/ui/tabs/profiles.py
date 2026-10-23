@@ -7,6 +7,7 @@ owns the profile store and the switching. The editors change the active ``Profil
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
@@ -14,6 +15,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
+    QFileDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -30,6 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 from livesubs.core.profiles import OverlayDisplay, Profile, infer_game_on_this_pc
+from livesubs.core.translation_pack import PackError, load_pack
 from livesubs.i18n import t
 from livesubs.platform import win32
 
@@ -40,6 +43,70 @@ def _hint(text: str) -> QLabel:
     label = QLabel(text, wordWrap=True)
     label.setProperty("hint", True)  # muted, styled by the theme
     return label
+
+
+class PairTable(QWidget):
+    """An English -> Turkish table with add / remove buttons; rows need both columns."""
+
+    edited = Signal()
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._loading = False
+        self.table = QTableWidget(0, 2)
+        self.table.setHorizontalHeaderLabels([t("feed.english"), t("feed.turkish")])
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table.verticalHeader().hide()
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.itemChanged.connect(self._on_item)
+        buttons = QHBoxLayout()
+        buttons.addWidget(QPushButton(t("profiles.glossary_add"), clicked=self.add_row))
+        buttons.addWidget(QPushButton(t("profiles.glossary_remove"), clicked=self.remove_rows))
+        buttons.addStretch(1)
+        column = QVBoxLayout(self)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.addWidget(self.table, 1)
+        column.addLayout(buttons)
+
+    def pairs(self) -> dict[str, str]:
+        pairs = {}
+        for row in range(self.table.rowCount()):
+            cells = [self.table.item(row, column) for column in (0, 1)]
+            english, turkish = (c.text().strip() if c is not None else "" for c in cells)
+            if english and turkish:
+                pairs[english] = turkish
+        return pairs
+
+    def set_pairs(self, pairs: dict[str, str]) -> None:
+        self._loading = True
+        self.table.setRowCount(0)
+        for english, turkish in pairs.items():
+            self._append_row(english, turkish)
+        self._loading = False
+
+    def add_row(self) -> None:
+        self._loading = True
+        self._append_row("", "")
+        self._loading = False
+        last = self.table.rowCount() - 1
+        self.table.setCurrentCell(last, 0)
+        self.table.editItem(self.table.item(last, 0))
+
+    def remove_rows(self) -> None:
+        rows = sorted({index.row() for index in self.table.selectedIndexes()}, reverse=True)
+        for row in rows:
+            self.table.removeRow(row)
+        self.edited.emit()
+
+    def _append_row(self, english: str, turkish: str) -> None:
+        row = self.table.rowCount()
+        self.table.insertRow(row)
+        self.table.setItem(row, 0, QTableWidgetItem(english))
+        self.table.setItem(row, 1, QTableWidgetItem(turkish))
+
+    def _on_item(self) -> None:
+        if not self._loading:
+            self.edited.emit()
 
 
 class ProfilesTab(QWidget):
@@ -94,23 +161,19 @@ class ProfilesTab(QWidget):
         self.context.textChanged.connect(self._on_context)
         form.addRow(t("profiles.context"), self.context)
 
-        self.glossary = QTableWidget(0, 2)
-        self.glossary.setHorizontalHeaderLabels([t("feed.english"), t("feed.turkish")])
-        self.glossary.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.glossary.verticalHeader().hide()
-        self.glossary.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.glossary.itemChanged.connect(self._on_glossary)
-        add = QPushButton(t("profiles.glossary_add"), clicked=self._add_term)
-        remove = QPushButton(t("profiles.glossary_remove"), clicked=self._remove_terms)
-        buttons = QHBoxLayout()
-        buttons.addWidget(add)
-        buttons.addWidget(remove)
-        buttons.addStretch(1)
-        column = QVBoxLayout()
-        column.addWidget(self.glossary, 1)
-        column.addLayout(buttons)
-        form.addRow(t("profiles.glossary"), column)
+        self.glossary = PairTable()
+        self.glossary.edited.connect(self._on_glossary)
+        form.addRow(t("profiles.glossary"), self.glossary)
+
+        self.examples = PairTable()
+        self.examples.edited.connect(self._on_examples)
+        form.addRow(t("profiles.examples"), self.examples)
         form.addRow(_hint(t("profiles.translation_hint")))
+
+        row = QHBoxLayout()
+        row.addWidget(QPushButton(t("profiles.import_pack"), clicked=self._ask_import_pack))
+        row.addStretch(1)
+        form.addRow(row)
         return box
 
     def _game_box(self) -> QGroupBox:
@@ -150,9 +213,8 @@ class ProfilesTab(QWidget):
             self.active_label.setText(t("profiles.active", name=p.name))
             if self.context.toPlainText() != p.translation.context:
                 self.context.setPlainText(p.translation.context)
-            self.glossary.setRowCount(0)
-            for english, turkish in p.translation.glossary.items():
-                self._append_row(english, turkish)
+            self.glossary.set_pairs(p.translation.glossary)
+            self.examples.set_pairs(p.translation.examples)
 
             inferred = infer_game_on_this_pc(p.source)
             self.location.clear()
@@ -187,12 +249,6 @@ class ProfilesTab(QWidget):
         finally:
             self._loading = False
 
-    def _append_row(self, english: str, turkish: str) -> None:
-        row = self.glossary.rowCount()
-        self.glossary.insertRow(row)
-        self.glossary.setItem(row, 0, QTableWidgetItem(english))
-        self.glossary.setItem(row, 1, QTableWidgetItem(turkish))
-
     # --- edits -----------------------------------------------------------------------------------
 
     def _edited(self) -> None:
@@ -208,27 +264,54 @@ class ProfilesTab(QWidget):
     def _on_glossary(self) -> None:
         if self._loading:
             return
-        terms = {}
-        for row in range(self.glossary.rowCount()):
-            cells = [self.glossary.item(row, column) for column in (0, 1)]
-            english, turkish = (c.text().strip() if c is not None else "" for c in cells)
-            if english and turkish:
-                terms[english] = turkish
-        self.profile.translation.glossary = terms
+        self.profile.translation.glossary = self.glossary.pairs()
         self._edited()
 
-    def _add_term(self) -> None:
-        self._loading = True
-        self._append_row("", "")
-        self._loading = False
-        self.glossary.setCurrentCell(self.glossary.rowCount() - 1, 0)
-        self.glossary.editItem(self.glossary.item(self.glossary.rowCount() - 1, 0))
+    def _on_examples(self) -> None:
+        if self._loading:
+            return
+        self.profile.translation.examples = self.examples.pairs()
+        self._edited()
 
-    def _remove_terms(self) -> None:
-        rows = sorted({index.row() for index in self.glossary.selectedIndexes()}, reverse=True)
-        for row in rows:
-            self.glossary.removeRow(row)
-        self._on_glossary()
+    def _ask_import_pack(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, t("profiles.import_pack"), "", t("profiles.import_filter")
+        )
+        if not path:
+            return
+        hints = self.profile.translation
+        if hints.context or hints.glossary or hints.examples:
+            answer = QMessageBox.question(
+                self,
+                t("profiles.import_pack"),
+                t("profiles.import_replace", name=self.profile.name),
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        self.import_pack(Path(path))
+
+    def import_pack(self, path: Path) -> bool:
+        """Replaces the active profile's context, glossary and examples with the pack's."""
+        try:
+            pack = load_pack(path)
+        except PackError as exc:
+            QMessageBox.warning(
+                self, t("profiles.import_pack"), t("profiles.import_failed", error=exc)
+            )
+            return False
+        self.profile.translation = pack.translation
+        self.refresh()
+        self.changed.emit()
+        QMessageBox.information(
+            self,
+            t("profiles.import_pack"),
+            t(
+                "profiles.import_done",
+                terms=len(pack.translation.glossary),
+                examples=len(pack.translation.examples),
+            ),
+        )
+        return True
 
     def _on_location(self, index: int) -> None:
         if self._loading or index < 0:

@@ -252,6 +252,7 @@ class Pipeline:
             history_size=self._start.ollama.context_lines,
             game_context=profile.translation.context,
             glossary=profile.translation.glossary,
+            examples=profile.translation.examples,
         )
         with self._lock:
             if self._stop.is_set():  # stopped while the model was loading

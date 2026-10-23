@@ -134,6 +134,9 @@ class OverlaySettings(SettingsModel):
 class TranslationSettings(SettingsModel):
     context: str = ""  # e.g. "Gritty crime story set in 1980s Miami."
     glossary: dict[str, str] = Field(default_factory=dict)
+    # Example translations (English -> Turkish) that show the model the game's tone; when set,
+    # they replace the built-in examples of the prompt.
+    examples: dict[str, str] = Field(default_factory=dict)
 
 
 class VramSettings(SettingsModel):

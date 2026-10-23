@@ -620,6 +620,7 @@ class ModelsTab(QWidget):
         settings = self.config.ollama.model_copy(deep=True)
         context = self.profile.translation.context
         glossary = dict(self.profile.translation.glossary)
+        examples = dict(self.profile.translation.examples)
 
         def work() -> None:
             try:
@@ -632,6 +633,7 @@ class ModelsTab(QWidget):
                     cancel=cancel,
                     game_context=context,
                     glossary=glossary,
+                    examples=examples,
                     keep_loaded=settings.gpu_model,
                 )
             finally:

@@ -30,6 +30,8 @@ class TranslationRequest:
     history: Sequence[ContextLine] = ()  # previous lines, oldest first, for the dialogue flow
     game_context: str = ""  # the profile's description of the game
     glossary: Mapping[str, str] = field(default_factory=dict)  # fixed renderings, names
+    # The profile's example translations (English, Turkish); empty = the prompt's own.
+    examples: Sequence[tuple[str, str]] = ()
 
 
 @dataclass(frozen=True, slots=True)
