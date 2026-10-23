@@ -707,3 +707,9 @@ First **finish the app** (each step committed and pushed; no new release unless 
   described under Other -> Web output; the phone-only switch is per profile (`WEB_ONLY` already
   existed there) and mirrored in the Settings tab. UI tests use a fake `WebServer` so no test
   opens a LAN port (a real bind on 0.0.0.0 raises the Windows firewall prompt).
+- 2026-10-23: **qwen3.6:35b-a3b measured against gemma4:26b-a4b-it-qat** (`compare_models.py`,
+  17 sample lines, no history): qwen3.6 (Q4_K_M + MTP, 22.6 GB download, 22.5 GB loaded, 5.2 GB
+  on the GPU) median 1656 / max 1922 ms, load 29 s, only ~4 GB RAM left free; gemma4:26b median
+  1272 / max 1568 ms, load 19 s. qwen's Turkish is clearly worse (translates "cabrón", "Battl
+  rap", "Hey" -> "Şey", misreads "Got this guy's car"). **Gemma4:26b stays the recommendation**;
+  quality work goes into profile context, glossary and more context lines instead.
