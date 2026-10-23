@@ -68,3 +68,21 @@ def test_engine_process_lifecycle(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         engine.shutdown()
     assert not engine.alive
     assert (tmp_path / "logs" / "engine.log").is_file()
+
+
+def test_restart_after_a_crash(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A native crash ends the process without a word; ``restart`` gives a working engine."""
+    monkeypatch.setenv(paths.HOME_ENV_VAR, str(tmp_path))
+    engine = EngineProcess()
+    engine.start()
+    try:
+        collect_until(engine, StateChanged, EngineState.IDLE, 30)
+        engine._process.kill()  # what an access violation in windows-capture looks like
+        engine._process.join(5)
+        assert not engine.alive
+        engine.restart()
+        assert engine.alive
+        collect_until(engine, StateChanged, EngineState.IDLE, 30)
+    finally:
+        engine.shutdown()
+    assert not engine.alive

@@ -151,9 +151,15 @@ class FakeEngine:
         self.sent: list[Command] = []
         self.queue: list[Event] = []
         self.started = self.stopped = False
+        self.alive = True
+        self.restarts = 0
 
     def start(self) -> None:
         self.started = True
+
+    def restart(self) -> None:
+        self.restarts += 1
+        self.alive = True
 
     def send(self, command: Command) -> None:
         self.sent.append(command)
@@ -209,6 +215,24 @@ def test_start_sends_the_profile_and_saves_it(window: MainWindow, tmp_path: Path
         ProfileStore(tmp_path / "profiles").load(DEFAULT_PROFILE_ID).region
         == command.profile.region
     )
+
+
+def test_a_dead_engine_is_replaced(window: MainWindow) -> None:
+    """Regression: windows-capture crashed the engine on Start; the UI waited in STARTING
+    forever and Start/Stop went to a dead process, so the app looked frozen."""
+    engine = engine_of(window)
+    engine.queue = [StateChanged(EngineState.STARTING)]
+    window._poll()
+    assert window.start_button.text() == "Durdur"
+
+    window._check_engine()
+    assert engine.restarts == 0
+
+    engine.alive = False
+    window._check_engine()
+    assert engine.restarts == 1
+    assert window.start_button.text() == "Başlat"
+    assert "yeniden başlatıldı" in window.statusBar().currentMessage()
 
 
 def test_events_drive_the_feed_and_overlay(window: MainWindow, qtbot: QtBot) -> None:

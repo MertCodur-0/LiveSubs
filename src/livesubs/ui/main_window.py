@@ -5,6 +5,7 @@ Talks to the engine process only through messages; polls its events every 30 ms 
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import sys
@@ -90,12 +91,15 @@ from livesubs.ui.tabs.settings import SettingsTab
 from livesubs.ui.tray import Tray
 from livesubs.web.server import WebServer
 
+log = logging.getLogger(__name__)
+
 DEFAULT_PROFILE_ID = "varsayilan"
 FEED_LIMIT = 200
 OLLAMA_CHECK_MS = 5000
 FOLLOW_MS = 300
 FULLSCREEN_CHECK_MS = 3000
 WEB_STATUS_MS = 2000
+ENGINE_CHECK_MS = 1000
 ACTIVE_STATES = (
     EngineState.STARTING,
     EngineState.WARMING_UP,
@@ -115,7 +119,10 @@ DEFAULT_TEXT_COLORS = ["#FFFFFF", "#FFFF00"]
 
 
 class Engine(Protocol):
+    @property
+    def alive(self) -> bool: ...
     def start(self) -> None: ...
+    def restart(self) -> None: ...
     def send(self, command: Command) -> None: ...
     def poll(self, max_events: int = 100) -> list[Event]: ...
     def shutdown(self, timeout: float = 5.0) -> None: ...
@@ -228,6 +235,8 @@ class MainWindow(QMainWindow):
 
         self._poll_timer = QTimer(self, interval=30, timeout=self._poll)
         self._poll_timer.start()
+        self._engine_timer = QTimer(self, interval=ENGINE_CHECK_MS, timeout=self._check_engine)
+        self._engine_timer.start()
         # The overlay follows its source: windows move, a region can be edited.
         self._follow_timer = QTimer(self, interval=FOLLOW_MS, timeout=self._follow)
         self._follow_timer.start()
@@ -798,6 +807,17 @@ class MainWindow(QMainWindow):
         for event in self._engine.poll():
             self.handle(event)
 
+    def _check_engine(self) -> None:
+        """A native crash (seen in windows-capture) kills the engine without a word: start a new
+        one instead of waiting for it forever."""
+        if self._engine.alive:
+            return
+        log.error("The engine process died; starting a new one")
+        self._engine.restart()
+        self._set_state(EngineState.STOPPED, "")
+        self.statusBar().showMessage(t("error.engine_crashed"), 30000)
+        self.tray.notify(APP_NAME, t("error.engine_crashed"))
+
     def handle(self, event: Event) -> None:
         match event:
             case StateChanged(state=state, detail=detail):
@@ -1074,6 +1094,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 - Qt override
         self._poll_timer.stop()
+        self._engine_timer.stop()
         self._ollama_timer.stop()
         self._follow_timer.stop()
         self._fullscreen_timer.stop()

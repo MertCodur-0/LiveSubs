@@ -117,6 +117,7 @@ _SHQueryUserNotificationState = _fn(
 _SetCurrentProcessExplicitAppUserModelID = _fn(
     _shell32, "SetCurrentProcessExplicitAppUserModelID", _HRESULT, wintypes.LPCWSTR
 )
+_AllowSetForegroundWindow = _fn(_user32, "AllowSetForegroundWindow", _BOOL, wintypes.DWORD)
 
 _DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
 _GW_OWNER = 4
@@ -490,6 +491,12 @@ def set_app_user_model_id(app_id: str) -> bool:
     """Groups the process's windows under ``app_id`` on the taskbar instead of under the Python
     interpreter that runs it (the packaged LiveSubs.exe is a renamed pythonw.exe)."""
     return _SetCurrentProcessExplicitAppUserModelID(app_id) == 0
+
+
+def allow_any_foreground_window() -> bool:
+    """Lets another process (the running LiveSubs) take the foreground from this one: Windows
+    only lets the process the user just started bring a window to the front."""
+    return bool(_AllowSetForegroundWindow(0xFFFFFFFF))  # ASFW_ANY
 
 
 # --- System --------------------------------------------------------------------------------------

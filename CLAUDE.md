@@ -188,6 +188,9 @@ Designed from the start for three source kinds; video device lands in phase 2.
 - mss copies screen pixels: it sees the lock screen while the session is locked
   (`win32.is_session_locked()`, WTS session flags — the OpenInputDesktop/SwitchDesktop trick
   reported "unlocked" under LockApp on Windows 11), and obscured windows.
+- A third, unexplained trigger (2026-10-23): Stop then Start on an Opera window in the same
+  engine process crashed at the same offset (`windows_capture.pyd` +0x3aad3, as on 2026-10-21).
+  Not reproduced with a flicker window. Hence the UI watches the engine (below, Main window).
 - Typed errors: `SourceUnavailableError`, `SourceBusyError` (device held by another app such as OBS
   -> UI suggests using the OBS preview window as a *window* source), `SourceLostError`.
 - Health signals: black-frame detector emits `BlackFrameWarning` (window/monitor: protected content;
@@ -346,6 +349,9 @@ remaining size, cancel. Minimizes to tray.
   per start), open the log folder. **Tray** (`ui/tray.py`): show, Start/Stop, hide/show the
   translation, quit; minimizing hides the window when the setting is on (one notice per session).
   **Fullscreen warning**: every 3 s while running, once per occurrence (status bar + tray).
+- **Engine watchdog** (2026-10-23): every 1 s the UI checks `EngineProcess.alive`; a dead engine
+  (native crash, no log line) is replaced (`restart()`: new process + queues), the state goes to
+  STOPPED and the status bar + tray say so; the user presses Start again.
 
 ### Other
 
@@ -414,6 +420,9 @@ remaining size, cancel. Minimizes to tray.
   `scripts/embedded/smoke_test.py` run through the packaged exe (Qt, theme + bundled fonts + SVG
   icon, OpenCV, WinRT OCR, windows-capture, app modules); then `dist/LiveSubs-<version>-win64.zip` (~160 MB) for
   GitHub Releases. Taskbar grouping via `SetCurrentProcessExplicitAppUserModelID`.
+- Single instance (`ui/single_instance.py`): a `QLocalServer` named after the settings folder;
+  a second start asks the first to show its window (`AllowSetForegroundWindow(ASFW_ANY)` first)
+  and exits.
   Do an early smoke build — winrt / windows-capture native modules may need spec tweaks.
 
 ## Project layout (target)
@@ -432,7 +441,7 @@ src/livesubs/
   ollama/      client.py, catalog.py, install.py, vram.py, compare.py
   platform/    win32.py, hotkeys.py, shortcuts.py, gpu.py
   ui/          main_window.py, header.py, icon.py, qr.py, overlay.py, region_frame.py, inspector.py,
-               tray.py, setup_check.py, tabs/, theme/ (base.qss, vice.json, dark.json)
+               tray.py, setup_check.py, single_instance.py, tabs/, theme/ (base.qss, vice.json, dark.json)
   web/         server.py, feed.py, static/index.html
 tests/         samples/ (+ samples.json), helpers/, test_*.py
 scripts/       build_exe.ps1, embedded/ (sitecustomize.py, smoke_test.py), create_shortcut.ps1,
@@ -729,3 +738,13 @@ First **finish the app** (each step committed and pushed; no new release unless 
   User (same day): yes — the setup dialog now makes and selects it (see Model management).
   gemma4:12b's projector is only 0.18 GB (52M params; the 26b's: 1.19 GB, 573M), so its copy
   would still not fit 8 GB -> not measured, no 12b copy (user agreed). Released as **v0.3.0**.
+- 2026-10-23 (user report: "after clearing the cache and starting again the app froze; it would
+  not open or quit until I closed Ollama"): not the cache (Start/Stop/clear/Start through the
+  real engine three times was fine). Windows' event log: the **engine crashed in
+  windows-capture** on that Start (access violation, no Python log) and the UI waited in
+  STARTING forever, sending Start/Stop to a dead process. Also a **second LiveSubs** had been
+  running in the tray since 21:44 (an engine started then never shut down; Ollama was polled
+  twice every 5 s), so quitting one left the other. Fixes: engine watchdog + restart, single
+  instance. Verified live: killing the engine -> a new one within ~1 s; a second start exits
+  and shows the first window. The UI itself also crashed once while quitting (Qt6Widgets.dll
+  access violation, 23:39:55) — not reproduced, watch for it.

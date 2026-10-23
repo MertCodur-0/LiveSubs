@@ -419,6 +419,9 @@ STRINGS: dict[str, str] = {
     "error.model_not_found": "Model yüklü değil: {detail}",
     "error.translation_failed": "Çeviri başarısız: {detail}",
     "error.internal": "Beklenmeyen hata: {detail}",
+    "error.engine_crashed": (
+        "Çeviri motoru beklenmedik şekilde kapandı ve yeniden başlatıldı. Başlat'a tekrar basın."
+    ),
     "error.no_source": "Önce bir kaynak seçin.",
     "error.no_region": "Önce altyazı bölgesini seçin.",
     "error.region_needs_screen": "Seçilen alan hiçbir ekranda değil; tekrar deneyin.",

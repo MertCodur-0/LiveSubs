@@ -93,6 +93,9 @@ class EngineProcess:
     """UI-side handle: starts the engine process and exchanges messages with it."""
 
     def __init__(self) -> None:
+        self._create()
+
+    def _create(self) -> None:
         context = multiprocessing.get_context("spawn")
         self._commands: Queue = context.Queue()
         self._events: Queue = context.Queue()
@@ -105,6 +108,14 @@ class EngineProcess:
 
     def start(self) -> None:
         self._process.start()
+
+    def restart(self) -> None:
+        """A fresh engine process (after a crash), with new queues: the old ones may be broken."""
+        if self._process.is_alive():
+            self._process.terminate()
+            self._process.join(1.0)
+        self._create()
+        self.start()
 
     @property
     def alive(self) -> bool:
