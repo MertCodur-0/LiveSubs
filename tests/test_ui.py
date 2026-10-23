@@ -443,7 +443,8 @@ def test_calibration_shows_editable_overlay_and_region(window: MainWindow) -> No
     assert from_qrect(window._region_frame.geometry()) == expected
 
     # Dragging the frame changes the region (normalized to the source).
-    moved = expected.translated(0, -to_logical(Rect(0, 0, 1, 108), current_screens()).height)
+    tenth = Rect(0, 0, 1, primary.rect.height // 10)  # CI's screen is not 1080 px tall
+    moved = expected.translated(0, -to_logical(tenth, current_screens()).height)
     window._on_region_edited(moved)
     assert window._profile.region.y == pytest.approx(0.7, abs=0.01)
 
