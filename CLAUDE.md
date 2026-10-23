@@ -481,7 +481,7 @@ First **finish the app** (each step committed and pushed; no new release unless 
 2. ~~Step 16 — Vice theme, fonts, SVG icon/header, overlay styles~~ (done 2026-10-22).
 3. ~~Step 17 — web/phone output + QR + Screen Wake Lock, phone-only mode~~ (done 2026-10-23).
 4. ~~Step 19 — README (EN + TR), screenshots~~ (done 2026-10-23, v0.2.0 released). Making the
-   GitHub repo public is the user's call (still private; the README's CI badge needs it public).
+   GitHub repo public: done 2026-10-23 (user reviewed the privacy check, see decision log).
 
 **Afterwards:**
 - **Claude API translation backend** — a second `TranslationBackend` next to Ollama (the
@@ -537,6 +537,10 @@ First **finish the app** (each step committed and pushed; no new release unless 
   drops unknown keys (also nested, also inside discriminated unions) and validates again.
 - 2026-10-21: GitHub repo created **private** (user's choice): github.com/MertCodur-0/LiveSubs;
   make it public when it is presentable. CI on GitHub passes.
+- 2026-10-23: **Repo made public** by the user's decision after a privacy check: commits use
+  only the noreply address, no secrets, no game footage in history, README images are fake
+  data. Accepted as-is: the Windows user name in PLAN.md's project path, hardware details in
+  CLAUDE.md, game dialogue quotes in `samples.json`, game exe names in tests.
 - 2026-10-21 (step 7): Ollama 0.40.5 on the dev machine; only `translategemma:latest` (4.3B) was
   installed — on the samples it softens swearing ("fucking" dropped) and misreads slang ("pick up"
   -> "geliyoruz"), median 302 ms. User chose to pull `qwen3:8b` and `gemma4:12b-it-qat` for the
