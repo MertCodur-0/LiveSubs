@@ -768,3 +768,17 @@ First **finish the app** (each step committed and pushed; no new release unless 
   in the Qt event loop), and `.emit` fails on `clicked`'s `checked` argument — connect
   signal-to-signal with `button.clicked.connect(signal)`. The real cache still held lines from
   2026-10-21. Regression tests click the buttons.
+- 2026-10-24: **GTA VI translation pack measured** (the user's pack, made with Claude outside the
+  app from the official trailers/site: 4-sentence context, 54 glossary entries, 10 examples, 505
+  English test lines; kept in the user's Downloads, never in the repo). `compare_models.py
+  --pack`, 60 random lines (seed 6), the original gemma4:26b (not the text-only copy), 12b,
+  qwen3:8b, translategemma, with and without the pack, num_ctx 2048, 3 context lines. Prompt 333
+  -> ~1110-1180 tokens (fits). Median ms plain -> pack: 26b 1090 -> **941** (faster despite the
+  3x prompt), 12b 925 -> 1081, qwen3 281 -> 274, translategemma 227 -> 250. Quality: 26b best
+  either way; the pack's gain is modest — it handles "In Spanish:" lines (label dropped, Spanish
+  translated), more natural introductions; regressions: "Cops" -> "Polisler" (plain:
+  "Aynasızlar"), "Back in Bayside" -> an imperative, "Raymond" -> "Ray" (the glossary lists the
+  nickname), swearing stronger than the source ("Holy shit" -> "Vay anasını sikeyim"; the
+  examples' "amına koyayım" sets that level). 12b with the pack produced junk ("Köpekler
+  geliyor" for cops, "Pis¡Os!"); translategemma leaks the glossary ("Say Vice City" ->
+  "Leonida'ya hoş geldin"); qwen3:8b stays weak ("Kahpe!", "amik").
