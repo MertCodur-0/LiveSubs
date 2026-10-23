@@ -83,7 +83,9 @@ flowchart LR
   edilebilir.
 
 RTX 4070 Laptop'ta (8 GB) ölçülen süreler: OCR satır başına 10–25 ms. Çeviri
-`gemma4:26b-a4b-it-qat` ya da `gemma4:12b-it-qat` ile yaklaşık 1,2–1,6 sn.
+`gemma4:26b-a4b-it-qat` ya da `gemma4:12b-it-qat` ile yaklaşık 1,1–1,6 sn. Kurulum penceresi
+26b modelinin yalnızca metin kopyasını oluşturur: aynı ağırlıklar, ama kullanılmayan görüntü
+kodlayıcı olmadan. Açılan ~1 GB VRAM uzman katmanlarına kalır ve model ~%12 hızlanır.
 
 ## Gereksinimler
 

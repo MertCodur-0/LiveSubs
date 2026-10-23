@@ -80,7 +80,9 @@ flowchart LR
   SQLite cache, and history as real chat turns. Requests can be cancelled mid-stream.
 
 Measured on an RTX 4070 Laptop (8 GB): OCR takes 10–25 ms per line. Translation takes about
-1.2–1.6 s with `gemma4:26b-a4b-it-qat` or `gemma4:12b-it-qat`.
+1.1–1.6 s with `gemma4:26b-a4b-it-qat` or `gemma4:12b-it-qat`. The setup dialog makes a
+text-only copy of the 26b model: the same weights without the unused vision encoder, which
+leaves ~1 GB of VRAM to the model's experts and makes it ~12 % faster.
 
 ## Requirements
 

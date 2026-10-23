@@ -727,3 +727,5 @@ First **finish the app** (each step committed and pushed; no new release unless 
   **1131 / 1151 ms** (max 1458 / 1448) = ~12 % faster, as estimated; load + warm-up about the
   same (16-19 s). Translations nearly identical (4 of 17 lines differ in wording, none worse).
   User (same day): yes — the setup dialog now makes and selects it (see Model management).
+  gemma4:12b's projector is only 0.18 GB (52M params; the 26b's: 1.19 GB, 573M), so its copy
+  would still not fit 8 GB -> not measured, no 12b copy (user agreed). Released as **v0.3.0**.
