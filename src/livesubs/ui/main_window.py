@@ -788,8 +788,11 @@ class MainWindow(QMainWindow):
         self._save()
         self._reads = 0
         self._warned_spill = False
+        # Line ids start again: old rows stay in the feed but no new line may land in them.
+        self._rows.clear()
+        self._translations.clear()
         if self._web is not None:
-            self._web.new_session()  # line ids start again
+            self._web.new_session()
         self._engine.send(
             StartPipeline(
                 profile=self._profile.model_copy(deep=True),

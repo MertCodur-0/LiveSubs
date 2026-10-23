@@ -268,6 +268,34 @@ def test_events_drive_the_feed_and_overlay(window: MainWindow, qtbot: QtBot) -> 
     assert window._overlay.text == "Sen kimsin?"
 
 
+def test_lines_after_a_restart_go_on_top_of_the_feed(window: MainWindow) -> None:
+    """The engine numbers lines from 1 again on every Start: a new line 1 once overwrote the old
+    line 1's row further down, so the newest translation was not at the top."""
+    engine = engine_of(window)
+    window.set_region(NormRect(x=0.1, y=0.8, width=0.8, height=0.15))
+    engine.queue = [
+        StateChanged(EngineState.RUNNING),
+        SubtitleRead(1, "Get in.", 9.0),
+        SubtitleTranslated(1, "Get in.", "Bin.", "m", "gpu", 9, 500, False),
+        SubtitleRead(2, "Drive.", 9.0),
+        SubtitleTranslated(2, "Drive.", "Sür.", "m", "gpu", 9, 500, False),
+    ]
+    window._poll()
+    window._send_start()
+    engine.queue = [
+        SubtitleRead(1, "Who are you?", 9.0),
+        SubtitleTranslated(1, "Who are you?", "Sen kimsin?", "m", "gpu", 9, 500, False),
+    ]
+    window._poll()
+    assert [window.feed.item(row, 2).text() for row in range(3)] == ["Sen kimsin?", "Sür.", "Bin."]
+
+    # A repeat of line 1 in the new session never brings back the old session's line 1.
+    window._overlay.clear()
+    engine.queue = [SubtitleRead(2, "Hey.", 9.0), SubtitleRead(2, "Hey.", 9.0, repeat=True)]
+    window._poll()
+    assert window._overlay.text == ""
+
+
 def test_translation_outlives_its_subtitle_by_the_clear_delay(
     window: MainWindow, qtbot: QtBot
 ) -> None:
@@ -750,10 +778,26 @@ def test_cache_is_cleared_only_while_stopped(window: MainWindow) -> None:
     window.clear_cache()
     assert window.settings.upkeep_status.text() == "Önce çeviriyi durdurun."
     window.handle(StateChanged(EngineState.STOPPED))
-    window.clear_cache()
+    window.settings.clear_cache.click()  # through the button, as the user does
+    assert window.settings.upkeep_status.text() == "Önbellek temizlendi."
     cache = TranslationCache(paths.translation_cache_file())
     assert cache.get("m", "p", "Hi.") is None
     cache.close()
+
+
+def test_request_buttons_emit_their_signals(window: MainWindow, qtbot: QtBot) -> None:
+    """`clicked=some_signal` in a PySide constructor raises when clicked ("not callable"): these
+    buttons once did nothing at all."""
+    buttons = [
+        (window.models.start_button, window.models.start_ollama_requested),
+        (window.models.setup_button, window.models.setup_requested),
+        (window.settings.clear_cache, window.settings.clear_cache_requested),
+        (window.settings.open_logs, window.settings.open_logs_requested),
+    ]
+    for button, signal in buttons:
+        signal.disconnect()  # the window's slots would start Ollama, open dialogs
+        with qtbot.waitSignal(signal, timeout=500):
+            button.click()
 
 
 def test_tray_follows_the_engine_state(window: MainWindow) -> None:

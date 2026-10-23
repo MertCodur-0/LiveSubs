@@ -187,8 +187,11 @@ class ModelsTab(QWidget):
         layout = QVBoxLayout(box)
         row = QHBoxLayout()
         self.ollama_status = QLabel(t("ollama.checking"), wordWrap=True)
-        self.start_button = QPushButton(t("ollama.start"), clicked=self.start_ollama_requested)
-        self.setup_button = QPushButton(t("setup.button"), clicked=self.setup_requested)
+        # Signal to signal through connect(): `clicked=signal` in the constructor raises on click.
+        self.start_button = QPushButton(t("ollama.start"))
+        self.start_button.clicked.connect(self.start_ollama_requested)
+        self.setup_button = QPushButton(t("setup.button"))
+        self.setup_button.clicked.connect(self.setup_requested)
         self.start_button.hide()
         self.setup_button.hide()
         row.addWidget(self.ollama_status, 1)

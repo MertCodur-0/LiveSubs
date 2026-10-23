@@ -748,3 +748,12 @@ First **finish the app** (each step committed and pushed; no new release unless 
   instance. Verified live: killing the engine -> a new one within ~1 s; a second start exits
   and shows the first window. The UI itself also crashed once while quitting (Qt6Widgets.dll
   access violation, 23:39:55) — not reproduced, watch for it.
+- 2026-10-24 (user report: "the newest translation is not always at the top of the feed, and
+  clearing the cache does not work"): (1) the engine numbers lines from 1 on every Start, but the
+  UI kept its line id -> feed row map (and the translations kept for repeats), so after a restart
+  new lines overwrote old rows further down; both maps are now cleared on Start. (2) The "clear
+  cache", "open log folder", "start Ollama" and "Kurulum…" buttons did nothing:
+  `QPushButton(..., clicked=some_signal)` raises "not callable" on click in PySide (only shown
+  in the Qt event loop), and `.emit` fails on `clicked`'s `checked` argument — connect
+  signal-to-signal with `button.clicked.connect(signal)`. The real cache still held lines from
+  2026-10-21. Regression tests click the buttons.

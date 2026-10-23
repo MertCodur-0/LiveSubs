@@ -177,12 +177,14 @@ class SettingsTab(QWidget):
     def _upkeep_box(self) -> QGroupBox:
         box = QGroupBox(t("settings.upkeep"))
         row = QHBoxLayout(box)
-        self.clear_cache = QPushButton(
-            t("settings.clear_cache"), clicked=self.clear_cache_requested
-        )
+        # Signal to signal through connect(): `clicked=signal` in the constructor raises on click.
+        self.clear_cache = QPushButton(t("settings.clear_cache"))
+        self.clear_cache.clicked.connect(self.clear_cache_requested)
+        self.open_logs = QPushButton(t("settings.open_logs"))
+        self.open_logs.clicked.connect(self.open_logs_requested)
         self.upkeep_status = _hint("")
         row.addWidget(self.clear_cache)
-        row.addWidget(QPushButton(t("settings.open_logs"), clicked=self.open_logs_requested))
+        row.addWidget(self.open_logs)
         row.addWidget(self.upkeep_status, 1)
         return box
 
