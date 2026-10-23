@@ -277,9 +277,9 @@ Implementation (step 7, `engine/translate/`):
   `qwen3:8b`, `translategemma`. The CPU lane (`qwen3:30b-a3b`) was dropped (step 13).
 - Test/compare: runs the models one after the other, so `OLLAMA_MAX_LOADED_MODELS` does not
   matter (the CPU lane that needed two loaded models is gone).
-- **Experiment, deferred again by the user (2026-10-22, not part of step 12 any more):** a
-  text-only gemma4:26b via a Modelfile (`FROM` the text GGUF blob, without the ~0.8-1 GB vision
-  encoder), to free VRAM for more experts on the GPU; estimated gain ~10-15 % (1.33 -> ~1.2 s).
+- **Text-only gemma4:26b, measured 2026-10-23** (see decision log): the vision projector is a
+  separate 1.19 GB blob, so a Modelfile with only the text blob works (`gemma4-text:26b-a4b-it-qat`
+  on the dev PC, no extra disk); ~12 % faster. Not wired into the app yet (setup dialog / catalog).
 
 ### Config and profiles — `%APPDATA%\LiveSubs\config.json` + `profiles\*.json`
 
@@ -713,3 +713,13 @@ First **finish the app** (each step committed and pushed; no new release unless 
   1272 / max 1568 ms, load 19 s. qwen's Turkish is clearly worse (translates "cabrón", "Battl
   rap", "Hey" -> "Şey", misreads "Got this guy's car"). **Gemma4:26b stays the recommendation**;
   quality work goes into profile context, glossary and more context lines instead.
+- 2026-10-23: **Text-only gemma4:26b measured.** The model's manifest has the vision encoder as
+  its own `projector` layer (1.19 GB, clip, 573M params), so a Modelfile with just the text blob
+  (`FROM <blob 4c8565…>`, `RENDERER gemma4-large`, `PARSER gemma4`, same parameters) creates it in
+  seconds without copying (`ollama create gemma4-text:26b-a4b-it-qat`); "vision" leaves its
+  capabilities. Loaded at num_ctx 2048: `/api/ps` size_vram 5.24 -> **6.08 GB** (Ollama put the
+  freed VRAM to use for experts), nvidia-smi 7.45 -> 7.18 GB. `compare_models.py`, 17 lines, two
+  runs in opposite order: original median 1307 / 1277 ms (max 1615 / 1651), text-only
+  **1131 / 1151 ms** (max 1458 / 1448) = ~12 % faster, as estimated; load + warm-up about the
+  same (16-19 s). Translations nearly identical (4 of 17 lines differ in wording, none worse).
+  Open: whether the app should create/recommend it (setup dialog after pulling the 26b).
