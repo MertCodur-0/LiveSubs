@@ -782,3 +782,6 @@ First **finish the app** (each step committed and pushed; no new release unless 
   examples' "amına koyayım" sets that level). 12b with the pack produced junk ("Köpekler
   geliyor" for cops, "Pis¡Os!"); translategemma leaks the glossary ("Say Vice City" ->
   "Leonida'ya hoş geldin"); qwen3:8b stays weak ("Kahpe!", "amik").
+  Added afterwards (same lines, its own run): text-only `gemma4-text:26b` median 972 -> **867 ms**
+  with the pack (~8 % faster than the original with the pack); with the pack only 3 of 60 lines
+  differ from the original, in wording only — the recommendation for GTA VI.
