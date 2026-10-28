@@ -67,9 +67,20 @@
   #status { top: max(14px, env(safe-area-inset-top)); }
   #hint { bottom: max(18px, env(safe-area-inset-bottom)); }
   .hidden { opacity: 0; pointer-events: none; }
+  /* Black on black behind everything: browsers keep the screen on only for a visible video. */
+  #awake {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    z-index: -1;
+    pointer-events: none;
+  }
 </style>
 </head>
 <body>
+<video id="awake" src="{{awake_video}}" muted loop playsinline disablepictureinpicture></video>
 <div id="stack"></div>
 <div id="idle" class="note">{{web.waiting}}</div>
 <div id="status" class="note hidden">{{web.connecting}}</div>
@@ -144,13 +155,23 @@ function connect() {
   };
 }
 
-// Keep the phone screen on. Browsers allow it only on secure pages (https), so on the local
-// network it usually is missing: then ask for a longer screen timeout instead.
+// Keep the phone screen on. The Wake Lock API works only on secure pages (https), so on the
+// local network it usually is missing: then a silent looping video does the job, as browsers
+// keep the screen on while a video plays. Only when both fail, ask for a longer screen timeout.
+const awakeVideo = document.getElementById("awake");
 let wakeLock = null;
 async function keepAwake() {
-  if (!("wakeLock" in navigator) || (wakeLock && !wakeLock.released)) return true;
+  if (wakeLock && !wakeLock.released) return true;
+  if ("wakeLock" in navigator) {
+    try {
+      wakeLock = await navigator.wakeLock.request("screen");
+      awakeVideo.pause();
+      hint.classList.add("hidden");
+      return true;
+    } catch {}
+  }
   try {
-    wakeLock = await navigator.wakeLock.request("screen");
+    await awakeVideo.play();  // muted, so most browsers allow it even before a tap
     hint.classList.add("hidden");
     return true;
   } catch {
@@ -170,11 +191,10 @@ document.addEventListener("visibilitychange", () => {
 document.addEventListener("click", () => {
   const page = document.documentElement;
   if (!document.fullscreenElement && page.requestFullscreen) page.requestFullscreen().catch(() => {});
-  keepAwake();
+  keepAwake().then((ok) => { if (!ok) showHint(hint.dataset.timeout); });
 });
 
-if (!("wakeLock" in navigator)) showHint(hint.dataset.timeout);
-else keepAwake().then((ok) => { if (!ok) showHint(hint.dataset.tap); });
+keepAwake().then((ok) => { if (!ok) showHint(hint.dataset.tap); });
 connect();
 </script>
 </body>

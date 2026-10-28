@@ -76,6 +76,11 @@ def test_page_has_its_text_filled_in() -> None:
     assert "Çeviri bekleniyor" in page
 
 
+def test_page_carries_the_keep_awake_video_inline() -> None:
+    page = render_page().decode("utf-8")
+    assert 'src="data:video/mp4;base64,' in page  # no URL: Safari wants byte ranges for those
+
+
 def test_lan_address_is_an_ipv4_address() -> None:
     assert len(lan_address().split(".")) == 4
 

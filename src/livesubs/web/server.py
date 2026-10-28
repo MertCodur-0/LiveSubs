@@ -7,6 +7,7 @@ again with its first message.
 
 from __future__ import annotations
 
+import base64
 import contextlib
 import html
 import json
@@ -41,8 +42,14 @@ def lan_address() -> str:
 
 
 def render_page() -> bytes:
-    """index.html with its ``{{web.*}}`` placeholders filled from the UI strings."""
+    """index.html with its ``{{web.*}}`` placeholders filled from the UI strings.
+
+    ``{{awake_video}}`` becomes the silent keep-awake video as a data URI: inline, so Safari
+    plays it without the byte-range requests it insists on for a video URL.
+    """
     page = (STATIC / "index.html").read_text(encoding="utf-8")
+    video = base64.b64encode((STATIC / "awake.mp4").read_bytes()).decode("ascii")
+    page = page.replace("{{awake_video}}", f"data:video/mp4;base64,{video}")
     return _PLACEHOLDER.sub(lambda m: html.escape(t(m.group(1))), page).encode("utf-8")
 
 

@@ -41,6 +41,16 @@ share the PC).
   card with the overlay on top — needs a preview window of our own (open item; OBS / the card's
   app as a *window* source meanwhile); (2) game on TV/monitor via splitter, translation on a PC
   screen next to it (overlay display target); (3) translation on a phone (web output).
+  **Update 2026-10-28:** the user plays on the TV (card passthrough) **and** runs Ambilight
+  software on the PC, which samples the PC screen -> a fullscreen copy of the card's picture on
+  a PC monitor is **required** (not optional), must stay capturable (no
+  `WDA_EXCLUDEFROMCAPTURE` on it) and must run even while translation is stopped. The
+  translation is read on the **laptop panel (DISPLAY2)** or a **tablet** (web output); the
+  preview then goes to the external monitor (DISPLAY1), which the Ambilight app samples (the
+  user picks that screen in the Ambilight app). Preview needs: fill the screen edge to edge (no
+  letterbox — black bars would turn the edge LEDs off; DISPLAY1 is 16:9 like the card), keep
+  the display awake while open (`SetThreadExecutionState(ES_DISPLAY_REQUIRED)`), nothing of
+  ours on top of it.
   Earlier assumption, still valid for window/monitor sources: main window on the laptop panel,
   Inspector by default on a monitor other than the game's, window positions remembered, global
   hotkeys. Benchmarks run on DISPLAY1.
@@ -380,14 +390,19 @@ remaining size, cancel. Minimizes to tray.
   "current line in the middle", then a top-down log the user rejected as reversed): each new
   translation appears at the top and pushes the older ones down; the oldest leave over the
   bottom edge. Newest white, older ones dimmed (opacity .5/.4/.32); FLIP animation: a new line
-  fades in from slightly above, the others slide down 0.6 s. Screen Wake Lock (needs a secure context, so over plain http on the LAN it is
-  usually missing -> "extend the screen timeout" hint); a tap asks for fullscreen + the lock.
+  fades in from slightly above, the others slide down 0.6 s. Keeping the screen on: Screen Wake Lock needs a secure
+  context, so over plain http on the LAN it is missing (the user's tablet went dark,
+  2026-10-28) -> fallback (NoSleep-style): a silent black looping video (`static/awake.mp4`,
+  3 KB, H.264 baseline + silent AAC, made with ffmpeg) played muted, full-screen behind the text
+  (browsers keep the screen on only for a *visible* playing video), inlined as a data URI
+  (`{{awake_video}}`; Safari wants byte ranges for video URLs). Only when both fail the
+  "extend the screen timeout" hint shows; a tap asks for fullscreen + retries.
   Settings tab group **Telefonda göster**: on/off, port, address + client count, QR
   (`ui/qr.py`, painted from `qrcode`'s matrix, no PIL), Wi-Fi/firewall hint, and **"show the
   translation only on the phone"** = the active profile's `OverlayDisplay.WEB_ONLY` (also in
   the Profiles tab's display combo); it disables the PC overlay (`Overlay.disabled`, F9 cannot
-  show it) and turns the web output on. Not verified with a real phone yet (needs the firewall
-  prompt answered); layout checked in headless Edge.
+  show it) and turns the web output on. **Verified by the user on a real tablet** (works);
+  layout also checked in headless Edge.
 - Startup checks (`ui/setup_check.py`, done 2026-10-22): **Kurulum** dialog, opened at start only
   when something is missing (and on `ocr_unavailable` / `model_not_found` engine errors, and from
   the "Kurulum…" button): en-US OCR (elevated `Add-WindowsCapability`, then polls 10 min),
@@ -785,3 +800,11 @@ First **finish the app** (each step committed and pushed; no new release unless 
   Added afterwards (same lines, its own run): text-only `gemma4-text:26b` median 972 -> **867 ms**
   with the pack (~8 % faster than the original with the pack); with the pack only 3 of 60 lines
   differ from the original, in wording only — the recommendation for GTA VI.
+- 2026-10-28: **User: play the PS5 on the TV via the card's passthrough, with Ambilight software
+  on the PC reading a fullscreen copy of the picture on a PC monitor.** Consequences for 9b/15:
+  the preview window becomes a must; the card can be opened by one app only, so LiveSubs owns it
+  and the Ambilight app captures our preview from the screen (not the card); the preview runs
+  independently of Start/Stop (proposed: its own process owning the card at full fps, sharing
+  the newest frame with the engine through shared memory at the profile fps — 1080p60 frames over
+  a `multiprocessing.Queue` would be far too heavy); our overlay stays excluded from capture so
+  the LEDs never see it; the fullscreen warning must ignore our own preview.
