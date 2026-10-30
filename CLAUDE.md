@@ -167,7 +167,8 @@ UI process (PySide6)                                  Engine process (multiproce
   `LineUpgraded(text, previous)` (re-translate). Mere variations never replace it (no flicker).
   Static bright scenes stay a limit. Verified end to end on the samples played as a stream: each
   line confirmed exactly once, cleared once.
-- Cache: in-memory LRU + SQLite, key = (model, profile, normalized text); context not in key.
+- Cache: in-memory LRU + SQLite, key = (model, profile + settings digest, normalized text);
+  dialogue context not in key.
 - Latency budget (8B on GPU): capture+preprocess ~10 ms, OCR 30–80 ms, confirm ~50 ms,
   translate 250–600 ms => ~0.4–0.8 s on-screen to overlay. `scripts/bench_pipeline.py` measures it.
 
@@ -284,7 +285,9 @@ Implementation (step 7, `engine/translate/`):
   the first chat after a load took ~4 s (measured twice) even with the model already loaded,
   later ones 100-600 ms — so translation start runs one tiny real translation.
 - `cache.py`: LRU (2000) + SQLite WAL (`cache_dir()/translations.sqlite3`), key = (model, profile,
-  `normalize.key(text)`), `clear(model)`.
+  `normalize.key(text)`), `clear(model)`. The orchestrator passes `"<profile>#<digest>"` as the
+  profile: `prompt.fingerprint` hashes the system prompt, game context, glossary and examples
+  (2026-10-30: importing a pack used to keep serving translations made without it).
 - `orchestrator.py`: GPU lane worker thread; **every line is translated, in reading order**: a
   new line never cancels the one in flight; waiting lines form a FIFO of at most `MAX_BACKLOG` (3,
   the oldest waiting line is dropped beyond that); cache hits go through the queue too (instant

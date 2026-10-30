@@ -10,7 +10,10 @@ tend to do when the context is pasted into one message.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
+from collections.abc import Mapping, Sequence
 
 from livesubs.engine.translate.base import TranslationRequest
 
@@ -60,6 +63,19 @@ def build_messages(request: TranslationRequest) -> list[dict[str, str]]:
         messages.append({"role": "assistant", "content": line.translation})
     messages.append({"role": "user", "content": request.text})
     return messages
+
+
+def fingerprint(
+    game_context: str, glossary: Mapping[str, str], examples: Sequence[tuple[str, str]]
+) -> str:
+    """A short digest of everything besides the line that shapes a translation: the system
+    prompt, the profile's context, glossary and examples. Part of the cache key, so editing them
+    (or importing a translation pack) never serves translations made without them."""
+    payload = json.dumps(
+        [SYSTEM_PROMPT, game_context.strip(), sorted(glossary.items()), list(examples or EXAMPLES)],
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(payload.encode()).hexdigest()[:12]
 
 
 def clean_output(text: str) -> str:

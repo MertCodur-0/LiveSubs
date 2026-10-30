@@ -20,6 +20,7 @@ from collections import deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
+from livesubs.engine.translate import prompt
 from livesubs.engine.translate.base import (
     CancelToken,
     ContextLine,
@@ -77,10 +78,12 @@ class TranslationOrchestrator:
         self._gpu = gpu
         self._cache = cache
         self._on_event = on_event
-        self._profile_id = profile_id
         self._game_context = game_context
         self._glossary = dict(glossary or {})
         self._examples = tuple((examples or {}).items())
+        # Cache scope: the profile plus a digest of its translation settings.
+        digest = prompt.fingerprint(game_context, self._glossary, self._examples)
+        self._cache_scope = f"{profile_id}#{digest}"
         self._history: deque[tuple[int, ContextLine]] = deque(maxlen=max(history_size, 1))
         self._history_enabled = history_size > 0
         self._max_backlog = max(max_backlog, 1)
@@ -147,11 +150,11 @@ class TranslationOrchestrator:
                 self._publish(job, result)
 
     def _translate(self, request: TranslationRequest, cancel: CancelToken) -> TranslationResult:
-        cached = self._cache.get(self._gpu.model, self._profile_id, request.text)
+        cached = self._cache.get(self._gpu.model, self._cache_scope, request.text)
         if cached is not None:
             return TranslationResult(cached, self._gpu.model, self._gpu.lane, 0.0, cached=True)
         result = self._gpu.translate(request, cancel)
-        self._cache.put(self._gpu.model, self._profile_id, request.text, result.text)
+        self._cache.put(self._gpu.model, self._cache_scope, request.text, result.text)
         return result
 
     def _request(self, job: _Job) -> TranslationRequest:

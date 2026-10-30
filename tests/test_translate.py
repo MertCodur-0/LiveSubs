@@ -370,6 +370,31 @@ def test_orchestrator_passes_the_profile_hints(fake: FakeBackend, events: Events
     assert request.examples == (("Copy.", "Anlaşıldı."),)
 
 
+def test_changed_translation_settings_never_reuse_old_translations(
+    fake: FakeBackend, events: Events
+) -> None:
+    """Regression: the cache key had no context, glossary or examples, so importing a
+    translation pack kept serving the lines translated without it."""
+    cache = TranslationCache()
+
+    def translate(**hints: object) -> TranslationResult:
+        orch = TranslationOrchestrator(fake, cache, events, profile_id="gta", **hints)
+        count = len(events.items) + 1
+        try:
+            orch.submit(1, "Cops!")
+            return events.wait_for(count)[-1].result
+        finally:
+            orch.close()
+
+    assert not translate().cached
+    assert translate().cached
+    assert not translate(glossary={"cop": "aynasız"}).cached
+    assert translate(glossary={"cop": "aynasız"}).cached
+    assert not translate(game_context="Miami.").cached
+    assert not translate(examples={"Copy.": "Anlaşıldı."}).cached
+    assert len(fake.requests) == 4
+
+
 def test_short_reply_between_long_lines_is_translated(
     orchestrator: TranslationOrchestrator, fake: FakeBackend, events: Events
 ) -> None:
