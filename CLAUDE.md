@@ -879,3 +879,7 @@ First **finish the app** (each step committed and pushed; no new release unless 
   `tests/test_child_process.py` kills a stand-in UI and fails without it. Packaged build
   verified: device host and engine start from LiveSubs.exe, card open in 0.4 s; the build's
   smoke test now covers MF listing, shared frames, the preview and the MSMF env var.
+- 2026-10-30: **Released v0.4.0** (capture card + preview, translation packs, watchdog/single
+  instance, phone screen kept on). Before it, one full test run crashed natively (pytest exit 3,
+  no traceback kept) while `build_exe.ps1` ran at the same time; two later runs alone were clean
+  (469 passed). Not reproduced — rerun with `-X faulthandler` if it shows up again.
