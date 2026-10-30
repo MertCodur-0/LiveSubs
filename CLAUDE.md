@@ -297,7 +297,9 @@ Implementation (step 7, `engine/translate/`):
   when their turn comes), so publishing order = reading order. An upgrade (same `line_id`)
   replaces its own waiting job or cancels its own in-flight request. History (default 3 lines)
   updated on publish; an upgrade replaces its own entry and never sees itself as context;
-  forgotten after 60 s without a new line (`HISTORY_TIMEOUT_S`: another scene). Events: `LineTranslated` / `LineFailed`. (Was "newest wins" until 2026-10-22, see log.)
+  forgotten after 60 s without a new line (`HISTORY_TIMEOUT_S`: another scene). Idle for 240 s
+  (`KEEP_WARM_S`, below the shortest keep-alive choice) -> `backend.load()` renews the model's
+  keep-alive (18 ms when loaded), so it never unloads while translation runs. Events: `LineTranslated` / `LineFailed`. (Was "newest wins" until 2026-10-22, see log.)
 - `scripts/compare_models.py`: sample lines (expected EN) through several models next to the
   user's `reference_tr`, with warm-up time, VRAM fit (`/api/ps` size_vram vs size) and latency.
   `bench_pipeline.py` now runs stabilizer + orchestrator and reports **appear -> translated**.

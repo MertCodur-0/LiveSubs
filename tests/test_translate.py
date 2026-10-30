@@ -315,6 +315,10 @@ class FakeBackend:
         self.release.set()
         self.ignore_cancel = False
         self.fail_with: TranslationError | None = None
+        self.loads = threading.Semaphore(0)
+
+    def load(self) -> None:
+        self.loads.release()
 
     def translate(self, request: TranslationRequest, cancel: CancelToken) -> TranslationResult:
         self.requests.append(request)
@@ -540,6 +544,18 @@ def test_history_is_forgotten_after_a_long_silence(fake: FakeBackend, events: Ev
             events.wait_for(line_id)
         assert [c.source for c in fake.requests[1].history] == ["One."]  # 50 s: same scene
         assert fake.requests[2].history == []  # 150 s later: another scene
+    finally:
+        orch.close()
+
+
+def test_model_is_kept_loaded_while_idle(fake: FakeBackend, events: Events) -> None:
+    """A long stretch without subtitles must not let Ollama's keep-alive unload the model."""
+    orch = TranslationOrchestrator(fake, TranslationCache(), events, keep_warm_s=0.05)
+    try:
+        assert fake.loads.acquire(timeout=5)
+        assert fake.loads.acquire(timeout=5)  # again and again while idle
+        orch.submit(1, "Still translating.")
+        assert events.wait_for(1)[0].result.text == "STILL TRANSLATING."
     finally:
         orch.close()
 

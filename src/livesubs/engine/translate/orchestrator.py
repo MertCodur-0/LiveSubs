@@ -41,6 +41,10 @@ log = logging.getLogger(__name__)
 MAX_BACKLOG = 3
 # Seconds without a new line after which the dialogue context is forgotten.
 HISTORY_TIMEOUT_S = 60.0
+# Idle seconds after which the model's keep-alive is renewed; below the shortest keep-alive
+# choice (5 min), so the model stays loaded as long as translation runs. Ollama's own timer
+# still unloads it once translation stops.
+KEEP_WARM_S = 240.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +85,7 @@ class TranslationOrchestrator:
         max_backlog: int = MAX_BACKLOG,
         history_timeout_s: float = HISTORY_TIMEOUT_S,
         clock: Callable[[], float] = time.monotonic,
+        keep_warm_s: float = KEEP_WARM_S,
     ) -> None:
         self._gpu = gpu
         self._cache = cache
@@ -97,6 +102,7 @@ class TranslationOrchestrator:
         self._clock = clock
         self._last_submit: float | None = None
         self._max_backlog = max(max_backlog, 1)
+        self._keep_warm_s = keep_warm_s
 
         self._cond = threading.Condition()
         self._pending: deque[_Job] = deque()
@@ -140,14 +146,21 @@ class TranslationOrchestrator:
     def _run(self) -> None:
         while True:
             with self._cond:
-                while not self._pending and not self._closed:
-                    self._cond.wait()
+                idle = False
+                while not self._pending and not self._closed and not idle:
+                    idle = not self._cond.wait(self._keep_warm_s)
                 if self._closed:
                     return
-                job = self._pending.popleft()
-                cancel = CancelToken()
-                self._in_flight = (job.line_id, cancel)
-                request = self._request(job)
+                if not self._pending:
+                    job = None
+                else:
+                    job = self._pending.popleft()
+                    cancel = CancelToken()
+                    self._in_flight = (job.line_id, cancel)
+                    request = self._request(job)
+            if job is None:
+                self._keep_warm()
+                continue
             try:
                 result = self._translate(request, cancel)
             except TranslationCancelledError:
@@ -162,6 +175,17 @@ class TranslationOrchestrator:
                         self._in_flight = None
             if not cancel.cancelled:  # superseded by an upgrade while finishing
                 self._publish(job, result)
+
+    def _keep_warm(self) -> None:
+        """Idle for ``keep_warm_s``: renew the model's keep-alive (a request without a prompt),
+        so a long stretch without subtitles never makes the next line wait for a reload."""
+        load = getattr(self._gpu, "load", None)
+        if load is None:
+            return
+        try:
+            load()
+        except TranslationError as exc:
+            log.info("Keeping the model loaded failed: %s", exc)
 
     def _translate(self, request: TranslationRequest, cancel: CancelToken) -> TranslationResult:
         cached = self._cache.get(self._gpu.model, self._cache_scope, request.text)
