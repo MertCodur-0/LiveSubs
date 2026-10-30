@@ -13,7 +13,7 @@ from livesubs import APP_NAME
 from livesubs.core.config import THEME_CHOICES, AppConfig
 from livesubs.core.geometry import Rect
 from livesubs.core.profiles import OverlaySettings, OverlayStyle
-from livesubs.ui import theme
+from livesubs.ui import icons, theme
 from livesubs.ui.header import Header
 from livesubs.ui.icon import SIZES, app_icon, render, write_ico
 from livesubs.ui.overlay import STYLE_PRESETS, VICE_HALO, Overlay, apply_style
@@ -208,3 +208,20 @@ def test_vice_draws_a_cyan_halo(qtbot: QtBot) -> None:
     assert halo not in _colors(overlay)
     apply_style(settings, OverlayStyle.VICE)
     assert halo in _colors(overlay)
+
+
+# --- line icons -----------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("name", icons.NAMES)
+def test_icons_render_in_the_given_color(qapp: QApplication, name: str) -> None:
+    color = QColor("#0A84FF")
+    image = icons.pixmap(name, color, 20).toImage()
+    seen = {
+        image.pixelColor(x, y).rgb()
+        for x in range(20)
+        for y in range(20)
+        if image.pixelColor(x, y).alpha() == 255
+    }
+    assert seen == {color.rgb()}  # drawn, and only in the tint color
+    assert image.pixelColor(0, 0).alpha() == 0
