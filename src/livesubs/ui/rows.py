@@ -34,6 +34,18 @@ def info(text: str) -> QLabel:
     return label
 
 
+def labeled(text: str, tip: str) -> QWidget:
+    """A form label with an (i) after it, for QFormLayout rows."""
+    widget = QWidget()
+    row = QHBoxLayout(widget)
+    row.setContentsMargins(0, 0, 0, 0)
+    row.setSpacing(6)
+    row.addWidget(QLabel(text))
+    row.addWidget(info(tip))
+    row.addStretch(1)
+    return widget
+
+
 def hint(text: str) -> QLabel:
     label = QLabel(text, wordWrap=True)
     label.setProperty("hint", True)  # muted, styled by the theme
@@ -53,9 +65,17 @@ class RowCard(QGroupBox):
         super().__init__(title)
         if not title:
             self.setProperty("untitled", True)  # no title margin (theme)
-        self._rows = QVBoxLayout(self)
+        self._outer = QHBoxLayout(self)
+        self._outer.setContentsMargins(0, 0, 0, 0)
+        self._outer.setSpacing(16)
+        self._rows = QVBoxLayout()
         self._rows.setContentsMargins(0, 0, 0, 0)
         self._rows.setSpacing(0)
+        self._outer.addLayout(self._rows, 1)
+
+    def set_side(self, widget: QWidget) -> None:
+        """A widget beside the rows, at the top right (the phone output's QR code)."""
+        self._outer.addWidget(widget, 0, Qt.AlignmentFlag.AlignTop)
 
     def _add(self, item: QWidget | QLayout) -> None:
         if self._rows.count():
@@ -77,11 +97,10 @@ class RowCard(QGroupBox):
         row = QHBoxLayout()
         row.setContentsMargins(*ROW_MARGINS)
         row.setSpacing(8)
-        title = QLabel(label)
+        # The label and its (i) share the label column, so controls line up across rows.
+        title = labeled(label, tip) if tip else QLabel(label)
         title.setMinimumWidth(LABEL_WIDTH if expand else 0)
         row.addWidget(title)
-        if tip:
-            row.addWidget(info(tip))
         if not expand:
             row.addStretch(1)
         for control in controls:
@@ -97,10 +116,9 @@ class RowCard(QGroupBox):
         row = QHBoxLayout()
         row.setContentsMargins(*ROW_MARGINS)
         row.setSpacing(8)
-        row.addWidget(widget)
+        row.addWidget(widget, 1)
         if tip:
             row.addWidget(info(tip))
-        row.addStretch(1)
         self._add(row)
 
     def add_layout(self, layout: QLayout) -> None:

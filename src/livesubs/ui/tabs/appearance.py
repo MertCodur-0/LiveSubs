@@ -12,8 +12,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
     QFontComboBox,
-    QFormLayout,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -26,6 +24,7 @@ from PySide6.QtWidgets import (
 from livesubs.core.profiles import OverlayDisplay, OverlayPlacement, OverlaySettings, OverlayStyle
 from livesubs.i18n import t
 from livesubs.ui.overlay import apply_style
+from livesubs.ui.rows import RowCard
 
 PLACEMENTS = (
     OverlayPlacement.ABOVE,
@@ -33,6 +32,8 @@ PLACEMENTS = (
     OverlayPlacement.BELOW,
     OverlayPlacement.CUSTOM,
 )
+FIELD_WIDTH = 150  # spin boxes at the right edge of a row (as in Settings)
+OPACITY_LABEL_WIDTH = 36  # "%100" without the slider jumping
 
 
 class _ColorButton(QPushButton):
@@ -64,15 +65,12 @@ class AppearanceTab(QWidget):
     def __init__(self, settings: OverlaySettings) -> None:
         super().__init__()
         self.settings = settings
-        look = QGroupBox(t("appearance.card.look"))
-        form = QFormLayout(look)
-
+        look = RowCard(t("appearance.card.look"))
         self.style_combo = QComboBox()
         for style in OverlayStyle:
             self.style_combo.addItem(t(f"appearance.style.{style}"), style)
-        self.style_combo.setToolTip(t("appearance.style_hint"))
         self.style_combo.currentIndexChanged.connect(self._on_style)
-        form.addRow(t("appearance.style"), self.style_combo)
+        look.add_row(t("appearance.style"), self.style_combo, tip=t("appearance.style_hint"))
 
         self.placement = QComboBox()
         for placement in PLACEMENTS:
@@ -80,22 +78,22 @@ class AppearanceTab(QWidget):
         self.placement.currentIndexChanged.connect(
             lambda i: self._set("placement", self.placement.itemData(i))
         )
-        form.addRow(t("appearance.placement"), self.placement)
+        look.add_row(t("appearance.placement"), self.placement)
 
         self.background = QCheckBox(t("appearance.background"))
         self.background.toggled.connect(self._on_background)
         self.opacity = QSlider(Qt.Orientation.Horizontal)
         self.opacity.setRange(0, 100)
         self.opacity_label = QLabel()
+        self.opacity_label.setMinimumWidth(OPACITY_LABEL_WIDTH)
         self.opacity.valueChanged.connect(self._on_opacity)
         row = QHBoxLayout()
         row.addWidget(self.background)
         row.addWidget(self.opacity, 1)
         row.addWidget(self.opacity_label)
-        form.addRow(t("appearance.box"), row)
+        look.add_row(t("appearance.box"), row)
 
-        text = QGroupBox(t("appearance.card.text"))
-        form = QFormLayout(text)
+        text = RowCard(t("appearance.card.text"))
         self.font = QFontComboBox()
         self.font.currentFontChanged.connect(lambda f: self._set("font_family", f.family()))
         self.size = QSpinBox(suffix=" pt")
@@ -104,7 +102,7 @@ class AppearanceTab(QWidget):
         row = QHBoxLayout()
         row.addWidget(self.font, 1)
         row.addWidget(self.size)
-        form.addRow(t("appearance.font"), row)
+        text.add_row(t("appearance.font"), row)
 
         self.text_color = _ColorButton(settings.text_color, lambda c: self._set("text_color", c))
         self.outline_color = _ColorButton(
@@ -125,41 +123,36 @@ class AppearanceTab(QWidget):
         row.addSpacing(12)
         row.addWidget(self.shadow)
         row.addStretch(1)
-        form.addRow(t("appearance.colors"), row)
+        text.add_row(t("appearance.colors"), row)
 
         self.max_lines = QSpinBox()
         self.max_lines.setRange(1, 4)
+        self.max_lines.setFixedWidth(FIELD_WIDTH)
         self.max_lines.valueChanged.connect(lambda v: self._set("max_lines", v))
-        form.addRow(t("appearance.max_lines"), self.max_lines)
+        text.add_row(t("appearance.max_lines"), self.max_lines, expand=False)
 
-        self.show_original = QCheckBox(t("appearance.show_original"))
+        self.show_original = QCheckBox()
         self.show_original.toggled.connect(lambda v: self._set("show_original", v))
-        form.addRow("", self.show_original)
+        text.add_row(t("appearance.show_original"), self.show_original, expand=False)
 
-        timing = QGroupBox(t("appearance.card.timing"))
-        form = QFormLayout(timing)
+        timing = RowCard(t("appearance.card.timing"))
         self.clear_delay = QDoubleSpinBox(suffix=" sn", decimals=1, singleStep=0.5)
         self.clear_delay.setRange(0, 10)
+        self.clear_delay.setFixedWidth(FIELD_WIDTH)
         self.clear_delay.valueChanged.connect(
             lambda v: self._set("clear_delay_ms", round(v * 1000))
         )
-        form.addRow(t("appearance.clear_delay"), self.clear_delay)
+        timing.add_row(t("appearance.clear_delay"), self.clear_delay, expand=False)
 
         self.preview = QPushButton(t("appearance.preview"), checkable=True)
         self.preview.toggled.connect(self.preview_toggled)
-        hint = QLabel(t("appearance.hint"))
-        hint.setWordWrap(True)
-        hint.setProperty("hint", True)  # muted, styled by the theme
-
-        self.preview.setProperty("pill", True)  # rounded (theme)
-        preview_row = QHBoxLayout()
-        preview_row.addWidget(self.preview)
-        preview_row.addStretch(1)
-        form.addRow("", preview_row)
-        form.addRow("", hint)
+        timing.add_row(
+            t("appearance.preview_row"), self.preview, tip=t("appearance.hint"), expand=False
+        )
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 8, 0)
+        layout.setSpacing(12)
         for card in (look, text, timing):
             layout.addWidget(card)
         layout.addStretch(1)

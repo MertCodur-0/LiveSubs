@@ -1476,3 +1476,32 @@ def test_state_line_shows_the_mean_translation_time(window: MainWindow) -> None:
     window._poll()
     assert window.state_label.text() == f"{t('state.running')} · {t('live.average', seconds='1,2')}"
     assert window.state_dot.property("state") == "ok"
+
+
+def test_advanced_settings_are_folded_away(window: MainWindow) -> None:
+    settings = window.settings
+    advanced = settings.advanced
+    for widget in (
+        settings.ollama_url,
+        settings.context_lines,
+        settings.keep_alive,
+        settings.fps,
+        settings.clear_cache,
+        settings.open_logs,
+        settings.setup_button,
+    ):
+        assert advanced.card.isAncestorOf(widget)
+    assert advanced.card.isHidden()
+    advanced.toggle.click()
+    assert not advanced.card.isHidden()
+    advanced.toggle.click()
+    assert advanced.card.isHidden()
+    # Everyday settings stay outside it.
+    for widget in (settings.theme, settings.web_enabled, settings.developer_view):
+        assert not advanced.card.isAncestorOf(widget)
+
+
+def test_setup_is_reachable_from_settings(window: MainWindow, qtbot: QtBot) -> None:
+    with qtbot.waitSignal(window.settings.setup_requested, timeout=1000):
+        window.settings.setup_button.click()
+    window.setup.hide()

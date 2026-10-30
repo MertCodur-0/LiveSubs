@@ -56,6 +56,7 @@ from livesubs.ollama.client import (
 )
 from livesubs.ollama.compare import TEST_LINES, LineResult, ModelRun, run_comparison
 from livesubs.platform import gpu
+from livesubs.ui.rows import info
 from livesubs.ui.setup_check import free_bytes
 
 GB = vram.GB
@@ -168,6 +169,7 @@ class ModelsTab(QWidget):
         content = QWidget(objectName="page")  # transparent in the scroll area (theme)
         layout = QVBoxLayout(content)
         layout.setContentsMargins(0, 0, 8, 0)
+        layout.setSpacing(12)
         layout.addWidget(self._status_box())
         layout.addWidget(self._installed_box())
         layout.addWidget(self._download_box())
@@ -259,8 +261,9 @@ class ModelsTab(QWidget):
     def _compare_box(self) -> QGroupBox:
         box = QGroupBox(t("models.compare"))
         layout = QVBoxLayout(box)
-        layout.addWidget(_hint(t("models.compare_hint")))
+        layout.setSpacing(8)
         pick = QHBoxLayout()
+        pick.addWidget(info(t("models.compare_hint")))
         self.compare_a = QComboBox()
         self.compare_b = QComboBox()
         self.compare_button = QPushButton(t("models.compare_start"), clicked=self.toggle_compare)

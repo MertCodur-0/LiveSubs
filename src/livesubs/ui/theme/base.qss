@@ -240,9 +240,13 @@ QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QPlainTextEdit, QTextEdit, QKeyS
     border: 1px solid {{field_border}};
     border-radius: 8px;
     padding: 4px 8px;
-    min-height: 20px;
     selection-background-color: {{selection}};
     selection-color: {{selection_text}};
+}
+
+/* One-line fields only: a QSS min-height would override a text box's fixed height in code. */
+QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QKeySequenceEdit {
+    min-height: 20px;
 }
 
 QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus,

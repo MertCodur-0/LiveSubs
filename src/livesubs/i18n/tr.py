@@ -79,6 +79,7 @@ STRINGS: dict[str, str] = {
     "appearance.show_original": "İngilizce aslını altında küçük göster",
     "appearance.clear_delay": "Altyazı bitince ekranda kalma",
     "appearance.preview": "Önizle",
+    "appearance.preview_row": "Örnek çeviriyi göster",
     "appearance.hint": (
         "Değişiklikler hemen uygulanır ve kaydedilir. Önizle, örnek bir çeviriyi seçtiğiniz "
         "bölgeye göre gösterir. Serbest konumda overlay'i F8 ile ayar moduna geçip fareyle "
@@ -216,7 +217,8 @@ STRINGS: dict[str, str] = {
     "profiles.last_one": "Son profil silinemez.",
     "profiles.hint": (
         "Her oyun için ayrı profil açın: kaynak, altyazı bölgesi, renkler, görünüm ve çeviri "
-        "ayarları profilde saklanır. Profiller arasında Canlı sekmesindeki listeden geçilir."
+        "ayarları profilde saklanır. Profiller arasında Canlı sayfasındaki Değiştir… ile "
+        "geçilir."
     ),
     "profiles.translation": "Çeviri",
     "profiles.context": "Oyun hakkında",
@@ -228,12 +230,14 @@ STRINGS: dict[str, str] = {
     "profiles.glossary_add": "Satır ekle",
     "profiles.glossary_remove": "Seçili satırları sil",
     "profiles.examples": "Örnek çeviriler",
-    "profiles.translation_hint": (
+    "profiles.glossary_tip": (
         "Sözlükteki kelimeler her zaman böyle çevrilir; çevrilmemesi gereken isimleri aynen "
-        "yazın (ör. Vice City → Vice City). Örnek çeviriler modele oyunun dilini gösterir: "
-        "argoyu ve üslubu en iyi anlatan 5-10 replik yeterli (fazlası çeviriyi yavaşlatır); "
-        "boş bırakılırsa yerleşik örnekler kullanılır. Değişiklikler bir sonraki Başlat'ta "
-        "geçerli olur."
+        "yazın (ör. Vice City → Vice City). Bir sonraki Başlat'ta geçerli olur."
+    ),
+    "profiles.examples_tip": (
+        "Örnek çeviriler modele oyunun dilini gösterir: argoyu ve üslubu en iyi anlatan 5-10 "
+        "replik yeterli (fazlası çeviriyi yavaşlatır); boş bırakılırsa yerleşik örnekler "
+        "kullanılır. Bir sonraki Başlat'ta geçerli olur."
     ),
     "profiles.import_pack": "Çeviri paketini içe aktar…",
     "profiles.import_filter": "Çeviri paketi (*.json)",
@@ -256,10 +260,13 @@ STRINGS: dict[str, str] = {
     "profiles.display.auto": "Altyazının olduğu ekran (otomatik)",
     "profiles.display.monitor": "{name} ({width}x{height}) — F8 ile konumlandırın",
     "profiles.display.web_only": "Yalnızca telefonda (bilgisayarda çeviri gösterilmez)",
-    "profiles.game_hint": (
+    "profiles.reserve_tip": (
         "Oyun bu bilgisayarda çalışıyorsa ekran kartı belleğinin bir kısmı ona kalır; model "
-        "seçerken bu dikkate alınır. Oyunu TV'de oynayıp çeviriyi bilgisayar ekranında okumak "
-        "için o ekranı seçin ve F8 ayar modunda çeviriyi istediğiniz yere taşıyın."
+        "seçerken bu dikkate alınır."
+    ),
+    "profiles.display_tip": (
+        "Oyunu TV'de oynayıp çeviriyi bilgisayar ekranında okumak için o ekranı seçin ve F8 "
+        "ayar modunda çeviriyi istediğiniz yere taşıyın."
     ),
     # Models tab
     "tab.models": "Modeller",
@@ -368,43 +375,51 @@ STRINGS: dict[str, str] = {
     "settings.keep_alive.-1": "Hep (uygulama kapanınca da)",
     "settings.fps": "Okuma hızı",
     "settings.fps_suffix": " kare/sn",
-    "settings.translation_hint": (
-        "Bir sonraki Başlat'ta geçerli olur. Önceki satırlar çeviriye bağlam olarak verilir "
-        "(daha tutarlı, biraz daha yavaş). Okuma hızı yükseldikçe altyazı daha erken yakalanır "
-        "ama işlemci daha çok çalışır; 10 çoğu oyun için yeterli."
+    "settings.advanced": "Gelişmiş",
+    "settings.context_lines_tip": (
+        "Önceki satırlar çeviriye bağlam olarak verilir: daha tutarlı, biraz daha yavaş. "
+        "Bir sonraki Başlat'ta geçerli olur."
+    ),
+    "settings.fps_tip": (
+        "Yükseldikçe altyazı daha erken yakalanır ama işlemci daha çok çalışır; 10 çoğu oyun "
+        "için yeterli. Bir sonraki Başlat'ta geçerli olur."
     ),
     "settings.hotkeys": "Kısayol tuşları",
     "settings.hotkey.calibration": "Ayar modu",
     "settings.hotkey.toggle_overlay": "Çeviriyi gizle / göster",
     "settings.hotkey.pause": "Duraklat / devam",
     "settings.hotkeys_reset": "Varsayılana dön",
-    "settings.hotkeys_hint": "Kutuya tıklayıp yeni tuşa basın; hemen geçerli olur.",
+    "settings.hotkeys_hint": "Kutuya tıklayıp yeni tuşa basın.",
     "settings.hotkeys_saved": "Kısayollar kaydedildi.",
     "settings.hotkey_invalid": "Bu tuş kullanılamaz: {hotkey}",
     "settings.hotkey_taken": "{hotkey} başka bir işe atanmış.",
-    "settings.window": "Görünüm, pencere ve kayıt",
+    "settings.window": "Pencere ve görünüm",
     "settings.theme": "Tema",
     "settings.theme.apple": "Apple koyu",
     "settings.theme.apple_light": "Apple açık",
     "settings.theme.system": "Apple, Windows'a göre açık/koyu",
     "settings.theme.vice": "Vice (neon gün batımı)",
     "settings.theme.dark": "Sade koyu",
-    "settings.minimize_to_tray": "Simge durumuna küçültünce sistem tepsisine gönder",
-    "settings.recording_mode": "Kayıt modu (OBS ve ekran görüntüleri çeviriyi de görsün)",
+    "settings.minimize_to_tray": "Küçültünce sistem tepsisine gönder",
+    "settings.recording_mode": "Kayıt modu",
     "settings.developer_view": "Geliştirici görünümü",
     "settings.developer_view_tip": (
         "Canlı akışı saat, model, OCR ve çeviri süreleriyle tablo olarak gösterir."
     ),
     "settings.recording_hint": (
-        "Normalde çeviri ekran yakalamadan gizlenir; böylece OCR kendi çevirimizi okumaz. "
+        "OBS ve ekran görüntüleri çeviriyi de görür. Normalde çeviri ekran yakalamadan "
+        "gizlenir; böylece OCR kendi çevirimizi okumaz. "
         "Kayıt modunda çeviri altyazı bölgesiyle çakışırsa OCR onu da okuyabilir; "
         "bu durumda uyarı gösterilir."
     ),
     "settings.web": "Telefonda göster",
-    "settings.web_enabled": "Çeviriyi telefona da gönder (web sayfası)",
+    "settings.web_enabled": "Çeviriyi telefona gönder",
     "settings.web_port": "Port",
-    "settings.web_only": "Çeviriyi yalnızca telefonda göster (bilgisayar ekranında kapalı)",
-    "settings.web_only_tip": "Bu profil için geçerlidir (Profiller sekmesindeki ekran seçimi).",
+    "settings.web_only": "Yalnızca telefonda göster",
+    "settings.web_only_tip": (
+        "Bilgisayar ekranındaki çeviri kapanır. Bu profil için geçerlidir (Profiller "
+        "sekmesindeki ekran seçimi)."
+    ),
     "settings.web_off": "Kapalı",
     "settings.web_address": "Telefonda açın: <b>{url}</b> — bağlı cihaz: {clients}",
     "settings.web_failed": "Web çıktısı başlatılamadı (port {port} kullanımda olabilir): {detail}",
@@ -492,7 +507,7 @@ STRINGS: dict[str, str] = {
         "bölgeyi daha sonra kalibrasyon modunda (F8) ince ayarlayabilirsiniz."
     ),
     "settings.preview": "Yakalama kartı önizlemesi",
-    "settings.preview_enabled": "Kartın görüntüsünü bir monitörde tam ekran göster",
+    "settings.preview_enabled": "Tam ekran önizleme",
     "settings.preview_device": "Kart",
     "settings.preview_monitor": "Monitör",
     "settings.preview_profile_card": "Etkin profildeki kart",

@@ -1,5 +1,6 @@
-"""Settings tab: translation, reading speed, phone output, capture card preview, hotkeys,
-window, recording, upkeep.
+"""Settings tab, macOS Settings style: cards of rows (window and theme, phone output,
+capture card preview, hotkeys) and a folded "Gelişmiş" card for what rarely changes (Ollama,
+context, model keep-alive, reading speed, upkeep). Long explanations sit in (i) tooltips.
 
 Edits change the given ``AppConfig`` / ``Profile`` objects in place and announce it; the main
 window saves them and applies what can change while running (hotkeys, recording mode).
@@ -7,13 +8,13 @@ window saves them and applies what can change while running (hotkeys, recording 
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QFormLayout,
-    QGroupBox,
     QHBoxLayout,
     QKeySequenceEdit,
     QLabel,
@@ -30,10 +31,12 @@ from livesubs.i18n import t
 from livesubs.platform import hotkeys, win32
 from livesubs.platform.video_devices import list_video_devices
 from livesubs.ui.qr import qr_pixmap
+from livesubs.ui.rows import Disclosure, RowCard, hint
 from livesubs.ui.theme import CHOICES as THEME_CHOICES
 
 KEEP_ALIVE = ("5m", "30m", "2h", "-1")  # Ollama durations; -1 keeps the model loaded
 HOTKEY_ACTIONS = ("calibration", "toggle_overlay", "pause")
+FIELD_WIDTH = 150  # spin boxes and key fields at the right edge of a row
 
 
 def hotkey_text(sequence: QKeySequence) -> str:
@@ -44,10 +47,12 @@ def hotkey_text(sequence: QKeySequence) -> str:
     return text.replace("Meta", "Win")
 
 
-def _hint(text: str) -> QLabel:
-    label = QLabel(text, wordWrap=True)
-    label.setProperty("hint", True)  # muted, styled by the theme
-    return label
+def _switch(checked: bool, on_toggle: Callable[[bool], None]) -> QCheckBox:
+    """A text-less check box for the right edge of a row (its row names it)."""
+    box = QCheckBox()
+    box.setChecked(checked)
+    box.toggled.connect(on_toggle)
+    return box
 
 
 class SettingsTab(QWidget):
@@ -70,86 +75,77 @@ class SettingsTab(QWidget):
         self.profile = profile
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 8, 0)
-        layout.addWidget(self._translation_box())
+        layout.setSpacing(12)
+        layout.addWidget(self._window_box())
         layout.addWidget(self._web_box())
         layout.addWidget(self._preview_box())
         layout.addWidget(self._hotkey_box())
-        layout.addWidget(self._window_box())
-        layout.addWidget(self._upkeep_box())
+        self.advanced = Disclosure(t("settings.advanced"), self._advanced_box())
+        layout.addWidget(self.advanced)
         layout.addStretch(1)
 
     # --- groups ----------------------------------------------------------------------------------
 
-    def _translation_box(self) -> QGroupBox:
-        box = QGroupBox(t("settings.translation"))
-        form = QFormLayout(box)
-        self.ollama_url = QLineEdit(self.config.ollama.url)
-        self.ollama_url.editingFinished.connect(self._on_url)
-        form.addRow(t("settings.ollama_url"), self.ollama_url)
-
-        self.context_lines = QSpinBox()
-        self.context_lines.setRange(0, 10)
-        self.context_lines.setValue(self.config.ollama.context_lines)
-        self.context_lines.valueChanged.connect(lambda v: self._set_ollama("context_lines", v))
-        form.addRow(t("settings.context_lines"), self.context_lines)
-
-        self.keep_alive = QComboBox()
-        for value in KEEP_ALIVE:
-            self.keep_alive.addItem(t(f"settings.keep_alive.{value}"), value)
-        current = self.keep_alive.findData(self.config.ollama.keep_alive)
-        if current < 0:  # a value set by hand in config.json
-            self.keep_alive.addItem(self.config.ollama.keep_alive, self.config.ollama.keep_alive)
-            current = self.keep_alive.count() - 1
-        self.keep_alive.setCurrentIndex(current)
-        self.keep_alive.currentIndexChanged.connect(
-            lambda i: self._set_ollama("keep_alive", self.keep_alive.itemData(i))
+    def _window_box(self) -> RowCard:
+        card = RowCard(t("settings.window"))
+        self.theme = QComboBox()
+        for name in THEME_CHOICES:
+            self.theme.addItem(t(f"settings.theme.{name}"), name)
+        self.theme.setCurrentIndex(max(self.theme.findData(self.config.theme), 0))
+        self.theme.currentIndexChanged.connect(self._on_theme)
+        card.add_row(t("settings.theme"), self.theme)
+        self.minimize_to_tray = _switch(self.config.minimize_to_tray, self._on_tray)
+        card.add_row(t("settings.minimize_to_tray"), self.minimize_to_tray, expand=False)
+        self.recording = _switch(self.config.recording_mode, self._on_recording)
+        card.add_row(
+            t("settings.recording_mode"),
+            self.recording,
+            tip=t("settings.recording_hint"),
+            expand=False,
         )
-        form.addRow(t("settings.keep_alive"), self.keep_alive)
+        self.developer_view = _switch(self.config.developer_view, self._on_developer_view)
+        card.add_row(
+            t("settings.developer_view"),
+            self.developer_view,
+            tip=t("settings.developer_view_tip"),
+            expand=False,
+        )
+        return card
 
-        self.fps = QSpinBox(suffix=t("settings.fps_suffix"))
-        self.fps.setRange(1, 30)
-        self.fps.setValue(self.profile.capture.fps)
-        self.fps.valueChanged.connect(self._on_fps)
-        form.addRow(t("settings.fps"), self.fps)
-        form.addRow(_hint(t("settings.translation_hint")))
-        return box
-
-    def _web_box(self) -> QGroupBox:
-        box = QGroupBox(t("settings.web"))
-        row = QHBoxLayout(box)
-        form = QFormLayout()
-        self.web_enabled = QCheckBox(t("settings.web_enabled"))
-        self.web_enabled.setChecked(self.config.web.enabled)
-        self.web_enabled.toggled.connect(self._on_web_enabled)
-        form.addRow(self.web_enabled)
-        self.web_only = QCheckBox(t("settings.web_only"))
-        self.web_only.setToolTip(t("settings.web_only_tip"))
-        self.web_only.setChecked(self.profile.overlay.display == OverlayDisplay.WEB_ONLY)
-        self.web_only.toggled.connect(self._on_web_only)
-        form.addRow(self.web_only)
+    def _web_box(self) -> RowCard:
+        card = RowCard(t("settings.web"))
+        self.web_enabled = _switch(self.config.web.enabled, self._on_web_enabled)
+        card.add_row(t("settings.web_enabled"), self.web_enabled, expand=False)
+        self.web_only = _switch(
+            self.profile.overlay.display == OverlayDisplay.WEB_ONLY, self._on_web_only
+        )
+        card.add_row(
+            t("settings.web_only"), self.web_only, tip=t("settings.web_only_tip"), expand=False
+        )
         self.web_port = QSpinBox()
         self.web_port.setRange(1024, 65535)
         self.web_port.setValue(self.config.web.port)
+        self.web_port.setFixedWidth(FIELD_WIDTH)
         self.web_port.editingFinished.connect(self._on_web_port)
-        form.addRow(t("settings.web_port"), self.web_port)
+        card.add_row(t("settings.web_port"), self.web_port, expand=False)
         self.web_status = QLabel(t("settings.web_off"), wordWrap=True)
         self.web_status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        form.addRow(self.web_status)
-        form.addRow(_hint(t("settings.web_hint")))
+        card.add_widget(self.web_status, tip=t("settings.web_hint"))
         self.web_qr = QLabel()
         self.web_qr.hide()
         self._qr_url = ""
-        row.addLayout(form, 1)
-        row.addWidget(self.web_qr, 0, Qt.AlignmentFlag.AlignTop)
-        return box
+        card.set_side(self.web_qr)
+        return card
 
-    def _preview_box(self) -> QGroupBox:
-        box = QGroupBox(t("settings.preview"))
-        form = QFormLayout(box)
-        self.preview_enabled = QCheckBox(t("settings.preview_enabled"))
-        self.preview_enabled.setChecked(self.config.preview.enabled)
-        self.preview_enabled.toggled.connect(self._on_preview_enabled)
-        form.addRow(self.preview_enabled)
+    def _preview_box(self) -> RowCard:
+        card = RowCard(t("settings.preview"))
+        self.preview_enabled = _switch(self.config.preview.enabled, self._on_preview_enabled)
+        card.add_row(
+            t("settings.preview_enabled"),
+            self.preview_enabled,
+            tip=t("settings.preview_hint"),
+            expand=False,
+        )
         self.preview_device = QComboBox()
         self.preview_device.activated.connect(self._on_preview_device)
         refresh = QPushButton(t("source.refresh"))
@@ -157,15 +153,14 @@ class SettingsTab(QWidget):
         device_row = QHBoxLayout()
         device_row.addWidget(self.preview_device, 1)
         device_row.addWidget(refresh)
-        form.addRow(t("settings.preview_device"), device_row)
+        card.add_row(t("settings.preview_device"), device_row)
         self.preview_monitor = QComboBox()
         self.preview_monitor.activated.connect(self._on_preview_monitor)
-        form.addRow(t("settings.preview_monitor"), self.preview_monitor)
-        self.preview_status = _hint("")
-        form.addRow(self.preview_status)
-        form.addRow(_hint(t("settings.preview_hint")))
+        card.add_row(t("settings.preview_monitor"), self.preview_monitor)
+        self.preview_status = hint("")
+        card.add_widget(self.preview_status)
         self.refresh_preview_choices()
-        return box
+        return card
 
     def refresh_preview_choices(self) -> None:
         """Connected cards and monitors; a chosen one that is missing stays listed."""
@@ -197,65 +192,79 @@ class SettingsTab(QWidget):
         self.preview_enabled.setChecked(self.config.preview.enabled)
         self.preview_enabled.blockSignals(False)
 
-    def _hotkey_box(self) -> QGroupBox:
-        box = QGroupBox(t("settings.hotkeys"))
-        form = QFormLayout(box)
+    def _hotkey_box(self) -> RowCard:
+        card = RowCard(t("settings.hotkeys"))
         self.hotkey_edits: dict[str, QKeySequenceEdit] = {}
         for action in HOTKEY_ACTIONS:
             edit = QKeySequenceEdit(QKeySequence(getattr(self.config.hotkeys, action)))
             edit.setMaximumSequenceLength(1)
+            edit.setFixedWidth(FIELD_WIDTH)
             edit.editingFinished.connect(lambda a=action: self._on_hotkey(a))
             self.hotkey_edits[action] = edit
-            form.addRow(t(f"settings.hotkey.{action}"), edit)
+            card.add_row(t(f"settings.hotkey.{action}"), edit, expand=False)
         reset = QPushButton(t("settings.hotkeys_reset"), clicked=self.reset_hotkeys)
-        self.hotkey_status = _hint(t("settings.hotkeys_hint"))
+        self.hotkey_status = hint(t("settings.hotkeys_hint"))
         row = QHBoxLayout()
         row.addWidget(self.hotkey_status, 1)
         row.addWidget(reset)
-        form.addRow(row)
-        return box
+        card.add_layout(row)
+        return card
 
-    def _window_box(self) -> QGroupBox:
-        box = QGroupBox(t("settings.window"))
-        form = QFormLayout(box)
-        self.theme = QComboBox()
-        for name in THEME_CHOICES:
-            self.theme.addItem(t(f"settings.theme.{name}"), name)
-        self.theme.setCurrentIndex(max(self.theme.findData(self.config.theme), 0))
-        self.theme.currentIndexChanged.connect(self._on_theme)
-        form.addRow(t("settings.theme"), self.theme)
-        self.minimize_to_tray = QCheckBox(t("settings.minimize_to_tray"))
-        self.minimize_to_tray.setChecked(self.config.minimize_to_tray)
-        self.minimize_to_tray.toggled.connect(self._on_tray)
-        form.addRow(self.minimize_to_tray)
-        self.recording = QCheckBox(t("settings.recording_mode"))
-        self.recording.setChecked(self.config.recording_mode)
-        self.recording.toggled.connect(self._on_recording)
-        form.addRow(self.recording)
-        form.addRow(_hint(t("settings.recording_hint")))
-        self.developer_view = QCheckBox(t("settings.developer_view"))
-        self.developer_view.setToolTip(t("settings.developer_view_tip"))
-        self.developer_view.setChecked(self.config.developer_view)
-        self.developer_view.toggled.connect(self._on_developer_view)
-        form.addRow(self.developer_view)
-        return box
+    def _advanced_box(self) -> RowCard:
+        """Settings that rarely change, folded away: Ollama, context, reading speed, upkeep."""
+        card = RowCard()
+        self.ollama_url = QLineEdit(self.config.ollama.url)
+        self.ollama_url.editingFinished.connect(self._on_url)
+        card.add_row(t("settings.ollama_url"), self.ollama_url)
 
-    def _upkeep_box(self) -> QGroupBox:
-        box = QGroupBox(t("settings.upkeep"))
-        row = QHBoxLayout(box)
+        self.context_lines = QSpinBox()
+        self.context_lines.setRange(0, 10)
+        self.context_lines.setValue(self.config.ollama.context_lines)
+        self.context_lines.setFixedWidth(FIELD_WIDTH)
+        self.context_lines.valueChanged.connect(lambda v: self._set_ollama("context_lines", v))
+        card.add_row(
+            t("settings.context_lines"),
+            self.context_lines,
+            tip=t("settings.context_lines_tip"),
+            expand=False,
+        )
+
+        self.keep_alive = QComboBox()
+        for value in KEEP_ALIVE:
+            self.keep_alive.addItem(t(f"settings.keep_alive.{value}"), value)
+        current = self.keep_alive.findData(self.config.ollama.keep_alive)
+        if current < 0:  # a value set by hand in config.json
+            self.keep_alive.addItem(self.config.ollama.keep_alive, self.config.ollama.keep_alive)
+            current = self.keep_alive.count() - 1
+        self.keep_alive.setCurrentIndex(current)
+        self.keep_alive.currentIndexChanged.connect(
+            lambda i: self._set_ollama("keep_alive", self.keep_alive.itemData(i))
+        )
+        card.add_row(t("settings.keep_alive"), self.keep_alive)
+
+        self.fps = QSpinBox(suffix=t("settings.fps_suffix"))
+        self.fps.setRange(1, 30)
+        self.fps.setValue(self.profile.capture.fps)
+        self.fps.setFixedWidth(FIELD_WIDTH)
+        self.fps.valueChanged.connect(self._on_fps)
+        card.add_row(t("settings.fps"), self.fps, tip=t("settings.fps_tip"), expand=False)
+
         # Signal to signal through connect(): `clicked=signal` in the constructor raises on click.
+        self.setup_button = QPushButton(t("setup.button"))
+        self.setup_button.clicked.connect(self.setup_requested)
         self.clear_cache = QPushButton(t("settings.clear_cache"))
         self.clear_cache.clicked.connect(self.clear_cache_requested)
         self.open_logs = QPushButton(t("settings.open_logs"))
         self.open_logs.clicked.connect(self.open_logs_requested)
-        self.open_setup = QPushButton(t("setup.button"))
-        self.open_setup.clicked.connect(self.setup_requested)
-        self.upkeep_status = _hint("")
-        row.addWidget(self.open_setup)
-        row.addWidget(self.clear_cache)
-        row.addWidget(self.open_logs)
-        row.addWidget(self.upkeep_status, 1)
-        return box
+        buttons = QHBoxLayout()
+        buttons.addWidget(self.setup_button)
+        buttons.addWidget(self.clear_cache)
+        buttons.addWidget(self.open_logs)
+        buttons.addStretch(1)
+        card.add_row(t("settings.upkeep"), buttons)
+        self.upkeep_status = hint("")
+        card.add_widget(self.upkeep_status)
+        return card
 
     def set_profile(self, profile: Profile) -> None:
         self.profile = profile
