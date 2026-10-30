@@ -593,7 +593,7 @@ Phase 2 — features
   preview or a still frame (done as 9b, 2026-10-30)
 - [x] 16. Vice theme, fonts, SVG icon/header, overlay styles — 2026-10-22
 - [x] 16b. Apple theme (default) + sidebar redesign; Vice and Sade koyu kept — 2026-10-30
-  on branch `ui-redesign` (not merged, not pushed)
+  on branch `ui-redesign`, merged into main and released as v0.5.0
 - [x] 17. Web output + QR (+ Screen Wake Lock), phone-only mode — 2026-10-23
 
 Phase 3 — release
@@ -971,3 +971,6 @@ First **finish the app** (each step committed and pushed; no new release unless 
   does not keep the dialog / tab alive (fail on the old code). After: scratch repro 10/10,
   `test_setup.py` 30/30, full suite 2/2 clean. **Rule: a worker thread must never hold a
   reference to a Qt object it could be the last owner of.**
+- 2026-10-30: **Released v0.5.0** (user's choice: merge `ui-redesign` into main, then release):
+  Apple theme + sidebar redesign, mouse wheel no longer changes values, the worker-thread
+  crash fix above.
