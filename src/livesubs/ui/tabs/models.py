@@ -13,7 +13,7 @@ import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from PySide6.QtCore import QObject, QTimer, Signal
+from PySide6.QtCore import QCoreApplication, QObject, QTimer, Signal
 from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -116,7 +116,12 @@ def _hint(text: str = "") -> QLabel:
 
 
 class _Bridge(QObject):
-    """Carries results from worker threads to the UI thread."""
+    """Carries results from worker threads to the UI thread.
+
+    Owned by the application, and workers capture the bridge, never the window: a worker
+    may drop the last reference after the window is gone, and a Qt object destroyed outside
+    the UI thread crashes the process.
+    """
 
     snapshot = Signal(object)  # Snapshot
     progress = Signal(object)  # PullProgress
@@ -156,7 +161,7 @@ class ModelsTab(QWidget):
         self._compare_models: list[str] = []
         self._compare_times: dict[str, list[float]] = {}
         self._compare_runs: dict[str, ModelRun] = {}
-        self._bridge = _Bridge()
+        self._bridge = _Bridge(QCoreApplication.instance())
         self._bridge.snapshot.connect(self._on_snapshot)
         self._bridge.progress.connect(self._on_progress)
         self._bridge.pull_finished.connect(self._on_pull_finished)
@@ -219,7 +224,7 @@ class ModelsTab(QWidget):
         self.table.verticalHeader().hide()
         self.table.setMinimumHeight(150)
         self.table.itemSelectionChanged.connect(self._update_buttons)
-        self.table.itemDoubleClicked.connect(lambda _item: self.use_selected())
+        self.table.itemDoubleClicked.connect(self.use_selected)
         layout.addWidget(self.table)
         buttons = QHBoxLayout()
         self.use_button = QPushButton(t("models.use"), clicked=self.use_selected)
@@ -304,8 +309,9 @@ class ModelsTab(QWidget):
 
     def refresh(self) -> None:
         url, known = self.config.ollama.url, set(self._archs)
+        fetch, bridge = self._fetch, self._bridge
         threading.Thread(
-            target=lambda: self._bridge.snapshot.emit(self._fetch(url, known)), daemon=True
+            target=lambda: bridge.snapshot.emit(fetch(url, known)), daemon=True
         ).start()
 
     def _on_snapshot(self, snapshot: Snapshot) -> None:
@@ -466,14 +472,15 @@ class ModelsTab(QWidget):
         ):
             return
         url = self.config.ollama.url
+        bridge = self._bridge
 
         def work() -> None:
             try:
                 delete_model(name, url)
             except OllamaError as exc:
-                self._bridge.deleted.emit(name, str(exc))
+                bridge.deleted.emit(name, str(exc))
             else:
-                self._bridge.deleted.emit(name, "")
+                bridge.deleted.emit(name, "")
 
         self.delete_button.setEnabled(False)
         threading.Thread(target=work, daemon=True).start()
@@ -528,16 +535,17 @@ class ModelsTab(QWidget):
         self._set_pull_status(t("setup.model.progress_unknown", status=name))
         self._update_buttons()
         url = self.config.ollama.url
+        bridge = self._bridge
 
         def work() -> None:
             try:
-                pull_model(name, self._bridge.progress.emit, cancel, url)
+                pull_model(name, bridge.progress.emit, cancel, url)
             except PullCancelledError:
-                self._bridge.pull_finished.emit(name, CANCELLED)
+                bridge.pull_finished.emit(name, CANCELLED)
             except PullError as exc:
-                self._bridge.pull_finished.emit(name, str(exc))
+                bridge.pull_finished.emit(name, str(exc))
             else:
-                self._bridge.pull_finished.emit(name, "")
+                bridge.pull_finished.emit(name, "")
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -630,15 +638,17 @@ class ModelsTab(QWidget):
         context = self.profile.translation.context
         glossary = dict(self.profile.translation.glossary)
         examples = dict(self.profile.translation.examples)
+        bridge = self._bridge
+        comparison = self._comparison
 
         def work() -> None:
             try:
-                self._comparison(
+                comparison(
                     models,
                     lines,
                     settings,
-                    on_model=self._bridge.model_run.emit,
-                    on_line=self._bridge.line_result.emit,
+                    on_model=bridge.model_run.emit,
+                    on_line=bridge.line_result.emit,
                     cancel=cancel,
                     game_context=context,
                     glossary=glossary,
@@ -646,7 +656,7 @@ class ModelsTab(QWidget):
                     keep_loaded=settings.gpu_model,
                 )
             finally:
-                self._bridge.compare_finished.emit()
+                bridge.compare_finished.emit()
 
         threading.Thread(target=work, daemon=True).start()
 

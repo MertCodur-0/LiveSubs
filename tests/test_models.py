@@ -1,7 +1,9 @@
 """Model management: VRAM estimates, Ollama model calls, the side-by-side test and the tab."""
 
+import gc
 import json
 import threading
+import weakref
 from collections.abc import Callable
 
 import httpx
@@ -361,6 +363,26 @@ def tab(qtbot: QtBot) -> ModelsTab:
     return widget
 
 
+def test_a_running_refresh_does_not_keep_the_tab_alive(qtbot: QtBot) -> None:
+    # A worker must never hold the last reference: the tab would be destroyed outside the UI
+    # thread (a native crash).
+    release = threading.Event()
+
+    def fetch(url: str, known: set[str]) -> Snapshot:
+        release.wait(5)
+        return SNAPSHOT
+
+    widget = ModelsTab(AppConfig(), Profile(name="x"), fetch=fetch, adapter=lambda: ADAPTER)
+    bridge = widget._bridge
+    widget.refresh()
+    alive = weakref.ref(widget)
+    del widget
+    gc.collect()
+    assert alive() is None
+    with qtbot.waitSignal(bridge.snapshot):
+        release.set()
+
+
 def cell(tab: ModelsTab, row: int, column: str) -> str:
     return tab.table.item(row, models_tab.COLUMNS.index(column)).text()
 
@@ -392,6 +414,9 @@ def test_use_selected_model(tab: ModelsTab, qtbot: QtBot) -> None:
     assert tab.use_button.isEnabled()
     with qtbot.waitSignal(tab.model_selected) as signal:
         tab.use_selected()
+    assert signal.args == ["qwen3:8b"]
+    with qtbot.waitSignal(tab.model_selected) as signal:  # double-click does the same
+        tab.table.itemDoubleClicked.emit(tab.table.item(1, 1))
     assert signal.args == ["qwen3:8b"]
 
 

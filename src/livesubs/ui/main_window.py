@@ -219,7 +219,12 @@ def _page(title: str, content: QWidget, *, scrolls: bool) -> QWidget:
 
 
 class _Bridge(QObject):
-    """Carries results from worker threads to the UI thread."""
+    """Carries results from worker threads to the UI thread.
+
+    Owned by the application, and workers capture the bridge, never the window: a worker
+    may drop the last reference after the window is gone, and a Qt object destroyed outside
+    the UI thread crashes the process.
+    """
 
     models = Signal(object)  # list[InstalledModel] | None
     spill = Signal(str, float)  # model, part of it that runs on the CPU
@@ -276,7 +281,7 @@ class MainWindow(QMainWindow):
         self._previewing = False
         self._calibrating = False
         self._paused = False
-        self._bridge = _Bridge()
+        self._bridge = _Bridge(QCoreApplication.instance())
         self._bridge.models.connect(self._on_models)
         self._bridge.spill.connect(self._on_spill)
         self._discard_changes = False  # settings were imported: never write the old ones back
@@ -1044,11 +1049,12 @@ class MainWindow(QMainWindow):
         # While translating: is the model slowed down by running partly on the CPU?
         watch = self._state == EngineState.RUNNING and not self._warned_spill
         model = self._config.ollama.gpu_model if watch else ""
+        bridge = self._bridge
 
         def work() -> None:
-            self._bridge.models.emit(list_models(url))
+            bridge.models.emit(list_models(url))
             if model and (share := cpu_share(url, model)) is not None:
-                self._bridge.spill.emit(model, share)
+                bridge.spill.emit(model, share)
 
         threading.Thread(target=work, daemon=True).start()
 

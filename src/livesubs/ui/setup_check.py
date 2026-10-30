@@ -15,7 +15,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QStandardPaths, QTimer, QUrl, Signal
+from PySide6.QtCore import QCoreApplication, QObject, QStandardPaths, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QComboBox,
@@ -103,7 +103,12 @@ def desktop_shortcut() -> Path:
 
 
 class _Bridge(QObject):
-    """Carries results from worker threads to the UI thread."""
+    """Carries results from worker threads to the UI thread.
+
+    Owned by the application, and workers capture the bridge, never the window: a worker
+    may drop the last reference after the window is gone, and a Qt object destroyed outside
+    the UI thread crashes the process.
+    """
 
     status = Signal(object)  # SetupStatus
     progress = Signal(object)  # PullProgress
@@ -133,7 +138,7 @@ class SetupDialog(QDialog):
         self._cancel: threading.Event | None = None
         self._preparing = False
         self._ocr_polls = 0
-        self._bridge = _Bridge()
+        self._bridge = _Bridge(QCoreApplication.instance())
         self._bridge.status.connect(self._on_status)
         self._bridge.progress.connect(self._on_progress)
         self._bridge.pull_finished.connect(self._on_pull_finished)
@@ -223,10 +228,8 @@ class SetupDialog(QDialog):
     # --- status ----------------------------------------------------------------------------------
 
     def refresh(self) -> None:
-        url = self._config.ollama.url
-        threading.Thread(
-            target=lambda: self._bridge.status.emit(self._checker(url)), daemon=True
-        ).start()
+        url, checker, bridge = self._config.ollama.url, self._checker, self._bridge
+        threading.Thread(target=lambda: bridge.status.emit(checker(url)), daemon=True).start()
 
     def check_on_startup(self) -> None:
         """Check in the background and open only when something is missing."""
@@ -343,6 +346,7 @@ class SetupDialog(QDialog):
             t("setup.ollama.starting" if installed else "setup.ollama.installing")
         )
         url = self._config.ollama.url
+        bridge = self._bridge
 
         def work() -> None:
             error = ""
@@ -355,7 +359,7 @@ class SetupDialog(QDialog):
                 start_ollama()
                 if not wait_until_running(url):
                     error = t("ollama.offline")
-            self._bridge.ollama_finished.emit(error)
+            bridge.ollama_finished.emit(error)
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -396,16 +400,17 @@ class SetupDialog(QDialog):
         self.progress_label.setText(t("setup.model.progress_unknown", status=name))
         self._update_model_button()
         url = self._config.ollama.url
+        bridge = self._bridge
 
         def work() -> None:
             try:
-                pull_model(name, self._bridge.progress.emit, cancel, url)
+                pull_model(name, bridge.progress.emit, cancel, url)
             except PullCancelledError:
-                self._bridge.pull_finished.emit(name, CANCELLED)
+                bridge.pull_finished.emit(name, CANCELLED)
             except PullError as exc:
-                self._bridge.pull_finished.emit(name, str(exc))
+                bridge.pull_finished.emit(name, str(exc))
             else:
-                self._bridge.pull_finished.emit(name, "")
+                bridge.pull_finished.emit(name, "")
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -457,15 +462,16 @@ class SetupDialog(QDialog):
         self.progress_label.setText(t("setup.model.preparing"))
         self._update_model_button()
         url = self._config.ollama.url
+        bridge = self._bridge
 
         def work() -> None:
             try:
                 create_text_only(entry.name, entry.text_only, url)
             except OllamaError as exc:
                 log.warning("Text-only copy of %s failed: %s", entry.name, exc)
-                self._bridge.prepared.emit(entry.name, str(exc))
+                bridge.prepared.emit(entry.name, str(exc))
             else:
-                self._bridge.prepared.emit(entry.text_only, "")
+                bridge.prepared.emit(entry.text_only, "")
 
         threading.Thread(target=work, daemon=True).start()
 
