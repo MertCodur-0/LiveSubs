@@ -254,6 +254,7 @@ class ModelsTab(QWidget):
         self.pull_progress.hide()
         grid.addWidget(self.pull_progress, 2, 0, 1, 3)
         self.pull_status = QLabel(wordWrap=True)
+        self.pull_status.hide()  # shown with a message: no empty row in the card
         grid.addWidget(self.pull_status, 3, 0, 1, 3)
         self._update_pull_hint(self.pull_combo.currentText())
         return box
@@ -487,6 +488,10 @@ class ModelsTab(QWidget):
 
     # --- download --------------------------------------------------------------------------------
 
+    def _set_pull_status(self, text: str) -> None:
+        self.pull_status.setText(text)
+        self.pull_status.setVisible(bool(text))
+
     def _update_pull_hint(self, name: str) -> None:
         entry = next((m for m in catalog.RECOMMENDED if m.name == name.strip()), None)
         if entry is None:
@@ -499,14 +504,14 @@ class ModelsTab(QWidget):
         if not name:
             return
         if any(catalog.same_model(name, m.name) for m in self.installed()):
-            self.pull_status.setText(t("models.already_installed", model=name))
+            self._set_pull_status(t("models.already_installed", model=name))
             return
         entry = next((m for m in catalog.RECOMMENDED if m.name == name), None)
         if entry is not None:
             folder = models_dir()
             free = free_bytes(folder)
             if free < entry.download_bytes * 1.05:
-                self.pull_status.setText(
+                self._set_pull_status(
                     t(
                         "setup.model.no_space",
                         need=entry.download_bytes / GB,
@@ -520,7 +525,7 @@ class ModelsTab(QWidget):
         self.pull_progress.setValue(0)
         self.pull_progress.show()
         self.pull_cancel_button.show()
-        self.pull_status.setText(t("setup.model.progress_unknown", status=name))
+        self._set_pull_status(t("setup.model.progress_unknown", status=name))
         self._update_buttons()
         url = self.config.ollama.url
 
@@ -542,10 +547,10 @@ class ModelsTab(QWidget):
 
     def _on_progress(self, progress: PullProgress) -> None:
         if not progress.total:
-            self.pull_status.setText(t("setup.model.progress_unknown", status=progress.status))
+            self._set_pull_status(t("setup.model.progress_unknown", status=progress.status))
             return
         self.pull_progress.setValue(round(1000 * progress.completed / progress.total))
-        self.pull_status.setText(
+        self._set_pull_status(
             t(
                 "models.pull_progress",
                 status=progress.status,
@@ -560,11 +565,11 @@ class ModelsTab(QWidget):
         self.pull_progress.hide()
         self.pull_cancel_button.hide()
         if error == CANCELLED:
-            self.pull_status.setText(t("setup.model.cancelled"))
+            self._set_pull_status(t("setup.model.cancelled"))
         elif error:
-            self.pull_status.setText(t("setup.model.failed", detail=error))
+            self._set_pull_status(t("setup.model.failed", detail=error))
         else:
-            self.pull_status.setText(t("models.pulled", model=name))
+            self._set_pull_status(t("models.pulled", model=name))
             self.models_changed.emit()
         self._update_buttons()
         self.refresh()

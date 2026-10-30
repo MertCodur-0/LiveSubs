@@ -395,11 +395,33 @@ font size, text color, outline/shadow, background opacity, max lines shown.
 
 ### Main window
 
-Source + profile pick, Ollama status (connected, model loaded), names of the models in use, big
-Start/Stop. Live feed: English line, Turkish line, model, lane, OCR ms + translation ms. Tabs:
-Live / Models / Appearance / Profiles / Settings in a sidebar (fps, thresholds, language, theme, port, hotkeys -> config).
-Models tab shows what to do when Ollama is missing/not running; pull shows progress, downloaded /
-remaining size, cancel. Minimizes to tray.
+macOS-Settings layout (2026-10-30, branch `ui-redesign`), window 1000x680 (checked down to
+820x560). **Sidebar** (200 px): app icon + "LiveSubs" (`ui/header.py`), icon buttons Canlı,
+Görünüm, Profiller, Modeller (`MainWindow.nav_buttons`, `show_page(i)` in that order), Ayarlar
+apart at the bottom, then a status dot (`statusDot[state=ok|warn|idle]`: Çalışıyor /
+Duraklatıldı / Ollama kapalı / Durdu, `_update_status`). Selected button: faint accent
+(`nav_selected`), hover fainter (`nav_hover`). Pages in a `QStackedWidget`, each with a large
+`#pageTitle`; long pages scroll.
+- **Live page**: a warning card (`QFrame#warnCard`: Ollama missing/stopped + "Ollama'yı
+  başlat" / "Kurulum…") only while something is wrong; a summary card "<source> · <model>",
+  "Profil: … · altyazı bölgesi seçili/seçilmedi" + **"Değiştir…"**, which opens the window-modal
+  "Kaynak ve model" sheet (`source_sheet`: profile, source + Yenile, region + select, model;
+  it hides while the region is marked and comes back after a pick or Esc). The region label
+  names the source only; percentages in its tooltip. Start/Stop pill + "Ayar modu (F8)" pill;
+  the state line "● Çalışıyor · ort. 1,2 sn" (mean of the last 20 non-cached translations,
+  cleared on Start; `_show_state` keeps the base text). Feed: `ui/feed.py` `FeedList` (Turkish
+  12 pt semibold, English 9 pt muted under it, hairlines, newest on top, painted by a delegate
+  from the palette); its rows mirror the old table row for row. **Settings -> Geliştirici
+  görünümü** (`config.developer_view`) shows the table (time, English, Turkish, model, OCR ms,
+  translation ms) instead.
+- **Settings page**: cards of rows — "Pencere ve görünüm" (theme, tray, recording mode,
+  developer view), "Telefonda göster" (QR at the card's right), "Yakalama kartı önizlemesi",
+  "Kısayol tuşları" — and a folded **"Gelişmiş"** (Ollama URL, context lines, keep-alive,
+  reading fps, upkeep: Kurulum…, clear cache, log folder). Setup stays reachable there.
+- Appearance: three row cards; Profiles: forms with (i) tips instead of paragraphs; Models:
+  compare explanation as (i), an empty pull status row hidden.
+- Models page shows what to do when Ollama is missing/not running; pull shows progress,
+  downloaded / remaining size, cancel. Minimizes to tray.
 
 - **Recording mode** (setting, default off): disables `WDA_EXCLUDEFROMCAPTURE` so OBS/screenshots
   see the overlay (README GIF, LinkedIn video). When on, warn if the overlay rectangle intersects the
@@ -458,39 +480,46 @@ remaining size, cancel. Minimizes to tray.
   desktop + Start menu shortcuts for the packaged exe (`platform/shortcuts.py`, WScript.Shell via
   PowerShell), settings export/import (`core/backup.py`: zip of `config.json` + `profiles/*.json`;
   import takes only those names, then offers a restart and stops saving the old settings).
-- Theme (step 16 2026-10-22; **redesigned 2026-10-30 on branch `ui-redesign`**, Apple-like):
-  `ui/theme/` — `base.qss` template with `{{token}}` placeholders (comments stripped first;
-  `{{assets}}` = the assets folder for `url(...)`), token files `dark.json` (window #1C1C1E,
-  cards #2C2C2E, accent #0A84FF) and `light.json` (#F5F5F7, white cards with a hairline
-  border, text #1D1D1F, accent #007AFF); same token set (test). Settings choice
-  `config.theme` = **"system" (default)** / "dark" / "light"; unknown values (the removed
-  "vice") validate to "system". `resolve(choice)`: "system" -> Qt's `colorScheme()`, else the
-  registry's `AppsUseLightTheme` (offscreen Qt reports Unknown). `apply_theme(choice)` also
-  sets / unsets Qt's color scheme (the Windows title bar follows) **with the style hints'
-  signals blocked** — `colorSchemeChanged` fires synchronously and ping-ponged between windows
-  into infinite recursion (found by the UI tests). `MainWindow._on_color_scheme` re-applies on
-  a live Windows switch, only for "system". `theme.prepare(app)` (in `app.py`, before any
-  widget): Fusion + Inter. Palette from the tokens (popups, dialogs match), app font Inter 10 pt.
-  Shape: cards = `QGroupBox` (12 px radius, title above the card, muted semibold), fields and
-  buttons 8 px, check boxes/radios drawn by QSS (`check.svg`), Start/Stop `#startButton` a
-  44 px pill (radius 22; accent, `running=true` -> calm red `stop` token), calibration and
-  preview buttons `pill=true`. No glow, no gradients, no shadows (cards stand out by color).
-  Main window: **macOS-Settings sidebar** (`QListWidget#nav`, row height set in code — QSS
-  padding does not size list rows) with the logo "LiveSubs" (Inter Bold) + tagline on top
-  (`ui/header.py`, plain labels), and a `QStackedWidget` of pages, each with a large
-  `#pageTitle`; `MainWindow.show_page(i)`. Live page: "Kaynak ve model" card, Start + Ayar modu
-  pills, state, "Canlı akış" card with the feed. Görünüm split into three cards. Long pages
-  scroll (content `objectName="page"` stays transparent); window 1000x720.
-  Fonts in `src/livesubs/assets/fonts/`: **Inter** Regular/SemiBold/Bold only (Audiowide and
-  Monoton removed with the Vice theme); covers Turkish (test). Listed in the README.
-  Own SVG art in `src/livesubs/assets/`: `icon.svg` (blue rounded square, two subtitle bars;
-  the sunset/palm icon and `header.svg` are gone), `arrow_up/down.svg` (neutral gray, both
-  themes), `check.svg`. `ui/icon.py` renders the SVG itself (no SVG icon engine plugin needed)
-  and writes `icon.ico` (PNG-in-ICO) via `scripts/make_icon.py` — rerun it after editing the
-  SVG. The packaged exe keeps pythonw's own icon (changing it would break the signature), so
-  shortcuts get `IconLocation = icon.ico` (setup dialog + `create_shortcut.ps1`). No Apple
-  logos, SF Pro or SF Symbols (license); no Rockstar/GTA logos, fonts, art or names.
-  The overlay's "Vice" *style preset* is an overlay feature and stays.
+- Theme (step 16 2026-10-22; **Apple theme + sidebar redesign 2026-10-30, branch
+  `ui-redesign`**): `ui/theme/` — `base.qss` template with `{{token}}` placeholders (comments
+  stripped first; `{{assets}}` = the assets folder for `url(...)`), four token files with one
+  token set (test): **`apple.json` (default**: window #1C1C1E, cards #2C2C2E, accent and Start
+  #0A84FF, Stop calm red #C4554D, Inter everywhere, no glow), `apple_light.json` (#F5F5F7,
+  white cards with a hairline, text #1D1D1F, accent #007AFF), `vice.json` (neon sunset:
+  Audiowide headings, Monoton logo, gradient Start, glow, `header_art`) and `dark.json`
+  ("Sade koyu"). Tokens are plain text, so a token may be a QSS expression in one theme and a
+  color in another (Vice's `start_bg` gradient); tokens read by `Theme.color` (palette, painted
+  widgets) stay colors (test). Settings choices `config.theme` (= `theme.CHOICES`): apple,
+  apple_light, **system** (Apple dark or light after Windows: Qt's `colorScheme()`, else the
+  registry's `AppsUseLightTheme`; re-applied live on `colorSchemeChanged`), vice, dark; unknown
+  values validate to "apple". `apply_theme` also forces / unsets Qt's color scheme (the
+  Windows title bar follows) **with the style hints' signals blocked** — the signal fires
+  synchronously and ping-ponged between windows into infinite recursion (found by the tests).
+  `theme.prepare(app)` (in `app.py`, before any widget): Fusion + bundled fonts. Palette from
+  the tokens, app font Inter 10 pt. Glow (`set_glow`) only on the logo and Start, only with a
+  `glow` token (Vice).
+  Shape and spacing: cards = `QGroupBox` (12 px, title above, muted semibold; `untitled`
+  property = flush) or `QFrame#card`; fields/buttons 8 px; Start/Stop `#startButton` a 40 px
+  pill; `pill=true` buttons; check boxes/radios drawn by QSS (`check.svg`). 4/8/12/16/24 scale:
+  card padding 6-16, 12 between cards. **A QSS `min-height` overrides `setFixedHeight`**: it is
+  set on one-line fields only (it squashed the profile's game description to one line).
+  `ui/rows.py`: `RowCard` (macOS-Settings rows: label column 190 px, control right, hairline
+  `QFrame#separator` between rows, `set_side` for the QR code), `info(tip)` = gray (i) with a
+  tooltip (long explanations live there), `labeled(text, tip)` for QFormLayout labels,
+  `Disclosure` (folding title, folded at first). `ui/icons.py`: own line icons
+  (`assets/icons/*.svg`, drawn black, 20 px viewBox, 1.6 px strokes: live, appearance,
+  profiles, models, settings, info, warning) tinted with `SourceIn` to a theme color.
+  Fonts in `src/livesubs/assets/fonts/` (OFL texts next to them): **Inter** (body, Apple
+  themes, overlay), **Audiowide** and **Monoton** (Vice). All cover Turkish (test).
+  Own SVG art in `src/livesubs/assets/`: `icon.svg` (blue rounded square with subtitle bars,
+  2026-10-30; replaced the sunset/palm icon), `header.svg` (Vice's banner, drawn dimmed at the
+  top of the sidebar and faded into it so the name stays readable), `arrow_up/down.svg`
+  (neutral gray), `check.svg`. `ui/icon.py` renders the SVG itself (no SVG icon engine plugin
+  needed) and writes `icon.ico` (PNG-in-ICO) via `scripts/make_icon.py` — rerun it after
+  editing the SVG. The packaged exe keeps pythonw's own icon (changing it would break the
+  signature), so shortcuts get `IconLocation = icon.ico`. No Apple logos, SF Pro or SF Symbols
+  (license); no Rockstar/GTA logos, fonts, art or names. The overlay's "Vice" *style preset*
+  is an overlay feature, independent of the app theme.
 - Packaging (`scripts/build_exe.ps1`, replaces PyInstaller 2026-10-22): the official **embeddable
   Python** of the venv's exact version; its PSF-signed `pythonw.exe` (signature checked) renamed to
   `LiveSubs.exe`; `python313._pth` adds `Lib\site-packages` + `import site`; runtime deps + app via
@@ -510,7 +539,7 @@ remaining size, cancel. Minimizes to tray.
 ```
 src/livesubs/
   app.py, __main__.py, i18n/
-  assets/      icon.svg, icon.ico, arrow_*.svg, check.svg, fonts/ (+ OFL licenses) — package data
+  assets/      icon.svg, icon.ico, header.svg, arrow_*.svg, check.svg, icons/, fonts/ (+ OFL)
   core/        config.py, profiles.py, paths.py, jsonio.py, geometry.py, messages.py, backup.py,
                translation_pack.py, child_process.py, logs.py
   device/      host.py (device host process), messages.py, preview.py
@@ -522,9 +551,10 @@ src/livesubs/
     translate/ base.py, ollama.py, orchestrator.py, prompt.py, cache.py
   ollama/      client.py, catalog.py, install.py, vram.py, compare.py
   platform/    win32.py, hotkeys.py, shortcuts.py, gpu.py, com.py, video_devices.py
-  ui/          main_window.py, header.py, icon.py, qr.py, overlay.py, region_frame.py, inspector.py,
+  ui/          main_window.py, header.py, icon.py, icons.py, rows.py, feed.py, qr.py, overlay.py,
+               region_frame.py, inspector.py,
                tray.py, setup_check.py, single_instance.py, capture_card.py, frame_region.py,
-               tabs/, theme/ (base.qss, dark.json, light.json)
+               tabs/, theme/ (base.qss, apple.json, apple_light.json, vice.json, dark.json)
   web/         server.py, feed.py, static/index.html
 tests/         samples/ (+ samples.json), helpers/, test_*.py
 scripts/       build_exe.ps1, embedded/ (sitecustomize.py, smoke_test.py), create_shortcut.ps1,
@@ -557,8 +587,8 @@ Phase 2 — features
 - [x] 15. Video device source (capture card): enumerate, busy/lost/black errors, region on the
   preview or a still frame (done as 9b, 2026-10-30)
 - [x] 16. Vice theme, fonts, SVG icon/header, overlay styles — 2026-10-22
-- [x] 16b. Apple-like redesign: dark/light/system themes, sidebar, cards, pill Start —
-  2026-10-30 on branch `ui-redesign` (not merged, not pushed)
+- [x] 16b. Apple theme (default) + sidebar redesign; Vice and Sade koyu kept — 2026-10-30
+  on branch `ui-redesign` (not merged, not pushed)
 - [x] 17. Web output + QR (+ Screen Wake Lock), phone-only mode — 2026-10-23
 
 Phase 3 — release
@@ -905,3 +935,15 @@ First **finish the app** (each step committed and pushed; no new release unless 
   costs redraws and the brief allowed "very little"); the overlay's Vice style preset kept (a
   feature, not the app theme). The brief arrived truncated after "...json) kullan,
   gerekiyorsa" — any later requirements were not seen.
+- 2026-10-30: **The full brief arrived** (the first paste was cut off): add "Apple" as a new
+  default theme and **keep Vice and Sade koyu**, show a plan + sketch first. Plan approved by
+  the user with my three proposals: build on the branch and bring Vice/Sade koyu (fonts,
+  banner, glow) back; keep Apple light and "system" as choices (default Apple dark); keep the
+  new plain icon. Then built without further questions, one commit per step: themes, icons,
+  sidebar, Live page (summary + sheet + warning card + mean time), feed list + developer
+  view, rows/Gelişmiş, screenshots + docs. The phone page is untouched (user). Decisions made
+  alone: profile picking moved into the "Değiştir…" sheet (the brief listed source, region and
+  model; the profile combo had to go somewhere off the main screen); setup ("Kurulum…") also
+  in Settings -> Gelişmiş, since the Live page shows it only on problems and it carries the
+  settings backup; Vice's banner dimmed and faded so "LiveSubs" stays readable; the mean time
+  ignores cache hits (0 ms would flatter it).

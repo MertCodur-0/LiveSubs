@@ -15,9 +15,9 @@ through [Ollama](https://ollama.com), and shows the translation in a click-throu
 the game, or on your phone. It uses no cloud APIs: capture, OCR and translation all run on your own
 PC.
 
-| Dark | Light |
+| Apple dark (default) | Apple light |
 | --- | --- |
-| ![Main window in the dark theme: live feed with English lines, their Turkish translations and timings](docs/images/live.png) | ![The same window in the light theme](docs/images/live-light.png) |
+| ![Main window in the Apple dark theme: sidebar, summary of source and model, live feed with English lines, their Turkish translations and timings](docs/images/live.png) | ![The same window in the light theme](docs/images/live-light.png) |
 
 <!-- Demo GIF goes here: docs/images/demo.gif (record it with recording mode on). -->
 
@@ -45,19 +45,20 @@ PC.
 - **Per-game profiles.** Source, region, colours, overlay style and position, context and
   glossary, game VRAM reserve.
 - **Real app.** Double-click the exe and a setup dialog installs what is missing. It has global
-  hotkeys, a tray icon and a calibration mode with a live Inspector. Dark and light themes;
-  by default it follows Windows' light/dark setting and switches with it.
+  hotkeys, a tray icon and a calibration mode with a live Inspector. A macOS-Settings-like
+  window with a sidebar; themes Apple dark (default), Apple light, Apple following
+  Windows' light/dark setting, Vice (neon sunset) and plain dark.
 
 | Settings with the phone QR code | Phone page |
 | --- | --- |
-| ![Settings tab with the phone output and its QR code](docs/images/settings.png) | <img src="docs/images/phone.png" alt="Phone page: newest translation at the top, older ones dimmed below" width="270"> |
+| ![Settings page with the phone output and its QR code](docs/images/settings.png) | <img src="docs/images/phone.png" alt="Phone page: newest translation at the top, older ones dimmed below" width="270"> |
 
 ## How it works
 
 ```mermaid
 flowchart LR
     subgraph UI["UI process (PySide6)"]
-        MW[Main window<br/>tabs, tray, hotkeys]
+        MW[Main window<br/>sidebar pages, tray, hotkeys]
         OV[Overlay]
         WEB[Web server<br/>SSE + QR]
         MM[Model manager]
@@ -196,15 +197,16 @@ src/livesubs/
   engine/      engine process: capture/, vision/, ocr/, text/, translate/
   ollama/      REST client, model catalog, VRAM estimate, model comparison
   platform/    Win32 helpers, hotkeys, GPU (DXGI), shortcuts
-  ui/          main window, tabs, overlay, calibration, setup dialog, theme
+  ui/          main window, pages, overlay, calibration, setup dialog, theme
   web/         phone output: SSE server, page
 ```
 
 ## Credits
 
-- Font: [Inter](https://rsms.me/inter/), under the SIL Open Font License (text in
-  `src/livesubs/assets/fonts`).
-- The icon is original. LiveSubs is not affiliated with any game or publisher.
+- Fonts: [Inter](https://rsms.me/inter/), [Audiowide](https://fonts.google.com/specimen/Audiowide)
+  and [Monoton](https://fonts.google.com/specimen/Monoton) (the last two in the Vice theme), all
+  under the SIL Open Font License (texts in `src/livesubs/assets/fonts`).
+- Icons and header art are original. LiveSubs is not affiliated with any game or publisher.
 
 ## License
 
