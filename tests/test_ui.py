@@ -1338,3 +1338,10 @@ def test_frame_region_dialog_drag(qtbot: QtBot) -> None:
     assert region is not None
     assert region.x == pytest.approx(0.1, abs=0.01)
     assert region.width == pytest.approx(0.8, abs=0.01)
+
+
+def test_start_on_another_source_updates_the_region_label(card_window: MainWindow) -> None:
+    card_window._profile.source = WindowSource(exe_name="opera.exe", title="YouTube - Opera")
+    select_card(card_window)
+    card_window.toggle()
+    assert CARD_NAME in card_window.region_label.text()

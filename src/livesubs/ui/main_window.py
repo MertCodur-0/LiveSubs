@@ -924,6 +924,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(t("error.no_region"), 5000)
             return
         self._profile.source = option.spec
+        self._update_region_label()  # it named the previous source
         self._send_start()
 
     def stop(self) -> None:
