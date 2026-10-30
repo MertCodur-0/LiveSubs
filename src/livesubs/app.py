@@ -15,7 +15,7 @@ def main() -> int:
     # Imported here: the engine child process imports this module but never needs the UI.
     from livesubs.engine.process import EngineProcess
     from livesubs.platform import win32
-    from livesubs.ui import theme
+    from livesubs.ui import theme, wheel
     from livesubs.ui.main_window import MainWindow
     from livesubs.ui.single_instance import SingleInstance
 
@@ -31,6 +31,7 @@ def main() -> int:
     if not instance.listen():
         logging.getLogger(__name__).warning("Single-instance socket not available")
     theme.prepare(app)
+    wheel.install(app)  # the wheel scrolls pages, never changes a combo box or spin box
 
     window = MainWindow(EngineProcess())
     instance.activated.connect(window.show_from_tray)

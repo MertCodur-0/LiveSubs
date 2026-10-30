@@ -56,6 +56,7 @@ from livesubs.platform import hotkeys, win32
 from livesubs.platform.video_devices import VideoDevice
 from livesubs.platform.win32 import MonitorInfo, WindowInfo
 from livesubs.ui import theme as themes
+from livesubs.ui import wheel
 from livesubs.ui.frame_region import FrameRegionDialog
 from livesubs.ui.inspector import Inspector
 from livesubs.ui.main_window import DEFAULT_PROFILE_ID, MainWindow
@@ -1505,3 +1506,25 @@ def test_setup_is_reachable_from_settings(window: MainWindow, qtbot: QtBot) -> N
     with qtbot.waitSignal(window.settings.setup_requested, timeout=1000):
         window.settings.setup_button.click()
     window.setup.hide()
+
+
+def test_wheel_never_changes_settings(window: MainWindow, qapp: QApplication) -> None:
+    from test_wheel import _wheel
+
+    wheel.install(qapp)
+    window.resize(1000, 680)
+    window.show()
+    for page, widget in (
+        (4, window.settings.theme),
+        (1, window.appearance.size),
+        (1, window.appearance.font),
+        (1, window.appearance.opacity),
+    ):
+        window.show_page(page)
+        before = widget.currentIndex() if hasattr(widget, "currentIndex") else widget.value()
+        _wheel(widget)
+        _wheel(widget, steps=1)
+        after = widget.currentIndex() if hasattr(widget, "currentIndex") else widget.value()
+        assert after == before, widget
+    assert window._config.theme == "apple"
+    window.hide()

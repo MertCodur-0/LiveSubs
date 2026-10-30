@@ -420,6 +420,11 @@ Duraklatıldı / Ollama kapalı / Durdu, `_update_status`). Selected button: fai
   reading fps, upkeep: Kurulum…, clear cache, log folder). Setup stays reachable there.
 - Appearance: three row cards; Profiles: forms with (i) tips instead of paragraphs; Models:
   compare explanation as (i), an empty pull status row hidden.
+- **The mouse wheel never changes values** (user report, 2026-10-30: scrolling a page changed
+  combo boxes and spin boxes under the pointer): `ui/wheel.py` `WheelGuard`, one app-wide event
+  filter installed in `app.py`, hands wheel events on combo boxes, spin boxes, sliders (and the
+  line edit inside a spin box or the editable font combo) to the nearest scroll area's bar, or
+  drops them. Lists and tables (glossary, examples, feed) still scroll.
 - Models page shows what to do when Ollama is missing/not running; pull shows progress,
   downloaded / remaining size, cancel. Minimizes to tray.
 
@@ -947,3 +952,9 @@ First **finish the app** (each step committed and pushed; no new release unless 
   in Settings -> Gelişmiş, since the Live page shows it only on problems and it carries the
   settings backup; Vice's banner dimmed and faded so "LiveSubs" stays readable; the mean time
   ignores cache hits (0 ms would flatter it).
+- 2026-10-30: **Flaky native crash in `tests/test_setup.py`**, seen again while gating the
+  wheel fix: `test_installed_model_is_used_without_downloading` aborted (access violation, a
+  Python worker thread running) in 2 full runs and 1 of 17 single-file runs; the file does not
+  import the changed code and passed 6/6 with the change stashed and 8/8 with it. Likely the
+  setup dialog's worker thread emitting after the test closed the dialog — the same unexplained
+  crash as before v0.4.0. Not fixed yet.
