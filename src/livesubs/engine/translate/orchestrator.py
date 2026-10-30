@@ -7,7 +7,9 @@ which stay on screen less long than a translation takes. To keep the delay bound
 of a line (same ``line_id``) replaces that line's waiting job, or cancels it while in flight.
 
 Cache hits go through the same queue (they are answered at once when their turn comes), so
-results are always published in reading order and history follows the dialogue.
+results are always published in reading order and history follows the dialogue. After
+``history_timeout_s`` without a new line the history is dropped: the next line most likely
+belongs to another scene, and the old lines would only mislead the model.
 
 The CPU quality lane (optional, step 13) will plug in after the GPU result.
 """
@@ -16,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections import deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -36,6 +39,8 @@ log = logging.getLogger(__name__)
 
 # Lines waiting behind the one in flight. At ~1.3 s per line, 3 waiting lines are ~4 s behind.
 MAX_BACKLOG = 3
+# Seconds without a new line after which the dialogue context is forgotten.
+HISTORY_TIMEOUT_S = 60.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +79,8 @@ class TranslationOrchestrator:
         glossary: Mapping[str, str] | None = None,
         examples: Mapping[str, str] | None = None,
         max_backlog: int = MAX_BACKLOG,
+        history_timeout_s: float = HISTORY_TIMEOUT_S,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._gpu = gpu
         self._cache = cache
@@ -86,6 +93,9 @@ class TranslationOrchestrator:
         self._cache_scope = f"{profile_id}#{digest}"
         self._history: deque[tuple[int, ContextLine]] = deque(maxlen=max(history_size, 1))
         self._history_enabled = history_size > 0
+        self._history_timeout_s = history_timeout_s
+        self._clock = clock
+        self._last_submit: float | None = None
         self._max_backlog = max(max_backlog, 1)
 
         self._cond = threading.Condition()
@@ -98,6 +108,10 @@ class TranslationOrchestrator:
     def submit(self, line_id: int, text: str) -> None:
         """Queue ``text`` for ``line_id``; reuse a line_id for an upgraded reading."""
         with self._cond:
+            now = self._clock()
+            if self._last_submit is not None and now - self._last_submit > self._history_timeout_s:
+                self._history.clear()  # a long silence: most likely another scene
+            self._last_submit = now
             job = _Job(line_id, text)
             # An upgrade supersedes its own line's older reading, wherever that one is.
             self._pending = deque(j for j in self._pending if j.line_id != line_id)

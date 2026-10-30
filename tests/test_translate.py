@@ -525,6 +525,22 @@ def test_history_is_bounded_and_can_be_cleared(fake: FakeBackend, events: Events
         orch.close()
 
 
+def test_history_is_forgotten_after_a_long_silence(fake: FakeBackend, events: Events) -> None:
+    now = [0.0]
+    orch = TranslationOrchestrator(
+        fake, TranslationCache(), events, history_timeout_s=60.0, clock=lambda: now[0]
+    )
+    try:
+        for line_id, (at, text) in enumerate([(0, "One."), (50, "Two."), (200, "Three.")], 1):
+            now[0] = at
+            orch.submit(line_id, text)
+            events.wait_for(line_id)
+        assert [c.source for c in fake.requests[1].history] == ["One."]  # 50 s: same scene
+        assert fake.requests[2].history == []  # 150 s later: another scene
+    finally:
+        orch.close()
+
+
 def test_failures_are_reported(
     orchestrator: TranslationOrchestrator, fake: FakeBackend, events: Events
 ) -> None:
