@@ -6,12 +6,39 @@ process; the UI sends commands, polls events without blocking and watches ``aliv
 
 from __future__ import annotations
 
+import logging
 import multiprocessing
+import multiprocessing.connection
+import os
 import queue
+import threading
 from collections.abc import Callable
 from multiprocessing.queues import Queue
 
 from livesubs.core.messages import Shutdown
+
+log = logging.getLogger(__name__)
+
+
+def exit_with_parent() -> None:
+    """In a child: end this process as soon as the UI process is gone.
+
+    ``daemon=True`` only covers a clean exit of the parent; after a crash or a kill the children
+    kept running (seen with the packaged exe): the device host would keep the card locked and
+    its preview on screen. Windows releases the card, shared memory and power requests of an
+    exited process, so a hard exit is enough.
+    """
+    parent = multiprocessing.parent_process()
+    if parent is None:
+        return
+
+    def watch() -> None:
+        multiprocessing.connection.wait([parent.sentinel])
+        log.warning("The UI process is gone; exiting")
+        logging.shutdown()
+        os._exit(0)
+
+    threading.Thread(target=watch, name="parent-watch", daemon=True).start()
 
 
 class ChildProcess[C, E]:

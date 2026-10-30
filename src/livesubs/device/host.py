@@ -17,7 +17,7 @@ import threading
 from collections.abc import Callable
 from multiprocessing.queues import Queue
 
-from livesubs.core.child_process import ChildProcess
+from livesubs.core.child_process import ChildProcess, exit_with_parent
 from livesubs.core.logs import setup_file_logging
 from livesubs.core.messages import Shutdown
 from livesubs.core.profiles import VideoDeviceSource
@@ -187,6 +187,7 @@ class DeviceWorker:
 def device_main(commands: Queue, events: Queue) -> None:
     """Entry point of the device host process."""
     setup_file_logging("device.log")
+    exit_with_parent()
     log.info("Device host started (pid %d)", os.getpid())
 
     from PySide6.QtCore import QTimer

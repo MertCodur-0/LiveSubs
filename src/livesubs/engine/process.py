@@ -11,7 +11,7 @@ import os
 from multiprocessing.queues import Queue
 
 from livesubs.core import paths
-from livesubs.core.child_process import ChildProcess
+from livesubs.core.child_process import ChildProcess, exit_with_parent
 from livesubs.core.logs import setup_file_logging
 from livesubs.core.messages import (
     Command,
@@ -36,6 +36,7 @@ log = logging.getLogger(__name__)
 def engine_main(commands: Queue, events: Queue) -> None:
     """Entry point of the engine process."""
     setup_file_logging("engine.log")
+    exit_with_parent()
     log.info("Engine started (pid %d)", os.getpid())
     pipeline: Pipeline | None = None
     events.put(StateChanged(EngineState.IDLE))
