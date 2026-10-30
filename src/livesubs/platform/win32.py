@@ -527,3 +527,21 @@ def total_ram_bytes() -> int:
     if not _GlobalMemoryStatusEx(ctypes.byref(status)):
         _raise_last_error()
     return status.ullTotalPhys
+
+
+# --- Power ---------------------------------------------------------------------------------------
+
+_ES_CONTINUOUS = 0x80000000
+_ES_DISPLAY_REQUIRED = 0x00000002
+_ES_SYSTEM_REQUIRED = 0x00000001
+_SetThreadExecutionState = _fn(_kernel32, "SetThreadExecutionState", _DWORD, _DWORD)
+
+
+def keep_display_awake(enabled: bool) -> None:
+    """Keep the screen on and the PC awake while ``enabled`` (the capture card preview: nobody
+    touches mouse or keyboard while playing on a console). Applies to the calling thread until
+    it calls this again or ends; call it from the same thread both times."""
+    flags = _ES_CONTINUOUS
+    if enabled:
+        flags |= _ES_DISPLAY_REQUIRED | _ES_SYSTEM_REQUIRED
+    _SetThreadExecutionState(flags)

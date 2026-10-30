@@ -437,4 +437,6 @@ STRINGS: dict[str, str] = {
     "error.no_source": "Önce bir kaynak seçin.",
     "error.no_region": "Önce altyazı bölgesini seçin.",
     "error.region_needs_screen": "Seçilen alan hiçbir ekranda değil; tekrar deneyin.",
+    # Capture card preview
+    "preview.title": "LiveSubs - Yakalama kartı önizlemesi",
 }
