@@ -11,7 +11,7 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -65,6 +65,7 @@ from livesubs.core.profiles import (
     Profile,
     ProfileStore,
     Source,
+    VideoDeviceSource,
     VisionSettings,
     WindowSource,
 )
@@ -72,14 +73,17 @@ from livesubs.engine.translate.cache import TranslationCache
 from livesubs.i18n import t
 from livesubs.ollama.client import DEFAULT_URL, InstalledModel, list_models, start_ollama
 from livesubs.platform import win32
+from livesubs.platform.video_devices import list_video_devices
 from livesubs.ui import screens
 from livesubs.ui import theme as themes
+from livesubs.ui.capture_card import CaptureCard, Host
+from livesubs.ui.frame_region import FrameRegionDialog
 from livesubs.ui.header import Header
 from livesubs.ui.hotkeys import HotkeyManager
 from livesubs.ui.icon import app_icon
 from livesubs.ui.inspector import Inspector
 from livesubs.ui.overlay import Overlay
-from livesubs.ui.pick import resolve
+from livesubs.ui.pick import resolve, resolve_card
 from livesubs.ui.placement import custom_geometry, monitor_at, overlay_geometry
 from livesubs.ui.region_frame import RegionFrame
 from livesubs.ui.region_select import RegionPicker
@@ -142,9 +146,18 @@ def visible_client_area(hwnd: int) -> Rect | None:
     return client.intersection(bounds) if bounds and client else None
 
 
-def available_sources() -> list[SourceOption]:
+def other_windows(own_pids: Collection[int] = ()) -> list[win32.WindowInfo]:
+    """Windows of other apps (ours: this process and the device host with its preview)."""
+    return [w for w in win32.list_windows(exclude_pid=os.getpid()) if w.pid not in own_pids]
+
+
+def available_sources(
+    card_area: Callable[[], Rect | None] = lambda: None, own_pids: Collection[int] = ()
+) -> list[SourceOption]:
+    """Windows, monitors and capture cards. ``card_area``: where the card's picture is shown
+    on the desktop (its preview), if anywhere."""
     options = []
-    for window in win32.list_windows(exclude_pid=os.getpid()):
+    for window in other_windows(own_pids):
         if window.minimized:
             continue
 
@@ -166,6 +179,9 @@ def available_sources() -> list[SourceOption]:
                 label, MonitorSource(device_name=monitor.device_name), lambda r=monitor.rect: r
             )
         )
+    for device in list_video_devices():
+        spec = VideoDeviceSource(device_name=device.name)
+        options.append(SourceOption(t("source.card", name=device.name), spec, card_area))
     return options
 
 
@@ -178,7 +194,12 @@ class _Bridge(QObject):
 
 class MainWindow(QMainWindow):
     def __init__(
-        self, engine: Engine, *, config: AppConfig | None = None, store: ProfileStore | None = None
+        self,
+        engine: Engine,
+        *,
+        config: AppConfig | None = None,
+        store: ProfileStore | None = None,
+        card_host: Host | None = None,
     ) -> None:
         super().__init__()
         self.setWindowTitle(f"{APP_NAME} {__version__}")
@@ -196,6 +217,15 @@ class MainWindow(QMainWindow):
         self._translations: dict[int, str] = {}
         self._clear_generation = 0
         self._reads = 0  # lines read since Start: tells "running" from "waiting for subtitles"
+        # The capture card: the device host owns it; a start on it waits until it is open.
+        self._card = CaptureCard(self._config.preview, card_host)
+        self._card.opened.connect(self._on_card_opened)
+        self._card.failed.connect(self._on_card_failed)
+        self._card.signal_changed.connect(self._on_card_signal)
+        self._card.preview_changed.connect(self._on_card_preview)
+        self._card_waiting = False  # Start pressed (or card lost while running): start once open
+        self._card_started_on = ""  # the shared frames the running pipeline reads
+        self._card_region_pending = False  # region pick waits for the card to open
         self._overlay = Overlay(self._profile.overlay)
         self._overlay.edited.connect(self._on_overlay_edited)
         self._overlay.set_capture_visible(self._config.recording_mode)
@@ -221,6 +251,7 @@ class MainWindow(QMainWindow):
         self.tray.show_window.connect(self.show_from_tray)
         self.tray.toggle_running.connect(self.toggle)
         self.tray.toggle_overlay.connect(self.toggle_overlay)
+        self.tray.toggle_preview.connect(self.toggle_card_preview)
         self.tray.quit.connect(self.close)
         self.tray.show()
 
@@ -251,6 +282,7 @@ class MainWindow(QMainWindow):
         self._web_timer = QTimer(self, interval=WEB_STATUS_MS, timeout=self._show_web_status)
         self._apply_web()
         self._apply_display()
+        self._apply_card()
         self.check_ollama()
         self._engine.start()
 
@@ -346,6 +378,7 @@ class MainWindow(QMainWindow):
         self.settings.recording_changed.connect(self._on_recording_changed)
         self.settings.web_changed.connect(self._apply_web)
         self.settings.display_changed.connect(self._on_display_changed)
+        self.settings.preview_changed.connect(self._apply_card)
         self.settings.theme_changed.connect(self.set_theme)
         self.settings.clear_cache_requested.connect(self.clear_cache)
         self.settings.open_logs_requested.connect(self._open_logs)
@@ -509,6 +542,78 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(t("warning.recording_overlap"), 15000)
         self._warned_overlap = overlap
 
+    # --- capture card ----------------------------------------------------------------------------
+
+    def _profile_card_name(self) -> str:
+        source = self._profile.source
+        return source.device_name if isinstance(source, VideoDeviceSource) else ""
+
+    def _reading_card(self) -> bool:
+        return isinstance(self._profile.source, VideoDeviceSource) and bool(self._card_started_on)
+
+    def _apply_card(self) -> None:
+        """Preview settings or the active profile changed: tell the device host."""
+        self._card.set_profile_card(self._profile_card_name())
+        self._card.apply()
+        self._show_preview_status()
+
+    def toggle_card_preview(self) -> None:
+        self._config.preview.enabled = not self._config.preview.enabled
+        self._save_later()
+        self._apply_card()
+
+    def _show_preview_status(self) -> None:
+        preview = self._config.preview
+        if not preview.enabled:
+            text = t("settings.preview_off")
+        elif not self._card.preview_device:
+            text = t("settings.preview_no_card")
+        elif self._card.preview_shown_on is not None:
+            name = self._card.preview_shown_on.removeprefix("\\\\.\\")
+            text = t("settings.preview_on", monitor=name)
+        elif preview.monitor and preview.monitor not in {
+            m.device_name for m in win32.list_monitors()
+        }:
+            text = t("settings.preview_no_monitor")
+        else:
+            text = t("state.card_opening")
+        self.settings.show_preview(text)
+
+    def _on_card_opened(self, shared_frames: str) -> None:
+        if self._card_region_pending:
+            card = self._card.wanted()
+            if card is not None:
+                self._pick_on_card_frame(card)
+        # A pending start, or the card came back (new buffer) while a pipeline reads it.
+        restart = self._state in ACTIVE_STATES and self._reading_card()
+        if self._card_waiting or (restart and shared_frames != self._card_started_on):
+            self._send_start()
+        self._show_preview_status()
+
+    def _on_card_failed(self, kind: str, name: str) -> None:
+        text = t(f"card.{kind}", name=name)
+        self.statusBar().showMessage(text, 30000)
+        if kind == "crashed":
+            self.tray.notify(APP_NAME, text)
+            if self._reading_card():
+                self._card_waiting = True  # the engine loses its frames; restart when back
+        self._show_preview_status()
+
+    def _on_card_signal(self, black: bool) -> None:
+        text = t("card.black" if black else "card.picture_back")
+        self.statusBar().showMessage(text, 60000 if black else 5000)
+        if black:
+            self.tray.notify(APP_NAME, text)
+
+    def _on_card_preview(self, by_user: bool) -> None:
+        if by_user:
+            self._save_later()  # the preview was closed on itself: remember it is off
+            self.statusBar().showMessage(t("card.preview_closed"), 10000)
+        self._show_preview_status()
+        self._place_overlay()  # it may have been the subtitle's on-screen area
+        if self._calibrating:
+            self._place_region_frame()
+
     # --- profile ---------------------------------------------------------------------------------
 
     @staticmethod
@@ -568,13 +673,14 @@ class MainWindow(QMainWindow):
         self._apply_display()
         self.models.set_profile(profile)
         self._fill_profile_combo()
+        self._apply_card()
         self.refresh_sources()
         self._update_region_label()
-        if was_active:
+        if was_active or self._card_waiting:
             if self.selected_source() is not None and profile.region is not None:
                 self._send_start()
             else:
-                self._engine.send(StopPipeline())
+                self.stop()
         self._place_overlay()
         if self._calibrating:
             self._place_region_frame()
@@ -621,7 +727,7 @@ class MainWindow(QMainWindow):
     # --- source & region -------------------------------------------------------------------------
 
     def refresh_sources(self) -> None:
-        self._sources = available_sources()
+        self._sources = available_sources(self._card.preview_rect, self._own_pids())
         self.source_combo.clear()
         for option in self._sources:
             self.source_combo.addItem(option.label)
@@ -645,8 +751,21 @@ class MainWindow(QMainWindow):
         index = self.source_combo.currentIndex()
         return self._sources[index] if 0 <= index < len(self._sources) else None
 
+    def _own_pids(self) -> set[int]:
+        pid = self._card.host_pid
+        return {pid} if pid else set()
+
     def select_region(self) -> None:
-        """Dim every monitor; the user marks the subtitle wherever it is shown."""
+        """Dim every monitor; the user marks the subtitle wherever it is shown. A capture card
+        without a preview on screen: mark it on a still frame instead."""
+        option = self.selected_source()
+        if (
+            option is not None
+            and isinstance(option.spec, VideoDeviceSource)
+            and self._card.preview_rect() is None
+        ):
+            self._pick_on_card_frame(option.spec)
+            return
         picker = RegionPicker()
         picker.selected.connect(self._on_picked)
         picker.show()
@@ -654,19 +773,44 @@ class MainWindow(QMainWindow):
 
     def _on_picked(self, logical: Rect) -> None:
         physical = screens.to_physical(logical, screens.current_screens())
-        windows = [
-            (w, area)
-            for w in win32.list_windows(exclude_pid=os.getpid())
-            if (area := visible_client_area(w.hwnd)) is not None
-        ]
-        pick = resolve(physical, windows, win32.list_monitors())
+        card = self._card.device_name or self._card.preview_device
+        pick = resolve_card(physical, self._card.preview_rect(), card)
+        if pick is None:
+            windows = [
+                (w, area)
+                for w in other_windows(self._own_pids())
+                if (area := visible_client_area(w.hwnd)) is not None
+            ]
+            pick = resolve(physical, windows, win32.list_monitors())
         if pick is None:
             self.statusBar().showMessage(t("error.region_needs_screen"), 5000)
             return
-        source_changed = pick.source != self._profile.source
-        self._profile.source = pick.source
+        self._use_region(pick.source, pick.region)
+
+    def _use_region(self, source: Source, region: NormRect) -> None:
+        source_changed = source != self._profile.source
+        self._profile.source = source
+        self._card.set_profile_card(self._profile_card_name())
         self.refresh_sources()
-        self.set_region(pick.region, restart=source_changed)
+        self.set_region(region, restart=source_changed)
+
+    def _pick_on_card_frame(self, card: VideoDeviceSource) -> None:
+        """The card's picture is on no screen: pick the region on a frame of it (opened for
+        this while it is not open anyway)."""
+        if not self._card.is_open(card.device_name):
+            self._card_region_pending = True
+            self._card.set_snapshot_device(card)
+            self.statusBar().showMessage(t("state.card_opening"), 5000)
+            return
+        self._card_region_pending = False
+        image = self._card.snapshot()
+        self._card.set_snapshot_device(None)
+        if image is None:
+            return
+        region = self._profile.region if self._profile.source == card else None
+        dialog = FrameRegionDialog(image, region, self)
+        if dialog.exec() and (picked := dialog.region()) is not None:
+            self._use_region(card, picked)
 
     def set_region(self, region: NormRect, *, restart: bool = False) -> None:
         self._profile.region = region
@@ -769,8 +913,8 @@ class MainWindow(QMainWindow):
     # --- start / stop ----------------------------------------------------------------------------
 
     def toggle(self) -> None:
-        if self._state in ACTIVE_STATES:
-            self._engine.send(StopPipeline())
+        if self._state in ACTIVE_STATES or self._card_waiting:
+            self.stop()
             return
         option = self.selected_source()
         if option is None:
@@ -782,7 +926,28 @@ class MainWindow(QMainWindow):
         self._profile.source = option.spec
         self._send_start()
 
+    def stop(self) -> None:
+        self._card_waiting = False
+        self._card.set_pipeline_device(None)
+        if self._state in ACTIVE_STATES:
+            self._engine.send(StopPipeline())
+        else:
+            self._set_state(self._state, "")  # leaves the "card opening" text
+
     def _send_start(self) -> None:
+        source = self._profile.source
+        card = source if isinstance(source, VideoDeviceSource) else None
+        self._card.set_pipeline_device(card)
+        if card is not None and not self._card.is_open(card.device_name):
+            # The device host opens it (a busy card is retried); _on_card_opened starts then.
+            if self._state in ACTIVE_STATES:
+                self._engine.send(StopPipeline())
+            self._card_waiting = True
+            self._show_running(True)
+            self.state_label.setText(t("state.card_opening"))
+            return
+        self._card_waiting = False
+        self._card_started_on = self._card.shared_frames if card is not None else ""
         if self.model_combo.currentText():
             self._config.ollama.gpu_model = self.model_combo.currentText()
         self._save()
@@ -798,6 +963,7 @@ class MainWindow(QMainWindow):
                 profile=self._profile.model_copy(deep=True),
                 ollama=self._config.ollama,
                 profile_id=self._profile_id,
+                shared_frames=self._card_started_on,
             )
         )
         if self._calibrating:
@@ -817,6 +983,8 @@ class MainWindow(QMainWindow):
             return
         log.error("The engine process died; starting a new one")
         self._engine.restart()
+        if not self._card_waiting:
+            self._card.set_pipeline_device(None)
         self._set_state(EngineState.STOPPED, "")
         self.statusBar().showMessage(t("error.engine_crashed"), 30000)
         self.tray.notify(APP_NAME, t("error.engine_crashed"))
@@ -825,8 +993,13 @@ class MainWindow(QMainWindow):
         match event:
             case StateChanged(state=state, detail=detail):
                 self._set_state(state, detail)
-            case EngineError(kind=kind, message=message):
+            case EngineError(kind=ErrorKind.SOURCE_LOST) if self._reading_card():
+                # The device host reopens the card; the pipeline follows (_on_card_opened).
+                self._card_waiting = True
+            case EngineError(kind=kind, message=message, fatal=fatal):
                 self.statusBar().showMessage(t(f"error.{kind}", detail=message), 15000)
+                if fatal:
+                    self._card.set_pipeline_device(None)
                 if kind in SETUP_ERRORS:  # missing on this PC: the setup dialog fixes it
                     self.open_setup()
             case FrameInfo():
@@ -854,9 +1027,14 @@ class MainWindow(QMainWindow):
         text = t(f"state.{state}", model=detail)
         if state == EngineState.RUNNING and self._reads == 0:
             text = t("state.waiting")
+        # STOPPED also comes from a pipeline replaced by a new one: the card is released only
+        # by stop(), by a start on another source and by a fatal error.
+        if self._card_waiting and state not in ACTIVE_STATES:
+            text = t("state.card_opening")
         self.state_label.setText(text)
-        self._show_running(state in ACTIVE_STATES)
-        self.tray.set_running(state in ACTIVE_STATES)
+        running = state in ACTIVE_STATES or self._card_waiting
+        self._show_running(running)
+        self.tray.set_running(running)
         self.models.set_busy(state in ACTIVE_STATES)
         if state in (EngineState.PAUSED, EngineState.STOPPED) and not self._calibrating:
             self._overlay.clear()
@@ -1114,6 +1292,7 @@ class MainWindow(QMainWindow):
         self._region_frame.close()
         self._inspector.close()
         self._overlay.close()
+        self._card.shutdown()
         self._engine.shutdown()
         super().closeEvent(event)
         # Qt quits when the last *visible* window closes; this one may be hidden in the tray, or

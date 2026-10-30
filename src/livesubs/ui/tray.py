@@ -14,6 +14,7 @@ class Tray(QObject):
     show_window = Signal()
     toggle_running = Signal()
     toggle_overlay = Signal()
+    toggle_preview = Signal()
     quit = Signal()
 
     def __init__(self, icon: QIcon) -> None:
@@ -23,8 +24,15 @@ class Tray(QObject):
         self.run_action = QAction(t("start"), self.menu, triggered=self.toggle_running)
         self.overlay_action = QAction(t("tray.toggle_overlay"), self.menu)
         self.overlay_action.triggered.connect(self.toggle_overlay)
+        self.preview_action = QAction(t("tray.toggle_preview"), self.menu)
+        self.preview_action.triggered.connect(self.toggle_preview)
         self.quit_action = QAction(t("tray.quit"), self.menu, triggered=self.quit)
-        for action in (self.show_action, self.run_action, self.overlay_action):
+        for action in (
+            self.show_action,
+            self.run_action,
+            self.overlay_action,
+            self.preview_action,
+        ):
             self.menu.addAction(action)
         self.menu.addSeparator()
         self.menu.addAction(self.quit_action)

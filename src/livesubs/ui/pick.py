@@ -1,7 +1,8 @@
 """From a rectangle drawn anywhere on the desktop to a source and a region in its frame.
 
-The user marks the subtitle where they see it; the source is the window under the mark (the
-front-most one containing its center), or the monitor when no window is there. The region is then
+The user marks the subtitle where they see it; the source is the capture card when the mark is on
+its full-screen preview, else the window under the mark (the front-most one containing its
+center), or the monitor when no window is there. The region is then
 normalized to that source's frame: the window's visible client area, or the monitor.
 """
 
@@ -11,7 +12,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from livesubs.core.geometry import NormRect, Rect
-from livesubs.core.profiles import MonitorSource, Source, WindowSource
+from livesubs.core.profiles import MonitorSource, Source, VideoDeviceSource, WindowSource
 from livesubs.platform.win32 import MonitorInfo, WindowInfo
 
 # Top-level windows that are part of the desktop itself, never a subtitle source.
@@ -54,6 +55,18 @@ def resolve(
                     MonitorSource(device_name=monitor.device_name), monitor.rect, region, name
                 )
     return None
+
+
+def resolve_card(selection: Rect, preview: Rect | None, device_name: str) -> Pick | None:
+    """A mark on the capture card's full-screen preview is a region of the card's frame (the
+    preview fills its monitor, so the monitor is the frame). None when it is elsewhere."""
+    cx, cy = selection.x + selection.width / 2, selection.y + selection.height / 2
+    if preview is None or not device_name or not _contains(preview, cx, cy):
+        return None
+    region = _normalize(selection, preview)
+    if region is None:
+        return None
+    return Pick(VideoDeviceSource(device_name=device_name), preview, region, device_name)
 
 
 def _normalize(selection: Rect, area: Rect) -> NormRect | None:

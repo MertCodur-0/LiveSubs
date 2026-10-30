@@ -1,4 +1,5 @@
-"""Settings tab: translation, reading speed, phone output, hotkeys, window, recording, upkeep.
+"""Settings tab: translation, reading speed, phone output, capture card preview, hotkeys,
+window, recording, upkeep.
 
 Edits change the given ``AppConfig`` / ``Profile`` objects in place and announce it; the main
 window saves them and applies what can change while running (hotkeys, recording mode).
@@ -26,7 +27,8 @@ from PySide6.QtWidgets import (
 from livesubs.core.config import AppConfig, HotkeySettings
 from livesubs.core.profiles import OverlayDisplay, Profile
 from livesubs.i18n import t
-from livesubs.platform import hotkeys
+from livesubs.platform import hotkeys, win32
+from livesubs.platform.video_devices import list_video_devices
 from livesubs.ui.qr import qr_pixmap
 from livesubs.ui.theme import THEMES
 
@@ -55,6 +57,7 @@ class SettingsTab(QWidget):
     recording_changed = Signal(bool)
     web_changed = Signal()  # turned on/off or another port
     display_changed = Signal()  # the active profile shows translations on the phone only, or not
+    preview_changed = Signal()  # capture card preview: on/off, card or monitor
     theme_changed = Signal(str)
     clear_cache_requested = Signal()
     open_logs_requested = Signal()
@@ -66,6 +69,7 @@ class SettingsTab(QWidget):
         layout = QVBoxLayout(self)
         layout.addWidget(self._translation_box())
         layout.addWidget(self._web_box())
+        layout.addWidget(self._preview_box())
         layout.addWidget(self._hotkey_box())
         layout.addWidget(self._window_box())
         layout.addWidget(self._upkeep_box())
@@ -135,6 +139,60 @@ class SettingsTab(QWidget):
         row.addLayout(form, 1)
         row.addWidget(self.web_qr, 0, Qt.AlignmentFlag.AlignTop)
         return box
+
+    def _preview_box(self) -> QGroupBox:
+        box = QGroupBox(t("settings.preview"))
+        form = QFormLayout(box)
+        self.preview_enabled = QCheckBox(t("settings.preview_enabled"))
+        self.preview_enabled.setChecked(self.config.preview.enabled)
+        self.preview_enabled.toggled.connect(self._on_preview_enabled)
+        form.addRow(self.preview_enabled)
+        self.preview_device = QComboBox()
+        self.preview_device.activated.connect(self._on_preview_device)
+        refresh = QPushButton(t("source.refresh"))
+        refresh.clicked.connect(self.refresh_preview_choices)
+        device_row = QHBoxLayout()
+        device_row.addWidget(self.preview_device, 1)
+        device_row.addWidget(refresh)
+        form.addRow(t("settings.preview_device"), device_row)
+        self.preview_monitor = QComboBox()
+        self.preview_monitor.activated.connect(self._on_preview_monitor)
+        form.addRow(t("settings.preview_monitor"), self.preview_monitor)
+        self.preview_status = _hint("")
+        form.addRow(self.preview_status)
+        form.addRow(_hint(t("settings.preview_hint")))
+        self.refresh_preview_choices()
+        return box
+
+    def refresh_preview_choices(self) -> None:
+        """Connected cards and monitors; a chosen one that is missing stays listed."""
+        preview = self.config.preview
+        self.preview_device.clear()
+        self.preview_device.addItem(t("settings.preview_profile_card"), "")
+        names = [d.name for d in list_video_devices()]
+        if preview.device and preview.device not in names:
+            names.append(preview.device)
+        for name in names:
+            self.preview_device.addItem(name, name)
+        self.preview_device.setCurrentIndex(max(self.preview_device.findData(preview.device), 0))
+        self.preview_monitor.clear()
+        self.preview_monitor.addItem(t("settings.preview_primary"), "")
+        for monitor in win32.list_monitors():
+            label = t(
+                "source.monitor",
+                name=monitor.device_name.removeprefix("\\\\.\\"),
+                width=monitor.rect.width,
+                height=monitor.rect.height,
+            )
+            self.preview_monitor.addItem(label, monitor.device_name)
+        self.preview_monitor.setCurrentIndex(max(self.preview_monitor.findData(preview.monitor), 0))
+
+    def show_preview(self, text: str) -> None:
+        """The preview's state (shown where, or why not), and the checkbox in step with it."""
+        self.preview_status.setText(text)
+        self.preview_enabled.blockSignals(True)
+        self.preview_enabled.setChecked(self.config.preview.enabled)
+        self.preview_enabled.blockSignals(False)
 
     def _hotkey_box(self) -> QGroupBox:
         box = QGroupBox(t("settings.hotkeys"))
@@ -251,6 +309,21 @@ class SettingsTab(QWidget):
             overlay.display = OverlayDisplay.AUTO
         self.profile_changed.emit()
         self.display_changed.emit()
+
+    def _on_preview_enabled(self, on: bool) -> None:
+        self.config.preview.enabled = on
+        self.config_changed.emit()
+        self.preview_changed.emit()
+
+    def _on_preview_device(self, index: int) -> None:
+        self.config.preview.device = self.preview_device.itemData(index)
+        self.config_changed.emit()
+        self.preview_changed.emit()
+
+    def _on_preview_monitor(self, index: int) -> None:
+        self.config.preview.monitor = self.preview_monitor.itemData(index)
+        self.config_changed.emit()
+        self.preview_changed.emit()
 
     def _on_theme(self, index: int) -> None:
         self.config.theme = self.theme.itemData(index)

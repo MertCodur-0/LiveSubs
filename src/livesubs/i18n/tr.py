@@ -7,6 +7,7 @@ STRINGS: dict[str, str] = {
     "source.refresh": "Yenile",
     "source.window": "Pencere: {title}",
     "source.monitor": "Monitör: {name} ({width}x{height})",
+    "source.card": "Yakalama kartı: {name}",
     "source.none": "Kaynak seçin",
     "region.select": "Altyazı bölgesini seç",
     "region.selected": "Bölge: {source} — konum {x:.0%}, {y:.0%}, boyut {w:.0%} x {h:.0%}",
@@ -401,6 +402,7 @@ STRINGS: dict[str, str] = {
     # Tray and warnings
     "tray.show": "LiveSubs'ı göster",
     "tray.toggle_overlay": "Çeviriyi gizle / göster",
+    "tray.toggle_preview": "Kart önizlemesini aç / kapat",
     "tray.quit": "Çıkış",
     "tray.running": "çalışıyor",
     "tray.idle": "hazır",
@@ -421,6 +423,7 @@ STRINGS: dict[str, str] = {
     "state.waiting": "Çalışıyor — altyazı bekleniyor (seçilen bölgede henüz yazı okunmadı)",
     "state.paused": "Duraklatıldı (devam için F10)",
     "state.stopped": "Durdu",
+    "state.card_opening": "Yakalama kartı açılıyor…",
     # Errors (by EngineError kind)
     "error.source_unavailable": "Kaynak açılamadı. Pencere kapalı ya da simge durumunda olabilir.",
     "error.source_lost": "Kaynak kapandı.",
@@ -437,6 +440,47 @@ STRINGS: dict[str, str] = {
     "error.no_source": "Önce bir kaynak seçin.",
     "error.no_region": "Önce altyazı bölgesini seçin.",
     "error.region_needs_screen": "Seçilen alan hiçbir ekranda değil; tekrar deneyin.",
-    # Capture card preview
+    # Capture card
     "preview.title": "LiveSubs - Yakalama kartı önizlemesi",
+    "card.busy": (
+        "Yakalama kartı başka bir uygulamada açık (OBS gibi). O uygulamayı kapatın; LiveSubs "
+        "kartı kendiliğinden açacak."
+    ),
+    "card.unavailable": (
+        "Yakalama kartı bulunamadı ({name}). Takılı olduğundan emin olun; LiveSubs denemeye "
+        "devam ediyor."
+    ),
+    "card.lost": "Yakalama kartının bağlantısı koptu ({name}); yeniden bağlanınca devam edilecek.",
+    "card.crashed": "Yakalama kartı süreci beklenmedik şekilde kapandı ve yeniden başlatıldı.",
+    "card.black": (
+        "Yakalama kartından görüntü gelmiyor (ekran siyah). Konsol açık mı? PS5'te HDCP açıksa "
+        "görüntü gelmez: Ayarlar → Sistem → HDMI → HDCP'yi Etkinleştir seçeneğini kapatın."
+    ),
+    "card.picture_back": "Yakalama kartından yeniden görüntü geliyor.",
+    "card.preview_closed": (
+        "Kart önizlemesi kapatıldı. Yeniden açmak için: Ayarlar → Yakalama kartı önizlemesi."
+    ),
+    "frame_region.title": "Altyazı bölgesini seç",
+    "frame_region.hint": (
+        "Yakalama kartının şu anki görüntüsü. Altyazının çıktığı alanı fareyle çerçeveleyin; "
+        "bölgeyi daha sonra kalibrasyon modunda (F8) ince ayarlayabilirsiniz."
+    ),
+    "settings.preview": "Yakalama kartı önizlemesi",
+    "settings.preview_enabled": "Kartın görüntüsünü bir monitörde tam ekran göster",
+    "settings.preview_device": "Kart",
+    "settings.preview_monitor": "Monitör",
+    "settings.preview_profile_card": "Etkin profildeki kart",
+    "settings.preview_primary": "Birincil monitör",
+    "settings.preview_on": "Önizleme açık: {monitor}",
+    "settings.preview_off": "Kapalı",
+    "settings.preview_no_card": (
+        "Gösterilecek kart yok: yukarıdan bir kart seçin ya da etkin profilin kaynağını "
+        "yakalama kartı yapın."
+    ),
+    "settings.preview_no_monitor": "Seçilen monitör bağlı değil.",
+    "settings.preview_hint": (
+        "Konsolun görüntüsü seçilen monitörü kenardan kenara doldurur, çeviri kapalıyken de "
+        "açık kalır ve ekran uykuya geçmez. TV arkası ışık (Ambilight) uygulamaları bu monitörü "
+        "okuyabilir. Kapatmak için önizlemenin üzerinde Esc'ye basın ya da çift tıklayın."
+    ),
 }

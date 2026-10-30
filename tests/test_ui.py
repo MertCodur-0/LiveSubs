@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from pytestqt.qtbot import QtBot
 
 from livesubs.core import paths
-from livesubs.core.config import AppConfig, load_config
+from livesubs.core.config import AppConfig, PreviewSettings, load_config
 from livesubs.core.geometry import NormRect, Rect
 from livesubs.core.messages import (
     Command,
@@ -35,17 +35,31 @@ from livesubs.core.profiles import (
     OverlayPlacement,
     Profile,
     ProfileStore,
+    VideoDeviceSource,
     VisionSettings,
     WindowSource,
 )
+from livesubs.device.messages import (
+    CloseDevice,
+    DeviceErrorKind,
+    DeviceFailed,
+    DeviceOpened,
+    OpenDevice,
+    PreviewChanged,
+    ShowPreview,
+    SignalChanged,
+)
+from livesubs.engine.capture.shared_frames import SharedFrameWriter
 from livesubs.engine.translate.cache import TranslationCache
 from livesubs.i18n import t
 from livesubs.platform import hotkeys, win32
+from livesubs.platform.video_devices import VideoDevice
 from livesubs.platform.win32 import MonitorInfo, WindowInfo
+from livesubs.ui.frame_region import FrameRegionDialog
 from livesubs.ui.inspector import Inspector
 from livesubs.ui.main_window import DEFAULT_PROFILE_ID, MainWindow
 from livesubs.ui.overlay import Overlay, wrap
-from livesubs.ui.pick import resolve
+from livesubs.ui.pick import resolve, resolve_card
 from livesubs.ui.placement import GAP_PX, custom_geometry, monitor_at, overlay_geometry
 from livesubs.ui.region_select import RegionPicker
 from livesubs.ui.screens import ScreenMap, current_screens, from_qrect, to_logical, to_physical
@@ -146,6 +160,42 @@ def test_long_text_shrinks_to_fit(qtbot: QtBot) -> None:
 # --- main window --------------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def no_video_devices(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The source list must not depend on the webcams and cards of the PC running the tests."""
+    monkeypatch.setattr("livesubs.ui.main_window.list_video_devices", lambda: [])
+    monkeypatch.setattr("livesubs.ui.tabs.settings.list_video_devices", lambda: [])
+
+
+class FakeCardHost:
+    """Stands in for the device host process."""
+
+    def __init__(self) -> None:
+        self.sent: list = []
+        self.events: list = []
+        self.started = self.alive = False
+        self.pid: int | None = None
+        self.restarts = 0
+
+    def start(self) -> None:
+        self.started = self.alive = True
+        self.pid = 4242
+
+    def restart(self) -> None:
+        self.restarts += 1
+        self.alive = True
+
+    def send(self, command: object) -> None:
+        self.sent.append(command)
+
+    def poll(self, max_events: int = 100) -> list:
+        events, self.events = self.events, []
+        return events
+
+    def shutdown(self, timeout: float = 5.0) -> None:
+        self.alive = False
+
+
 class FakeEngine:
     def __init__(self) -> None:
         self.sent: list[Command] = []
@@ -177,7 +227,12 @@ def window(qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Mai
     monkeypatch.setenv("LIVESUBS_HOME", str(tmp_path))
     monkeypatch.setattr("livesubs.ui.main_window.list_models", lambda url: None)
     monkeypatch.setattr("livesubs.ui.main_window.cpu_share", lambda url, model: None)
-    win = MainWindow(FakeEngine(), config=AppConfig(), store=ProfileStore(tmp_path / "profiles"))
+    win = MainWindow(
+        FakeEngine(),
+        config=AppConfig(),
+        store=ProfileStore(tmp_path / "profiles"),
+        card_host=FakeCardHost(),
+    )
     qtbot.addWidget(win)
     # A LiveSubs running on this PC holds F8-F10; its "hotkeys taken" notice is not under test.
     win.statusBar().clearMessage()
@@ -186,6 +241,10 @@ def window(qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Mai
 
 def engine_of(window: MainWindow) -> FakeEngine:
     return window._engine  # type: ignore[return-value]
+
+
+def card_host_of(window: MainWindow) -> FakeCardHost:
+    return window._card._host  # type: ignore[return-value]
 
 
 def test_start_needs_a_region(window: MainWindow) -> None:
@@ -1090,3 +1149,192 @@ def test_phone_only_from_the_profiles_tab(window: MainWindow, web: list[FakeWebS
     assert window._profile.overlay.display == OverlayDisplay.WEB_ONLY
     assert window.settings.web_only.isChecked()
     assert window._overlay.disabled
+
+
+# --- capture card -------------------------------------------------------------------------------
+
+CARD_NAME = "Test Card"
+CARD = VideoDeviceSource(device_name=CARD_NAME)
+
+
+@pytest.fixture
+def card_window(window: MainWindow, monkeypatch: pytest.MonkeyPatch) -> MainWindow:
+    devices = [VideoDevice(0, CARD_NAME, "usb-test")]
+    monkeypatch.setattr("livesubs.ui.main_window.list_video_devices", lambda: devices)
+    monkeypatch.setattr("livesubs.ui.tabs.settings.list_video_devices", lambda: devices)
+    window.refresh_sources()
+    window.settings.refresh_preview_choices()
+    return window
+
+
+def select_card(window: MainWindow) -> None:
+    labels = [window.source_combo.itemText(i) for i in range(window.source_combo.count())]
+    window.source_combo.setCurrentIndex(labels.index(t("source.card", name=CARD_NAME)))
+    window.set_region(NormRect(x=0.1, y=0.8, width=0.8, height=0.15))
+
+
+def card_opens(window: MainWindow, frames: str) -> None:
+    card_host_of(window).events.append(DeviceOpened(CARD_NAME, frames, 1920, 1080))
+    window._card.poll()
+
+
+def starts_of(window: MainWindow) -> list[StartPipeline]:
+    return [c for c in engine_of(window).sent if isinstance(c, StartPipeline)]
+
+
+def test_cards_are_listed_as_sources(card_window: MainWindow) -> None:
+    assert t("source.card", name=CARD_NAME) in [
+        card_window.source_combo.itemText(i) for i in range(card_window.source_combo.count())
+    ]
+    assert not card_host_of(card_window).started  # nothing wanted: no process yet
+
+
+def test_start_on_a_card_waits_until_the_host_opened_it(card_window: MainWindow) -> None:
+    select_card(card_window)
+    card_window.toggle()
+    host = card_host_of(card_window)
+    assert host.started and host.sent == [OpenDevice(CARD)]
+    assert starts_of(card_window) == []
+    assert card_window.state_label.text() == t("state.card_opening")
+    assert card_window.start_button.text() == t("stop")
+
+    card_opens(card_window, "frames-1")
+    (start,) = starts_of(card_window)
+    assert start.shared_frames == "frames-1"
+    assert start.profile.source == CARD
+
+
+def test_stop_while_waiting_releases_the_card(card_window: MainWindow) -> None:
+    select_card(card_window)
+    card_window.toggle()
+    card_window.toggle()
+    assert card_host_of(card_window).sent == [OpenDevice(CARD), CloseDevice()]
+    assert card_window.start_button.text() == t("start")
+    card_opens(card_window, "frames-1")  # arrives late: no start any more
+    assert starts_of(card_window) == []
+
+
+def test_a_lost_card_resumes_when_it_is_back(card_window: MainWindow) -> None:
+    select_card(card_window)
+    card_window.toggle()
+    card_opens(card_window, "frames-1")
+    engine = engine_of(card_window)
+    engine.queue = [StateChanged(EngineState.RUNNING)]
+    card_window._poll()
+
+    # The card was unplugged: the pipeline stops with "source lost"; the card stays wanted.
+    engine.queue = [
+        EngineError(ErrorKind.SOURCE_LOST, "closed", fatal=True),
+        StateChanged(EngineState.STOPPED),
+    ]
+    card_window._poll()
+    assert CloseDevice() not in card_host_of(card_window).sent
+    assert card_window.state_label.text() == t("state.card_opening")
+    card_opens(card_window, "frames-2")
+    assert [s.shared_frames for s in starts_of(card_window)] == ["frames-1", "frames-2"]
+
+
+def test_a_replaced_pipeline_keeps_the_card(card_window: MainWindow) -> None:
+    """STOPPED also comes from the pipeline a new start replaces: never close the card then."""
+    select_card(card_window)
+    card_window.toggle()
+    card_opens(card_window, "frames-1")
+    engine_of(card_window).queue = [
+        StateChanged(EngineState.RUNNING),
+        StateChanged(EngineState.STOPPED),
+        StateChanged(EngineState.STARTING),
+    ]
+    card_window._poll()
+    assert CloseDevice() not in card_host_of(card_window).sent
+
+
+def test_card_problems_are_explained(card_window: MainWindow) -> None:
+    card_host_of(card_window).events = [
+        DeviceFailed(CARD_NAME, DeviceErrorKind.BUSY, "no frames"),
+    ]
+    card_window._card.poll()
+    assert card_window.statusBar().currentMessage() == t("card.busy", name=CARD_NAME)
+    card_host_of(card_window).events = [SignalChanged(black=True)]
+    card_window._card.poll()
+    assert card_window.statusBar().currentMessage() == t("card.black")
+
+
+def test_preview_opens_the_card_on_the_chosen_monitor(card_window: MainWindow) -> None:
+    host = card_host_of(card_window)
+    card_window.settings.preview_device.setCurrentIndex(1)
+    card_window.settings.preview_device.activated.emit(1)
+    card_window.settings.preview_enabled.setChecked(True)
+    primary = next(m for m in win32.list_monitors() if m.is_primary)
+    assert host.sent == [OpenDevice(CARD), ShowPreview(primary.device_name)]
+    assert card_window._config.preview == PreviewSettings(enabled=True, device=CARD_NAME)
+
+    # Esc on the preview: off, remembered, and the card is released (nothing else wants it).
+    host.events = [PreviewChanged(None, by_user=True)]
+    card_window._card.poll()
+    assert not card_window._config.preview.enabled
+    assert not card_window.settings.preview_enabled.isChecked()
+    assert host.sent[-1] == CloseDevice()
+
+
+def test_preview_shows_the_profile_card_by_default(card_window: MainWindow) -> None:
+    select_card(card_window)
+    card_window._profile.source = CARD
+    card_window._apply_card()
+    card_window.toggle_card_preview()  # from the tray
+    assert card_host_of(card_window).sent[0] == OpenDevice(CARD)
+
+
+def test_a_dead_device_host_is_replaced(card_window: MainWindow) -> None:
+    select_card(card_window)
+    card_window.toggle()
+    host = card_host_of(card_window)
+    host.alive = False
+    card_window._card._watch()
+    assert host.restarts == 1
+    assert host.sent == [OpenDevice(CARD), OpenDevice(CARD)]  # told again what is wanted
+
+
+def test_a_mark_on_the_preview_selects_the_card() -> None:
+    preview = Rect(0, 0, 1920, 1080)
+    pick = resolve_card(Rect(192, 864, 1536, 162), preview, CARD_NAME)
+    assert pick is not None
+    assert pick.source == CARD
+    assert pick.region == NormRect(x=0.1, y=0.8, width=0.8, height=0.15)
+    assert resolve_card(Rect(2500, 100, 100, 50), preview, CARD_NAME) is None  # elsewhere
+    assert resolve_card(Rect(192, 864, 1536, 162), None, CARD_NAME) is None  # no preview
+
+
+def test_region_on_a_card_frame(card_window: MainWindow, monkeypatch: pytest.MonkeyPatch) -> None:
+    """No preview on screen: the region is picked on a still frame of the card."""
+    select_card(card_window)
+    picked = NormRect(x=0.2, y=0.7, width=0.6, height=0.2)
+    monkeypatch.setattr(FrameRegionDialog, "exec", lambda self: 1)
+    monkeypatch.setattr(FrameRegionDialog, "region", lambda self: picked)
+
+    card_window.select_region()  # the card is not open: opened for a frame first
+    assert card_host_of(card_window).sent == [OpenDevice(CARD)]
+    writer = SharedFrameWriter(64, 36)
+    try:
+        writer.write(np.zeros((36, 64, 3), np.uint8), 1.0)
+        card_opens(card_window, writer.name)
+    finally:
+        writer.close()
+    assert card_window._profile.region == picked
+    assert card_window._profile.source == CARD
+    assert card_host_of(card_window).sent[-1] == CloseDevice()  # only opened for the frame
+
+
+def test_frame_region_dialog_drag(qtbot: QtBot) -> None:
+    dialog = FrameRegionDialog(np.zeros((1080, 1920, 3), np.uint8), None)
+    qtbot.addWidget(dialog)
+    view = dialog.view
+    assert dialog.region() is None
+    w, h = view.width(), view.height()
+    start, end = QPoint(w // 10, h * 8 // 10), QPoint(w * 9 // 10, h * 95 // 100)
+    qtbot.mousePress(view, Qt.MouseButton.LeftButton, pos=start)
+    qtbot.mouseMove(view, end)
+    qtbot.mouseRelease(view, Qt.MouseButton.LeftButton, pos=end)
+    region = dialog.region()
+    assert region is not None
+    assert region.x == pytest.approx(0.1, abs=0.01)
+    assert region.width == pytest.approx(0.8, abs=0.01)

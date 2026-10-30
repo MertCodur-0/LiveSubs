@@ -44,6 +44,17 @@ class WebSettings(SettingsModel):
     port: int = Field(8765, ge=1024, le=65535)
 
 
+class PreviewSettings(SettingsModel):
+    """Full-screen picture of the capture card on a PC monitor (e.g. for a TV light strip app).
+
+    App-wide, not per profile: it belongs to the PC's setup and runs while translation is off.
+    """
+
+    enabled: bool = False
+    device: str = ""  # the card's name; "" = the card of the active profile
+    monitor: str = ""  # display device name; "" = the primary monitor
+
+
 class AppConfig(SettingsModel):
     schema_version: int = CONFIG_SCHEMA_VERSION
     last_profile: str | None = None
@@ -54,6 +65,7 @@ class AppConfig(SettingsModel):
     cpu_lane: CpuLaneSettings = Field(default_factory=CpuLaneSettings)
     hotkeys: HotkeySettings = Field(default_factory=HotkeySettings)
     web: WebSettings = Field(default_factory=WebSettings)
+    preview: PreviewSettings = Field(default_factory=PreviewSettings)
     # Lets OBS and screenshots see the overlay (for recordings); OCR may then read it back.
     recording_mode: bool = False
     # None = detect the GPU's VRAM; set it when detection is wrong.
