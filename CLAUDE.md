@@ -160,7 +160,8 @@ UI process (PySide6)                                  Engine process (multiproce
   A new line needs 2 agreeing reads (rapidfuzz ratio of keys >= 90; latest read wins) ->
   `LineConfirmed(text, repeat)`; `repeat` = same as the previous line (reappeared after a flash),
   so its translation is reused. `CHANGED` keeps the old line on screen until the new one is
-  confirmed. `CLEARED` -> `LineCleared` (only if a line existed). Fast re-read 50 ms only while a
+  confirmed; it does **not** drop a waiting candidate (the next read's text decides).
+  `CLEARED` -> `LineCleared` (only if a line existed). Fast re-read 50 ms only while a
   candidate awaits its confirming read; otherwise reads every 500 ms, or at once when text pixels
   grow >= 15 % (fade-ins, glyphs uncovered by the moving background).
 - **Read upgrades** (user's point: the background keeps moving, so words lost on a bright frame
@@ -1021,3 +1022,13 @@ First **finish the app** (each step committed and pushed; no new release unless 
   app has focus.
 - 2026-10-30: **Capture card sound** (user: may play from the preview instead of the TV;
   details under "Capture card" -> Sound). **Released v0.6.0** (user's request).
+- 2026-10-30 (user report, Spider-Man via the card: "I knew Fisk" was clearly on screen, then
+  "wouldn't go quietly." replaced it; only the second part was translated, the feed showed the
+  first untranslated): the translation cache proves "I knew Fisk" was never submitted during
+  play (only later, from a paused video). Cause (reproduced in a stabilizer test, not with real
+  frames — no recording on the PC): `CHANGED` reset the stabilizer's candidate, and the change
+  detector compares each frame with the previous one; a short line's small mask drops under
+  IoU 0.75 from a few pixels of moving background, so every read was a first read. Now
+  `CHANGED` keeps the candidate and two agreeing reads confirm the line whatever the mask did.
+  Open (asked the user): a sentence split over two subtitles ("I knew Fisk" / "wouldn't go
+  quietly.") is translated piece by piece ("Fisk'i tanıyordum." is wrong on its own).

@@ -107,8 +107,10 @@ class Stabilizer:
                 self._reset()
                 return Decision(read=False, event=LineCleared() if had_line else None)
             case Change.APPEARED | Change.CHANGED:
+                # The candidate stays: the text decides whether this is still the same line. A
+                # short line's small mask can come as CHANGED on every frame (a few pixels of
+                # moving background), and dropping the candidate then never confirmed it.
                 self._pending = True
-                self._candidate = None
                 return Decision(read=True)
         # Change.SAME: read when due, or at once when more glyphs became visible.
         grew = text_pixels > self._last_read_pixels * (1 + self.mask_growth)

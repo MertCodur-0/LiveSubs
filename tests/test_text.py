@@ -214,6 +214,24 @@ def test_changed_line_keeps_the_old_one_until_confirmed(clock: Clock) -> None:
     )
 
 
+def test_short_line_is_confirmed_while_its_mask_keeps_changing(clock: Clock) -> None:
+    """User report: "I knew Fisk" was on screen, clearly readable, then "wouldn't go quietly."
+    replaced it, and only the second part was ever translated. A short line's mask is small,
+    so a few pixels of moving background push the thumbnail IoU under the threshold: every
+    frame came as CHANGED, which used to throw the candidate away before its confirming read."""
+    stab = Stabilizer()
+    appear_and_confirm(stab, clock, LINE)
+    events = []
+    for _ in range(3):
+        assert stab.update(Change.CHANGED, 300, clock(0.1)).read
+        events.append(stab.on_read("I knew Fisk", clock()))
+    assert LineConfirmed("I knew Fisk") in events
+    stab.update(Change.CHANGED, 600, clock(0.1))
+    stab.on_read("wouldn't go quietly.", clock())
+    stab.update(Change.SAME, 600, clock(0.06))
+    assert stab.on_read("wouldn't go quietly.", clock()) == LineConfirmed("wouldn't go quietly.")
+
+
 def test_line_reappearing_after_a_flicker_is_a_repeat(clock: Clock) -> None:
     stab = Stabilizer()
     appear_and_confirm(stab, clock, LINE)
