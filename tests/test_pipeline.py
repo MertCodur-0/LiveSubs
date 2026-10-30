@@ -1,5 +1,6 @@
 """The pipeline end to end on a scripted "video" of sample screenshots, real OCR, fake model."""
 
+import dataclasses
 import threading
 import time
 from collections.abc import Iterator
@@ -230,6 +231,33 @@ def test_without_ollama_english_still_flows(
     assert EngineState.RUNNING in recorder.states()
     assert len([e for e in recorder.of(SubtitleRead) if not e.upgrade]) == 2
     assert recorder.of(SubtitleTranslated) == []
+
+
+def test_a_prompt_that_fills_the_context_is_reported_once(
+    two_lines_and_a_gap: tuple[list[Sample], list[tuple[np.ndarray, float]]],
+) -> None:
+    """Ollama silently cuts a prompt longer than num_ctx (the examples first)."""
+    (a, _), scenes = two_lines_and_a_gap
+
+    class LongPrompt(UpperCaseBackend):
+        def translate(self, request: TranslationRequest, cancel: CancelToken) -> TranslationResult:
+            result = super().translate(request, cancel)
+            return dataclasses.replace(result, prompt_tokens=2047)  # num_ctx 2048, cut
+
+    source, recorder = ScriptedSource(scenes), Recorder()
+    pipeline = Pipeline(
+        start_command(a),
+        recorder,
+        open_source=lambda spec: (source.open(), source)[1],
+        backend_factory=lambda start: LongPrompt(),
+    )
+    run(pipeline, source)
+
+    assert len(recorder.of(SubtitleTranslated)) >= 2
+    errors = recorder.of(EngineError)
+    assert [(e.kind, e.message, e.fatal) for e in errors] == [
+        (ErrorKind.CONTEXT_FULL, "2047/2048", False)
+    ]
 
 
 def test_unavailable_source_stops_with_an_error() -> None:

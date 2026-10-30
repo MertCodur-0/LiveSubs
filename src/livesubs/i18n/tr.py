@@ -474,6 +474,10 @@ STRINGS: dict[str, str] = {
     "error.ollama_unavailable": "Ollama'ya ulaşılamıyor; yalnızca İngilizce gösteriliyor.",
     "error.model_not_found": "Model yüklü değil: {detail}",
     "error.translation_failed": "Çeviri başarısız: {detail}",
+    "error.context_full": (
+        "Çeviri istemi modelin bağlamını dolduruyor ({detail}); baştaki örnekler kırpılabilir. "
+        "Bağlam satırlarını azaltın ya da profilin örneklerini veya açıklamasını kısaltın."
+    ),
     "error.internal": "Beklenmeyen hata: {detail}",
     "error.engine_crashed": (
         "Çeviri motoru beklenmedik şekilde kapandı ve yeniden başlatıldı. Başlat'a tekrar basın."

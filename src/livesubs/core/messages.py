@@ -88,6 +88,7 @@ class ErrorKind(StrEnum):
     OLLAMA_UNAVAILABLE = "ollama_unavailable"
     MODEL_NOT_FOUND = "model_not_found"
     TRANSLATION_FAILED = "translation_failed"
+    CONTEXT_FULL = "context_full"  # the prompt nearly fills num_ctx: Ollama cuts its start
     INTERNAL = "internal"
 
 

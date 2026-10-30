@@ -170,6 +170,16 @@ def test_streamed_translation(backend: OllamaBackend) -> None:
 
 
 @respx.mock
+def test_prompt_size_is_reported(backend: OllamaBackend) -> None:
+    respx.post(f"{URL}/api/chat").mock(
+        return_value=httpx.Response(
+            200, content=ndjson("Selam.", done_extra={"prompt_eval_count": 321})
+        )
+    )
+    assert backend.translate(TranslationRequest("Hi."), CancelToken()).prompt_tokens == 321
+
+
+@respx.mock
 def test_num_gpu_is_left_to_ollama_by_default() -> None:
     route = respx.post(f"{URL}/api/chat").mock(
         return_value=httpx.Response(200, content=ndjson("Selam."))

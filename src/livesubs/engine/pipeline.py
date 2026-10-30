@@ -75,6 +75,9 @@ log = logging.getLogger(__name__)
 
 FIRST_FRAME_TIMEOUT_S = 5.0
 CAPTURE_MAX_FPS = 30.0
+# Room a translation needs after the prompt; a prompt closer to num_ctx than this gets a warning
+# (a cut prompt reports num_ctx - 1 tokens).
+CONTEXT_MARGIN_TOKENS = 128
 
 SourceOpener = Callable[[Source], FrameSource]
 BackendFactory = Callable[[StartPipeline], TranslationBackend]
@@ -138,6 +141,7 @@ class Pipeline:
         self._lock = threading.Lock()
         self._orchestrator: TranslationOrchestrator | None = None
         self._waiting: tuple[int, str] | None = None
+        self._context_warned = False
 
     def start(self) -> None:
         self._thread.start()
@@ -353,6 +357,7 @@ class Pipeline:
     def _on_translation(self, event: TranslationEvent) -> None:
         match event:
             case LineTranslated(line_id=line_id, source=source, result=result):
+                self._check_context(result.prompt_tokens)
                 self._emit(
                     SubtitleTranslated(
                         line_id=line_id,
@@ -367,6 +372,16 @@ class Pipeline:
                 )
             case LineFailed(error=error):
                 self._emit(EngineError(_error_kind(error), str(error)))
+
+    def _check_context(self, prompt_tokens: int | None) -> None:
+        """Warn once per start when the prompt (nearly) fills ``num_ctx``: Ollama then silently
+        drops its oldest messages, the examples first, and the translations get worse."""
+        num_ctx = self._start.ollama.num_ctx
+        if self._context_warned or prompt_tokens is None:
+            return
+        if prompt_tokens > num_ctx - CONTEXT_MARGIN_TOKENS:
+            self._context_warned = True
+            self._emit(EngineError(ErrorKind.CONTEXT_FULL, f"{prompt_tokens}/{num_ctx}"))
 
     def _fatal(self, kind: ErrorKind, message: str) -> None:
         self._emit(EngineError(kind, message, fatal=True))

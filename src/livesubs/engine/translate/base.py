@@ -41,6 +41,7 @@ class TranslationResult:
     lane: Lane
     elapsed_ms: float
     cached: bool = False
+    prompt_tokens: int | None = None  # the whole prompt, as the backend counted it
 
 
 class TranslationError(Exception):

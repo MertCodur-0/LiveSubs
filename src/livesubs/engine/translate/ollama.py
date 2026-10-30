@@ -81,6 +81,7 @@ class OllamaBackend:
             "options": self._options(),
         }
         parts: list[str] = []
+        prompt_tokens: int | None = None
         if cancel.cancelled:
             raise TranslationCancelledError(request.text)
         try:
@@ -98,6 +99,8 @@ class OllamaBackend:
                         raise TranslationError(chunk["error"])
                     parts.append(chunk.get("message", {}).get("content", ""))
                     if chunk.get("done"):
+                        # The whole prompt, also when Ollama reused a cached prefix of it.
+                        prompt_tokens = chunk.get("prompt_eval_count")
                         break
         except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
             raise BackendUnavailableError(f"Ollama is not reachable: {exc}") from exc
@@ -114,7 +117,9 @@ class OllamaBackend:
         if not text:
             raise TranslationError("the model returned an empty translation")
         elapsed = (time.perf_counter() - started) * 1000
-        return TranslationResult(text, self._model, self._lane, elapsed)
+        return TranslationResult(
+            text, self._model, self._lane, elapsed, prompt_tokens=prompt_tokens
+        )
 
     def load(self) -> None:
         """Load the model into memory (empty prompt)."""

@@ -120,7 +120,9 @@ UI process (PySide6)                                  Engine process (multiproce
   model warms up on a side thread (WARMING_UP), the newest line read meanwhile is translated when
   it is ready (RUNNING) — a real run lost the first subtitles during a 7.5 s warm-up before.
   Without Ollama/model: non-fatal error, English-only mode. Source/OCR missing or source lost:
-  fatal. Region changes reset detection. Source opener and backend factory are injectable (tests
+  fatal. A prompt within 128 tokens of `num_ctx` (Ollama's `prompt_eval_count`, which counts
+  the whole prompt even with a cached prefix; a cut prompt reports `num_ctx - 1`): one non-fatal
+  `CONTEXT_FULL` per start. Region changes reset detection. Source opener and backend factory are injectable (tests
   play sample screenshots as a scripted video).
 - Region stored **normalized (0–1) to the source's frame space** (window client area / monitor /
   video frame), converted to physical pixels with DPI awareness.
