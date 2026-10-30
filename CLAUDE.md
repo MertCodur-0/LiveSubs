@@ -33,6 +33,9 @@ share the PC).
   `\\.\DISPLAY2` laptop panel 2560x1440 @ 150 %, at (1920, -164).
   Only the RTX 4070 is active (no Intel iGPU listed; MUX in dGPU mode), so both displays are on
   the same adapter — no cross-adapter capture copies.
+  **Device names swap (seen 2026-10-30):** the external monitor was then `\\.\DISPLAY2` at (0, 0)
+  and the laptop panel `\\.\DISPLAY1`. Never hard-code a display name; pick by position or
+  `is_primary` (tests and scripts too).
 - **User's primary scenario (updated 2026-10-21):** the game runs on a **console (PS5), not on
   this PC**; its picture reaches the PC through a **capture card** (+ HDMI splitter, or the card's
   passthrough). The PC only runs Windows + LiveSubs, so all of it goes to translation (see
@@ -91,7 +94,8 @@ Dev: pytest, pytest-qt, respx, ruff. Packaging needs no extra tool (embeddable P
 
 ## Architecture
 
-Two processes so the GIL can never let the UI stall the pipeline.
+Separate processes so the GIL can never let the UI stall the pipeline. A capture card has a third
+process of its own, the device host (see "Capture card" below).
 
 ```
 UI process (PySide6)                                  Engine process (multiprocessing)
@@ -172,7 +176,8 @@ UI process (PySide6)                                  Engine process (multiproce
 Designed from the start for three source kinds; video device lands in phase 2.
 
 - `SourceKind`: `WINDOW` (WGC by HWND), `MONITOR` (WGC by monitor; mss fallback),
-  `VIDEO_DEVICE` (capture card via OpenCV `CAP_MSMF`, `CAP_DSHOW` fallback).
+  `VIDEO_DEVICE` (capture card via OpenCV `CAP_MSMF`, read by the device host; the engine reads
+  its shared frames). No DirectShow fallback: MSMF works for the card, DSHOW indices differ.
 - `FrameSource` protocol: `open()`, `close()`, `latest_frame() -> Frame | None` (newest-wins, never
   queues stale frames; raises `SourceLostError` once gone), `wait_for_frame(newer_than, timeout)`
   (for the fast re-read), `info` (kind, name, backend, max fps), `screen_rect() -> Rect | None`
@@ -205,10 +210,50 @@ Designed from the start for three source kinds; video device lands in phase 2.
   -> UI suggests using the OBS preview window as a *window* source), `SourceLostError`.
 - Health signals: black-frame detector emits `BlackFrameWarning` (window/monitor: protected content;
   video device: HDCP hint — PS5: Settings -> System -> HDMI -> disable HDCP).
-- Video device enumeration: device name + supported resolution/fps list (via Media Foundation;
-  candidate libs: WinRT `Windows.Devices.Enumeration` or `cv2-enumerate-cameras` — decide in phase 2).
-  Frames are read directly, no preview window. In calibration mode the current frame is shown in the
-  Inspector for region selection (there is no on-screen frame to draw a region box on).
+
+#### Capture card (steps 9b/15, done 2026-10-30)
+
+- Card: "V-Z632" (USB UVC, VID 345F PID 2130), no HDMI out (a splitter feeds the TV). Modes
+  (ffmpeg dshow): YUY2 and MJPEG, 1920x1080 / 1280x720 / ... up to 60 fps, 2560x1440 at 30.
+  Default and only mode used: **1920x1080 YUY2 at 60** (`VideoDeviceSource.width/height/fps`
+  override it; no mode picker in the UI).
+- `platform/video_devices.py`: `list_video_devices()` through Media Foundation
+  (`MFEnumDeviceSources`, ctypes, COM helpers in `platform/com.py`); list index = OpenCV MSMF
+  index (verified: webcam 0, card 1). DirectShow-only devices (OBS Virtual Camera) are absent.
+- `engine/capture/video_device.py` `VideoDeviceCapture`: own reader thread, `cap.read()` gives
+  a new array per frame. **`OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS=0` must be set before cv2
+  is imported** (open 26 s -> 0.3 s; setting it after the import does nothing) -> set in
+  `livesubs/__init__.py`. A card held by another app (OBS) *opens* fine but never delivers a
+  frame -> `SourceBusyError` after 3 s; 2 s without frames while running -> `SourceLostError`.
+  Windows does **not** share the card between apps (tested: second opener gets no frames).
+  Measured: 60.0 fps, ~30 % of one core for YUY2 -> BGR.
+- `engine/capture/shared_frames.py`: `SharedFrameWriter` / `SharedFrameReader` /
+  `SharedFrameSource` (a `FrameSource`): named shared memory, 3 slots, seqlock per slot (no torn
+  frames, tested under a concurrent writer); reader attaches with `track=False`; a closed flag
+  and a 3 s staleness check raise `SourceLostError`. 1080p: write 0.2 ms, read (copy) 0.9 ms.
+  `StartPipeline.shared_frames` names the buffer; `factory.open_source` builds the source.
+- `device/host.py`: `device_main` (Qt event loop for the preview, commands polled every 20 ms,
+  log `device.log`) + `DeviceWorker` thread: keeps the wanted card open, retries every 2 s while
+  busy/missing (one `DeviceFailed` per kind), reopens after a loss with a **new** buffer name,
+  reports a picture black for 3 s (`SignalChanged`). `DeviceHost` = `ChildProcess`
+  (`core/child_process.py`, shared with `EngineProcess`). Messages in `device/messages.py`.
+- `device/preview.py` `PreviewWindow`: frameless full screen on a monitor, stretched to fill
+  (no bars), blank cursor, `win32.keep_display_awake` (`SetThreadExecutionState`), capturable
+  (no WDA flag). Esc / double-click / Alt+F4 hide it and turn the setting off. Measured: 60
+  paints/s, 0.7 ms per paint (QPainter is enough, no GPU path needed); host ~0.6 of one core.
+- UI (`ui/capture_card.py` `CaptureCard`): wanted card = pipeline > region snapshot > preview;
+  host started on first need, watchdog restarts it. `config.preview` (`PreviewSettings`:
+  enabled, device "" = the active profile's card, monitor "" = primary), Settings group
+  "Yakalama kartı önizlemesi", tray toggle. Start on a card waits for `DeviceOpened` ("Yakalama
+  kartı açılıyor…"); a lost card (engine `SOURCE_LOST`) resumes when the card is back. The card
+  is released only on Stop, a start on another source, a fatal error — **not** on `STOPPED`,
+  which the engine also sends for a pipeline replaced by a new start. Region: a mark on the
+  preview -> card (`pick.resolve_card`, the preview monitor = the frame); no preview -> still
+  frame dialog (`ui/frame_region.py`). The host's windows are never offered as sources.
+- Exclusive-fullscreen warning: unaffected (only `QUNS_RUNNING_D3D_FULL_SCREEN`; the preview is a
+  plain Qt window).
+- Audio of the card is not played (the TV has it via the splitter).
+- Not done: the latency loopback measurement (user: later).
 
 ### Translation
 
@@ -457,17 +502,19 @@ src/livesubs/
   app.py, __main__.py, i18n/
   assets/      icon.svg, icon.ico, header.svg, arrow_*.svg, fonts/ (+ OFL licenses) — package data
   core/        config.py, profiles.py, paths.py, jsonio.py, geometry.py, messages.py, backup.py,
-               translation_pack.py
+               translation_pack.py, child_process.py, logs.py
+  device/      host.py (device host process), messages.py, preview.py
   engine/      process.py, pipeline.py
-    capture/   base.py, wgc.py, mss_fallback.py, factory.py, video_device.py (phase 2)
+    capture/   base.py, wgc.py, mss_fallback.py, factory.py, video_device.py, shared_frames.py
     vision/    preprocess.py, change.py
     ocr/       winrt_ocr.py, language.py
     text/      normalize.py, filters.py, stabilizer.py
     translate/ base.py, ollama.py, orchestrator.py, prompt.py, cache.py
   ollama/      client.py, catalog.py, install.py, vram.py, compare.py
-  platform/    win32.py, hotkeys.py, shortcuts.py, gpu.py
+  platform/    win32.py, hotkeys.py, shortcuts.py, gpu.py, com.py, video_devices.py
   ui/          main_window.py, header.py, icon.py, qr.py, overlay.py, region_frame.py, inspector.py,
-               tray.py, setup_check.py, single_instance.py, tabs/, theme/ (base.qss, vice.json, dark.json)
+               tray.py, setup_check.py, single_instance.py, capture_card.py, frame_region.py,
+               tabs/, theme/ (base.qss, vice.json, dark.json)
   web/         server.py, feed.py, static/index.html
 tests/         samples/ (+ samples.json), helpers/, test_*.py
 scripts/       build_exe.ps1, embedded/ (sitecustomize.py, smoke_test.py), create_shortcut.ps1,
@@ -486,9 +533,8 @@ Phase 1 — working core (source -> region -> OCR -> GPU translation -> overlay)
 - [x] 7. Translation: Ollama backend, prompt, cache, orchestrator (GPU lane) + mocked-HTTP tests
 - [x] 8. Engine process + IPC
 - [x] 9. Minimal UI: source pick, drag-select region, Start/Stop, live feed, overlay  => core done
-- [ ] 9b. **= step 15** (capture card is the user's main source): video device source, then a
-  low-latency fullscreen preview window for it. **Postponed** (2026-10-22): the user has not
-  bought the card yet — see "Next up".
+- [x] 9b. **= step 15** (capture card is the user's main source): video device source, device
+  host process, full-screen preview — 2026-10-30.
 
 Phase 2 — features
 - [x] 10. Calibration mode (F8): movable region frame, Inspector, overlay move/resize; hotkeys (+ appearance tab, user request)
@@ -498,7 +544,8 @@ Phase 2 — features
 - [~] 13. CPU quality mode — dropped by the user (2026-10-22)
 - [x] 14. Settings tab (incl. recording mode + overlap warning), tray, fullscreen warning,
   startup checks (setup dialog) — 2026-10-22
-- [ ] 15. Video device source (capture card): enumerate, resolution/fps, busy/HDCP errors, inspector region pick (done as 9b)
+- [x] 15. Video device source (capture card): enumerate, busy/lost/black errors, region on the
+  preview or a still frame (done as 9b, 2026-10-30)
 - [x] 16. Vice theme, fonts, SVG icon/header, overlay styles — 2026-10-22
 - [x] 17. Web output + QR (+ Screen Wake Lock), phone-only mode — 2026-10-23
 
@@ -525,8 +572,8 @@ First **finish the app** (each step committed and pushed; no new release unless 
 **Afterwards:**
 - **Claude API translation backend** — a second `TranslationBackend` next to Ollama (the
   protocol was built for it): API key in settings, model choice, cost/latency shown in the feed.
-- **Capture card** (steps 9b/15) once the user has the card: video device source, low-latency
-  fullscreen preview window, HDCP/busy-device errors.
+- ~~Capture card (steps 9b/15)~~ done 2026-10-30. Open: test with the HDMI splitter once it
+  arrives (must hand the card 1080p, HDCP stripped or off); latency loopback measurement (later).
 
 ## Known risks
 
@@ -817,3 +864,18 @@ First **finish the app** (each step committed and pushed; no new release unless 
   open it), then video_device.py, then the capture process + preview. User also wants the
   card's latency measured: HDMI loopback from the PC (our own flashing pattern -> card -> our
   capture) for the card's share, a phone slow-motion video for button-to-screen total.
+- 2026-10-30: **Capture card done** (steps 9b/15; details under "Capture card"). Measured with
+  the PS5 home screen: 60 fps into shared memory and the preview, frame age at the reader
+  < 100 ms, preview filled DISPLAY-external edge to edge and was visible to mss (so to a light
+  strip app). End to end with the real UI, engine and device host: preview 0.6 s, card open
+  0.8 s after start-up, `FrameInfo` 1920x1080 right after Start. Real-card tests run with
+  `LIVESUBS_TEST_VIDEO_DEVICE=V-Z632` (marked `capture`). Scripts that spawn our processes must
+  keep module-level side effects under `if __name__ == "__main__"`: spawn re-runs the script
+  in each child (an e2e script made a new LIVESUBS_HOME per process that way).
+- 2026-10-30: **Children outlived a killed UI** (found running the packaged exe with the preview
+  on, then killing the UI): engine and device host kept running (`daemon=True` only covers a
+  clean exit) -> the card would stay locked and the preview stuck on screen. Both now call
+  `core.child_process.exit_with_parent()` (waits on the parent's sentinel, then `os._exit`);
+  `tests/test_child_process.py` kills a stand-in UI and fails without it. Packaged build
+  verified: device host and engine start from LiveSubs.exe, card open in 0.4 s; the build's
+  smoke test now covers MF listing, shared frames, the preview and the MSMF env var.

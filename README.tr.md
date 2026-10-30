@@ -9,10 +9,11 @@
 
 [English](README.md)
 
-LiveSubs, bir oyun penceresinin ya da monitörün altyazı bölgesini Windows'un yerleşik OCR'ı ile
-okur. Her satırı [Ollama](https://ollama.com) üzerinden yerel bir dil modeliyle çevirir ve
-çeviriyi oyunun üstünde, tıklamaları engellemeyen bir katmanda (overlay) ya da telefonunda
-gösterir. Bulut servisi kullanmaz: yakalama, OCR ve çeviri tamamen kendi bilgisayarında çalışır.
+LiveSubs, bir oyun penceresinin, monitörün ya da HDMI yakalama kartından gelen konsol görüntüsünün
+altyazı bölgesini Windows'un yerleşik OCR'ı ile okur. Her satırı [Ollama](https://ollama.com)
+üzerinden yerel bir dil modeliyle çevirir ve çeviriyi oyunun üstünde, tıklamaları engellemeyen bir
+katmanda (overlay) ya da telefonunda gösterir. Bulut servisi kullanmaz: yakalama, OCR ve çeviri
+tamamen kendi bilgisayarında çalışır.
 
 ![Ana pencere: İngilizce satırlar, Türkçe çevirileri ve süreleriyle canlı akış](docs/images/live.png)
 
@@ -22,6 +23,10 @@ gösterir. Bulut servisi kullanmaz: yakalama, OCR ve çeviri tamamen kendi bilgi
 
 - **Her oyun, her kaynak.** Altyazının çıktığı yeri hangi ekranda olursa olsun fareyle çizersin.
   Altındaki pencere (ya da monitörün tamamı) kaynak olur; pencere taşınırsa onu takip eder.
+- **Yakalama kartıyla konsollar.** PS5 (ya da herhangi bir HDMI kaynağı) USB yakalama kartı
+  üzerinden: kartı LiveSubs açar ve görüntüsünü bir PC monitöründe, çeviriden bağımsız olarak
+  kenardan kenara tam ekran gösterebilir; örneğin o ekranı okuyan bir TV arkası ışık
+  (Ambilight) uygulaması için.
 - **Hareketli arka planda bile okur.** Renk ve yerel kontrast maskesi yalnızca altyazı
   rengindeki ince çizgileri bırakır; parlak gökyüzü, yol ve arayüz öğeleri yok sayılır. Bir
   karede seçilemeyen kelimeler sonraki karelerden tamamlanır ve satır yerinde güncellenir.
@@ -55,8 +60,11 @@ flowchart LR
         WEB[Web sunucusu<br/>SSE + QR]
         MM[Model yöneticisi]
     end
+    subgraph DEV["Cihaz süreci"]
+        CARD[Yakalama kartı<br/>Media Foundation, 60 fps] --> PRE[Tam ekran<br/>önizleme]
+    end
     subgraph ENG["Motor süreci"]
-        CAP[Yakalama<br/>WGC / mss] --> VIS[Renk maskesi +<br/>değişim algılama]
+        CAP[Yakalama<br/>WGC / mss /<br/>kart kareleri] --> VIS[Renk maskesi +<br/>değişim algılama]
         VIS --> OCR[Windows OCR]
         OCR --> TXT[Temizleme, filtre,<br/>2 okuma onayı]
         TXT --> TR[Çeviri kuyruğu<br/>+ önbellek]
@@ -65,16 +73,22 @@ flowchart LR
     MM <--> OL
     MW -- komutlar --> ENG
     ENG -- olaylar --> MW
+    MW -- komutlar --> DEV
+    CARD -.->|paylaşımlı bellek| CAP
     MW --> OV
     MW --> WEB
     WEB -.->|Wi-Fi| PHONE[Telefon]
 ```
 
-- **İki süreç.** Yakalama, OCR ve çeviri ayrı bir motor sürecinde çalışır; arayüz meşgul olsa da
-  onları durduramaz. İki süreç `multiprocessing` kuyrukları üzerinden tipli mesajlarla
-  haberleşir.
+- **Ayrı süreçler.** Yakalama, OCR ve çeviri ayrı bir motor sürecinde çalışır; arayüz meşgul
+  olsa da onları durduramaz. Yakalama kartını üçüncü bir süreç, cihaz süreci açar: Windows bir
+  kartı aynı anda tek uygulamaya verir ve önizleme, çeviri durduğunda ya da motor yeniden
+  başladığında da kesilmemelidir. Süreçler `multiprocessing` kuyrukları üzerinden tipli
+  mesajlarla haberleşir; kartın kareleri (1080p60) paylaşımlı bellekten geçer ve motor en
+  yenisini kendi hızında alır.
 - **Yakalama:** Windows Graphics Capture (kopyasız kareler, pencerenin iç alanına kırpılır),
-  gerekirse GDI ile yedek yakalama.
+  gerekirse GDI ile yedek yakalama. Yakalama kartları OpenCV'nin Media Foundation arka ucuyla
+  sıkıştırmasız YUY2 olarak okunur (ölçülen: 1080p'de kesintisiz 60 fps, ~0,3 sn'de açılır).
 - **Görüntü:** kareler arasında yalnızca yazı maskesi karşılaştırılır; hareket eden arka plan
   yeniden okumayı tetiklemez. Yeni bir satırın kabul edilmesi için iki okumanın aynı sonucu
   vermesi gerekir.
@@ -144,13 +158,18 @@ yönetici izni gerekmez ve anti-cheat sistemlerine takılmaz.
 - **Telefon:** Ayarlar → *Telefonda göster*. QR kodu okut; telefon bilgisayarla aynı Wi-Fi'da
   olmalı. Windows ilk seferde güvenlik duvarı izni sorar; *Özel ağlar*'a izin ver. *Çeviriyi
   yalnızca telefonda göster* seçeneği bilgisayardaki çeviriyi kapatır.
+- **Yakalama kartı (konsol):** kaynak olarak *Yakalama kartı: <ad>*'ı seç ya da Ayarlar →
+  *Yakalama kartı önizlemesi*'ni açıp bölgeyi tam ekran önizlemenin üzerine çiz. Önizleme
+  kapalıysa *Altyazı bölgesini seç*, kartın anlık görüntüsünü gösterir ve bölgeyi onun üzerine
+  çizersin. Kartı aynı anda tek uygulama kullanabilir; OBS'i kapat (LiveSubs kart boşalır
+  boşalmaz onu açar). Görüntü simsiyahsa sebep genellikle HDCP'dir: PS5'te Ayarlar → Sistem →
+  HDMI → *HDCP'yi Etkinleştir*'i kapat. Önizlemeyi kapatmak için üzerinde Esc'ye bas.
 - **Profiller:** her oyuna bir profil: bağlam ("80'lerde geçen argolu bir suç hikâyesi"),
   isim ve terim sözlüğü, oyunun nerede çalıştığı (VRAM payını belirler) ve çevirinin hangi
   ekranda gösterileceği.
 
 ## Yol haritası
 
-- Capture kartı (konsol, HDMI yakalama) desteği ve düşük gecikmeli önizleme penceresi
 - Ollama'ya alternatif olarak Claude API ile çeviri
 - Başka hedef diller
 

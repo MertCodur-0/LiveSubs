@@ -3,7 +3,8 @@
 LiveSubs.exe is a windowless pythonw.exe, so the result goes to the report file: "ok" plus the
 loaded Qt plugins, or the traceback. Exercises the native parts that a trimmed or incomplete
 package would break: Qt widgets, the theme with its bundled fonts and SVG art, the SVG/image
-plugins, OpenCV, WinRT OCR, windows-capture and the UI and engine modules.
+plugins, OpenCV, WinRT OCR, windows-capture, the capture card parts (Media Foundation listing,
+shared frames, the preview) and the UI and engine modules.
 """
 
 import sys
@@ -38,13 +39,32 @@ def check() -> list[str]:
     painter.drawPath(path)
     painter.end()
 
+    import os
+
     import windows_capture  # noqa: F401
 
+    from livesubs.device.host import DeviceHost  # noqa: F401
+    from livesubs.device.preview import PreviewWindow
+    from livesubs.engine.capture.shared_frames import SharedFrameReader, SharedFrameWriter
+    from livesubs.engine.capture.video_device import VideoDeviceCapture  # noqa: F401
     from livesubs.engine.ocr.winrt_ocr import WinRtOcr
     from livesubs.engine.process import EngineProcess  # noqa: F401
+    from livesubs.platform.video_devices import list_video_devices
     from livesubs.ui.main_window import MainWindow  # noqa: F401
     from livesubs.ui.qr import qr_pixmap
     from livesubs.web.server import FONT, render_page
+
+    # Capture card: OpenCV's MSMF must open cards fast (set before cv2 is imported), Media
+    # Foundation must list devices, frames must cross shared memory, the preview must paint.
+    assert os.environ.get("OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS") == "0"
+    list_video_devices()
+    writer = SharedFrameWriter(32, 18)
+    reader = SharedFrameReader(writer.name)
+    writer.write(np.full((18, 32, 3), 7, np.uint8), 1.0)
+    assert int(reader.read()[1].image[0, 0, 0]) == 7
+    reader.close()
+    writer.close()
+    assert not PreviewWindow().grab().isNull()
 
     WinRtOcr().recognize(np.full((40, 200), 255, np.uint8))
     assert b"EventSource" in render_page() and FONT.is_file()  # package data of the phone page

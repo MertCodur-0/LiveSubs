@@ -9,10 +9,11 @@
 
 [Türkçe](README.tr.md)
 
-LiveSubs reads the subtitle area of a game window or monitor with Windows' built-in OCR,
-translates each line with a local LLM through [Ollama](https://ollama.com), and shows the
-translation in a click-through overlay on top of the game, or on your phone. It uses no cloud
-APIs: capture, OCR and translation all run on your own PC.
+LiveSubs reads the subtitle area of a game window, a monitor or a console's picture coming in
+through an HDMI capture card with Windows' built-in OCR, translates each line with a local LLM
+through [Ollama](https://ollama.com), and shows the translation in a click-through overlay on top of
+the game, or on your phone. It uses no cloud APIs: capture, OCR and translation all run on your own
+PC.
 
 ![Main window: live feed with English lines, their Turkish translations and timings](docs/images/live.png)
 
@@ -22,6 +23,9 @@ APIs: capture, OCR and translation all run on your own PC.
 
 - **Any game, any source.** Draw a box around the subtitles on any screen. LiveSubs picks the
   window under it (or the whole monitor) and keeps following it when the window moves.
+- **Consoles through a capture card.** A PS5 (or any HDMI source) through a USB capture card:
+  LiveSubs owns the card and can show its picture full screen on a PC monitor, edge to edge and
+  independent of translation, for example for a TV light strip app that samples that screen.
 - **Reads subtitles over busy backgrounds.** A colour + local-contrast mask keeps only
   subtitle-coloured strokes, so bright skies, roads and HUDs are ignored. Words hidden on one
   frame are picked up from later ones, and the line is upgraded in place.
@@ -55,8 +59,11 @@ flowchart LR
         WEB[Web server<br/>SSE + QR]
         MM[Model manager]
     end
+    subgraph DEV["Device host process"]
+        CARD[Capture card<br/>Media Foundation, 60 fps] --> PRE[Full-screen<br/>preview]
+    end
     subgraph ENG["Engine process"]
-        CAP[Capture<br/>WGC / mss] --> VIS[Colour mask +<br/>change detection]
+        CAP[Capture<br/>WGC / mss /<br/>card frames] --> VIS[Colour mask +<br/>change detection]
         VIS --> OCR[Windows OCR]
         OCR --> TXT[Normalize, filter,<br/>2-read stabilizer]
         TXT --> TR[Translation queue<br/>+ cache]
@@ -65,15 +72,21 @@ flowchart LR
     MM <--> OL
     MW -- commands --> ENG
     ENG -- events --> MW
+    MW -- commands --> DEV
+    CARD -.->|shared memory| CAP
     MW --> OV
     MW --> WEB
     WEB -.->|Wi-Fi| PHONE[Phone]
 ```
 
-- **Two processes.** Capture, OCR and translation run in an engine process, so a busy UI can
-  never stall them. The two processes exchange typed messages over `multiprocessing` queues.
+- **Separate processes.** Capture, OCR and translation run in an engine process, so a busy UI
+  can never stall them. A capture card is owned by a third process, the device host: Windows lets
+  only one app read a card, and its preview must keep running while translation is stopped or
+  the engine restarts. Processes exchange typed messages over `multiprocessing` queues; card
+  frames (1080p60) go through shared memory, and the engine takes the newest one at its own pace.
 - **Capture:** Windows Graphics Capture (zero-copy frames, cropped to the client area), with a GDI
-  fallback.
+  fallback. Capture cards are read through OpenCV's Media Foundation backend as uncompressed
+  YUY2 (measured: steady 60 fps at 1080p, opens in ~0.3 s).
 - **Vision:** only the text mask is compared between frames, so a moving background never
   triggers a re-read. A new line needs two agreeing reads.
 - **Translation:** Ollama `/api/chat` streaming with a few-shot prompt, temperature 0, an LRU +
@@ -138,6 +151,12 @@ rights are needed and anti-cheat systems are not bothered.
 - **Phone:** Settings → *Telefonda göster*. Scan the QR code; the phone must be on the same
   Wi-Fi network, and Windows asks once for firewall access (allow *Private networks*).
   *Show the translation only on the phone* turns the PC overlay off.
+- **Capture card (console):** pick *Yakalama kartı: <name>* as the source, or turn on Settings →
+  *Yakalama kartı önizlemesi* and draw the region on the full-screen preview. Without a preview,
+  *Select the subtitle region* shows a still frame of the card to draw on. The card can be used by
+  one app at a time, so close OBS (LiveSubs opens the card as soon as it is free). A black picture
+  usually means HDCP: on a PS5, turn off Settings → System → HDMI → *Enable HDCP*. Press Esc on the
+  preview to close it.
 - **Profiles:** one per game: context ("gritty crime story set in the 80s"), a glossary of
   names and terms, where the game runs (sets the VRAM reserve), and which screen the overlay
   goes to.
@@ -146,7 +165,6 @@ The UI is in Turkish (strings live in `livesubs/i18n`, ready for translation).
 
 ## Roadmap
 
-- Capture cards (consoles via HDMI capture), with a low-latency preview window
 - A Claude API translation backend as an alternative to Ollama
 - More target languages
 
@@ -171,6 +189,7 @@ screenshots used by the OCR tests are game footage, so they are not in the repos
 ```
 src/livesubs/
   core/        config, profiles, IPC messages, geometry
+  device/      device host process: capture card, shared frames, full-screen preview
   engine/      engine process: capture/, vision/, ocr/, text/, translate/
   ollama/      REST client, model catalog, VRAM estimate, model comparison
   platform/    Win32 helpers, hotkeys, GPU (DXGI), shortcuts
