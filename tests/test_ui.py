@@ -1069,14 +1069,35 @@ def test_system_theme_follows_windows_live(
 
 
 def test_sidebar_switches_pages(window: MainWindow) -> None:
-    titles = [window.nav.item(i).text() for i in range(window.nav.count())]
-    assert len(titles) == window.pages.count() == 5
-    for index in range(window.nav.count()):
-        window.show_page(index)
+    titles = [button.text() for button in window.nav_buttons]
+    keys = ("tab.live", "tab.appearance", "tab.profiles", "tab.models", "tab.settings")
+    assert titles == [t(k) for k in keys]
+    assert window.pages.count() == 5
+    for index, button in enumerate(window.nav_buttons):
+        assert not button.icon().isNull()
+        button.click()
         assert window.pages.currentIndex() == index
+        assert button.isChecked()
+        assert sum(b.isChecked() for b in window.nav_buttons) == 1
         title = window.pages.currentWidget().findChild(QLabel, "pageTitle")
         assert title is not None and title.text() == titles[index]
     window.show_page(0)
+    assert window.nav_buttons[0].isChecked()
+
+
+def test_sidebar_status(window: MainWindow) -> None:
+    window._on_models(None)  # the fixture's Ollama check finds nothing either
+    assert window.status_text.text() == t("sidebar.ollama_off")
+    assert window.status_dot.property("state") == "warn"
+    window._on_models([])
+    assert window.status_text.text() == t("sidebar.stopped")
+    engine_of(window).queue.append(StateChanged(EngineState.RUNNING))
+    window._poll()
+    assert window.status_text.text() == t("sidebar.running")
+    assert window.status_dot.property("state") == "ok"
+    engine_of(window).queue.append(StateChanged(EngineState.PAUSED))
+    window._poll()
+    assert window.status_text.text() == t("sidebar.paused")
 
 
 def test_start_button_shows_the_running_state(window: MainWindow) -> None:

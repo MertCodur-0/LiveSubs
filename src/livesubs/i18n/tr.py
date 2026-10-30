@@ -33,6 +33,10 @@ STRINGS: dict[str, str] = {
     "overlay.sample_original": "Get your ass in the car, bro. The cops are coming!",
     # Appearance tab
     "tab.live": "Canlı",
+    "sidebar.running": "Çalışıyor",
+    "sidebar.paused": "Duraklatıldı",
+    "sidebar.stopped": "Durdu",
+    "sidebar.ollama_off": "Ollama kapalı",
     "live.source_card": "Kaynak ve model",
     "live.feed_card": "Canlı akış",
     "header.tagline": "Oyun altyazıları için canlı Türkçe çeviri",

@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QRectF
-from PySide6.QtGui import QPainter, QPaintEvent, QPixmap, QResizeEvent
+from PySide6.QtGui import QLinearGradient, QPainter, QPaintEvent, QPixmap, QResizeEvent
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
@@ -15,6 +15,7 @@ from livesubs.ui.icon import render
 
 HEIGHT = 48
 ICON_PX = 24
+ART_OPACITY = 0.8
 
 
 class Header(QWidget):
@@ -63,10 +64,20 @@ class Header(QWidget):
         pixmap.fill(self._theme.color("sidebar"))
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        # Right-aligned at full height; the art's left edge fades into the sidebar color.
+        # Right-aligned at full height and dimmed; a fade to the sidebar color keeps the name
+        # readable over its left part.
         view = self._art.viewBoxF()
         scale = self.height() / view.height()
         width = view.width() * scale
+        painter.setOpacity(ART_OPACITY)
         self._art.render(painter, QRectF(self.width() - width, 0, width, self.height()))
+        painter.setOpacity(1.0)
+        fade = QLinearGradient(0, 0, self.width(), 0)
+        solid, clear = self._theme.color("sidebar"), self._theme.color("sidebar")
+        clear.setAlpha(0)
+        fade.setColorAt(0.0, solid)
+        fade.setColorAt(0.55, solid)
+        fade.setColorAt(1.0, clear)
+        painter.fillRect(self.rect(), fade)
         painter.end()
         return pixmap

@@ -19,14 +19,14 @@ from PySide6.QtCore import QCoreApplication, QEvent, QObject, QSize, Qt, QTimer,
 from PySide6.QtGui import QCloseEvent, QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QButtonGroup,
     QComboBox,
+    QFrame,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QListWidget,
-    QListWidgetItem,
     QMainWindow,
     QMessageBox,
     QPushButton,
@@ -77,7 +77,7 @@ from livesubs.i18n import t
 from livesubs.ollama.client import DEFAULT_URL, InstalledModel, list_models, start_ollama
 from livesubs.platform import win32
 from livesubs.platform.video_devices import list_video_devices
-from livesubs.ui import screens
+from livesubs.ui import icons, screens
 from livesubs.ui import theme as themes
 from livesubs.ui.capture_card import CaptureCard, Host
 from livesubs.ui.frame_region import FrameRegionDialog
@@ -107,8 +107,8 @@ FOLLOW_MS = 300
 FULLSCREEN_CHECK_MS = 3000
 WEB_STATUS_MS = 2000
 ENGINE_CHECK_MS = 1000
-SIDEBAR_WIDTH = 210
-NAV_ITEM_HEIGHT = 32
+SIDEBAR_WIDTH = 200
+NAV_ICON_PX = 18
 PAGE_MARGINS = (28, 22, 28, 14)
 ACTIVE_STATES = (
     EngineState.STARTING,
@@ -226,7 +226,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle(f"{APP_NAME} {__version__}")
         self.setWindowIcon(app_icon())
-        self.resize(1000, 720)
+        self.resize(1000, 680)
         self._engine = engine
         self._config = config or load_config()
         self._store = store or ProfileStore()
@@ -239,6 +239,7 @@ class MainWindow(QMainWindow):
         self._rows: dict[int, int] = {}
         self._translations: dict[int, str] = {}
         self._clear_generation = 0
+        self._ollama_ok: bool | None = None  # None until the first check
         self._reads = 0  # lines read since Start: tells "running" from "waiting for subtitles"
         # The capture card: the device host owns it; a start on it waits until it is open.
         self._card = CaptureCard(self._config.preview, card_host)
@@ -279,6 +280,7 @@ class MainWindow(QMainWindow):
         self.tray.show()
 
         self._build()
+        self._update_status()
         self.refresh_sources()
         self._update_region_label()
         self._hotkeys: HotkeyManager | None = None
@@ -432,34 +434,55 @@ class MainWindow(QMainWindow):
 
         # macOS Settings style: a sidebar picks the page, each page has a large title. Long
         # pages scroll instead of squeezing their rows on short screens (Models scrolls itself).
-        self.nav = QListWidget(objectName="nav")
-        self.nav.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.nav.setSpacing(1)
         self.pages = QStackedWidget()
-        for page, title, scrolls in (
-            (live, "tab.live", False),
-            (self.models, "tab.models", False),
-            (self.appearance, "tab.appearance", True),
-            (self.profiles, "tab.profiles", True),
-            (self.settings, "tab.settings", True),
+        self._nav_group = QButtonGroup(self)
+        self.nav_buttons: list[QPushButton] = []
+        for index, (page, key, icon, scrolls) in enumerate(
+            (
+                (live, "tab.live", "live", False),
+                (self.appearance, "tab.appearance", "appearance", True),
+                (self.profiles, "tab.profiles", "profiles", True),
+                (self.models, "tab.models", "models", False),
+                (self.settings, "tab.settings", "settings", True),
+            )
         ):
-            item = QListWidgetItem(t(title))
-            item.setSizeHint(QSize(0, NAV_ITEM_HEIGHT))  # QSS padding does not size list rows
-            self.nav.addItem(item)
-            self.pages.addWidget(_page(t(title), page, scrolls=scrolls))
-        self.nav.currentRowChanged.connect(self.pages.setCurrentIndex)
-        self.nav.setCurrentRow(0)
+            button = QPushButton(t(key), objectName="navButton", checkable=True)
+            button.setProperty("icon_name", icon)
+            button.setIconSize(QSize(NAV_ICON_PX, NAV_ICON_PX))
+            button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            button.clicked.connect(lambda _=False, i=index: self.show_page(i))
+            self._nav_group.addButton(button, index)
+            self.nav_buttons.append(button)
+            self.pages.addWidget(_page(t(key), page, scrolls=scrolls))
         self._fill_profile_combo()
 
         self.header = Header(self._theme)
+        self.status_dot = QLabel("●", objectName="statusDot")
+        self.status_text = QLabel(objectName="statusText")
+        status = QHBoxLayout()
+        status.setContentsMargins(8, 0, 8, 0)
+        status.setSpacing(6)
+        status.addWidget(self.status_dot)
+        status.addWidget(self.status_text, 1)
+        settings_line = QFrame(objectName="separator")
         sidebar = QWidget(objectName="sidebar")
         sidebar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         sidebar.setFixedWidth(SIDEBAR_WIDTH)
         side = QVBoxLayout(sidebar)
-        side.setContentsMargins(12, 22, 12, 12)
-        side.setSpacing(20)
+        side.setContentsMargins(8, 12, 8, 12)
+        side.setSpacing(2)
         side.addWidget(self.header)
-        side.addWidget(self.nav, 1)
+        side.addSpacing(12)
+        for button in self.nav_buttons[:-1]:
+            side.addWidget(button)
+        side.addStretch(1)
+        side.addWidget(settings_line)
+        side.addSpacing(6)
+        side.addWidget(self.nav_buttons[-1])  # Settings: apart at the bottom
+        side.addSpacing(10)
+        side.addLayout(status)
+        self._tint_nav()
+        self.show_page(0)
 
         central = QWidget()
         row = QHBoxLayout(central)
@@ -470,8 +493,29 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
 
     def show_page(self, index: int) -> None:
-        """Select a sidebar page (0 = Live, then Models, Appearance, Profiles, Settings)."""
-        self.nav.setCurrentRow(index)
+        """Select a sidebar page (0 = Live, then Appearance, Profiles, Models, Settings)."""
+        self.nav_buttons[index].setChecked(True)
+        self.pages.setCurrentIndex(index)
+
+    def _tint_nav(self) -> None:
+        """Sidebar icons in the theme's text color (redrawn on a theme change)."""
+        color = self._theme.color("text")
+        for button in self.nav_buttons:
+            button.setIcon(icons.icon(button.property("icon_name"), color, NAV_ICON_PX))
+
+    def _update_status(self) -> None:
+        """The sidebar's dot: translating, paused, Ollama off, or stopped."""
+        if self._state in ACTIVE_STATES or self._card_waiting:
+            paused = self._state == EngineState.PAUSED
+            state, text = ("warn", "sidebar.paused") if paused else ("ok", "sidebar.running")
+        elif self._ollama_ok is False:
+            state, text = "warn", "sidebar.ollama_off"
+        else:
+            state, text = "idle", "sidebar.stopped"
+        self.status_text.setText(t(text))
+        if self.status_dot.property("state") != state:
+            self.status_dot.setProperty("state", state)  # colored by the theme
+            themes.repolish(self.status_dot)
 
     # --- settings tab, tray and warnings ----------------------------------------------------------
 
@@ -490,6 +534,7 @@ class MainWindow(QMainWindow):
         self._theme = themes.apply_theme(choice)
         self.header.set_theme(self._theme)
         themes.set_glow(self.start_button, self._theme)
+        self._tint_nav()
 
     def _on_color_scheme(self) -> None:
         """Windows switched light/dark: follow it when the theme is "system"."""
@@ -907,6 +952,8 @@ class MainWindow(QMainWindow):
         threading.Thread(target=work, daemon=True).start()
 
     def _on_models(self, models: list[InstalledModel] | None) -> None:
+        self._ollama_ok = models is not None
+        self._update_status()
         if models is None:
             self.ollama_label.setText(t("ollama.offline"))
             self.ollama_button.show()
@@ -1095,6 +1142,7 @@ class MainWindow(QMainWindow):
         self._show_running(running)
         self.tray.set_running(running)
         self.models.set_busy(state in ACTIVE_STATES)
+        self._update_status()
         if state in (EngineState.PAUSED, EngineState.STOPPED) and not self._calibrating:
             self._overlay.clear()
             if self._web is not None:
