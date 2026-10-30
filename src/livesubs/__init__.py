@@ -7,5 +7,5 @@ import os
 # Set here, before any module imports cv2; child processes inherit it.
 os.environ.setdefault("OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS", "0")
 
-__version__ = "0.5.2"
+__version__ = "0.6.0"
 APP_NAME = "LiveSubs"

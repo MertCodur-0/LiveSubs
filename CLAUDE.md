@@ -1019,3 +1019,5 @@ First **finish the app** (each step committed and pushed; no new release unless 
   active (fails on the old code).
 - 2026-10-30: **Released v0.5.2** (user's request): the (i) explanations show while another
   app has focus.
+- 2026-10-30: **Capture card sound** (user: may play from the preview instead of the TV;
+  details under "Capture card" -> Sound). **Released v0.6.0** (user's request).
