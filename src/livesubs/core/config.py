@@ -70,6 +70,8 @@ class AppConfig(SettingsModel):
     preview: PreviewSettings = Field(default_factory=PreviewSettings)
     # Lets OBS and screenshots see the overlay (for recordings); OCR may then read it back.
     recording_mode: bool = False
+    # The Live feed as the table with time, model and timings instead of the plain list.
+    developer_view: bool = False
     # None = detect the GPU's VRAM; set it when detection is wrong.
     total_vram_gb: float | None = Field(None, gt=0, le=256)
 

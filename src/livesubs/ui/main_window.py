@@ -81,6 +81,7 @@ from livesubs.platform.video_devices import list_video_devices
 from livesubs.ui import icons, rows, screens
 from livesubs.ui import theme as themes
 from livesubs.ui.capture_card import CaptureCard, Host
+from livesubs.ui.feed import FeedList
 from livesubs.ui.frame_region import FrameRegionDialog
 from livesubs.ui.header import Header
 from livesubs.ui.hotkeys import HotkeyManager
@@ -422,8 +423,14 @@ class MainWindow(QMainWindow):
         self.feed.setWordWrap(True)
         self.feed.setShowGrid(False)
         self.feed.verticalHeader().hide()
+        # The list for reading, the table (time, model, timings) in the developer view.
+        self.feed_list = FeedList()
+        self.feed_stack = QStackedWidget()
+        self.feed_stack.addWidget(self.feed_list)
+        self.feed_stack.addWidget(self.feed)
+        self._show_feed_view()
         feed_card = QGroupBox(t("live.feed_card"))
-        QVBoxLayout(feed_card).addWidget(self.feed)
+        QVBoxLayout(feed_card).addWidget(self.feed_stack)
         layout.addWidget(feed_card, 1)
 
         self.appearance = AppearanceTab(self._profile.overlay)
@@ -442,6 +449,7 @@ class MainWindow(QMainWindow):
         self.settings.clear_cache_requested.connect(self.clear_cache)
         self.settings.open_logs_requested.connect(self._open_logs)
         self.settings.setup_requested.connect(self.open_setup)
+        self.settings.developer_view_changed.connect(self._show_feed_view)
 
         self.models = ModelsTab(self._config, self._profile)
         self.models.model_selected.connect(self._on_model_selected)
@@ -569,6 +577,10 @@ class MainWindow(QMainWindow):
             seconds = sum(self._translate_ms) / len(self._translate_ms) / 1000
             text = f"{text} · {t('live.average', seconds=f'{seconds:.1f}'.replace('.', ','))}"
         self.state_label.setText(text)
+
+    def _show_feed_view(self) -> None:
+        developer = self._config.developer_view
+        self.feed_stack.setCurrentWidget(self.feed if developer else self.feed_list)
 
     def show_page(self, index: int) -> None:
         """Select a sidebar page (0 = Live, then Appearance, Profiles, Models, Settings)."""
@@ -1417,8 +1429,10 @@ class MainWindow(QMainWindow):
             return self._rows[line_id]
         if self.feed.rowCount() >= FEED_LIMIT:
             self.feed.removeRow(self.feed.rowCount() - 1)
+            self.feed_list.remove_last()
             self._rows = {k: v for k, v in self._rows.items() if v < FEED_LIMIT - 1}
         self.feed.insertRow(0)
+        self.feed_list.insert_top()
         self._rows = {k: v + 1 for k, v in self._rows.items()}
         self._rows[line_id] = 0
         return 0
@@ -1426,6 +1440,10 @@ class MainWindow(QMainWindow):
     def _set_cells(self, row: int, values: dict[int, str]) -> None:
         for column, value in values.items():
             self.feed.setItem(row, column, QTableWidgetItem(value))
+        english, turkish = (self.feed.item(row, c) for c in (1, 2))
+        self.feed_list.set_line(
+            row, turkish.text() if turkish else "", english.text() if english else ""
+        )
 
     def _on_read(self, event: SubtitleRead) -> None:
         """A line was read. The overlay keeps the previous translation until this line's own

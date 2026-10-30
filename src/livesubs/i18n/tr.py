@@ -391,6 +391,10 @@ STRINGS: dict[str, str] = {
     "settings.theme.dark": "Sade koyu",
     "settings.minimize_to_tray": "Simge durumuna küçültünce sistem tepsisine gönder",
     "settings.recording_mode": "Kayıt modu (OBS ve ekran görüntüleri çeviriyi de görsün)",
+    "settings.developer_view": "Geliştirici görünümü",
+    "settings.developer_view_tip": (
+        "Canlı akışı saat, model, OCR ve çeviri süreleriyle tablo olarak gösterir."
+    ),
     "settings.recording_hint": (
         "Normalde çeviri ekran yakalamadan gizlenir; böylece OCR kendi çevirimizi okumaz. "
         "Kayıt modunda çeviri altyazı bölgesiyle çakışırsa OCR onu da okuyabilir; "

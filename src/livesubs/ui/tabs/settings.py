@@ -61,6 +61,7 @@ class SettingsTab(QWidget):
     theme_changed = Signal(str)
     clear_cache_requested = Signal()
     open_logs_requested = Signal()
+    developer_view_changed = Signal()
     setup_requested = Signal()  # the setup dialog: installs, shortcuts, settings backup
 
     def __init__(self, config: AppConfig, profile: Profile) -> None:
@@ -232,6 +233,11 @@ class SettingsTab(QWidget):
         self.recording.toggled.connect(self._on_recording)
         form.addRow(self.recording)
         form.addRow(_hint(t("settings.recording_hint")))
+        self.developer_view = QCheckBox(t("settings.developer_view"))
+        self.developer_view.setToolTip(t("settings.developer_view_tip"))
+        self.developer_view.setChecked(self.config.developer_view)
+        self.developer_view.toggled.connect(self._on_developer_view)
+        form.addRow(self.developer_view)
         return box
 
     def _upkeep_box(self) -> QGroupBox:
@@ -338,6 +344,11 @@ class SettingsTab(QWidget):
     def _on_tray(self, on: bool) -> None:
         self.config.minimize_to_tray = on
         self.config_changed.emit()
+
+    def _on_developer_view(self, on: bool) -> None:
+        self.config.developer_view = on
+        self.config_changed.emit()
+        self.developer_view_changed.emit()
 
     def _on_recording(self, on: bool) -> None:
         self.config.recording_mode = on
