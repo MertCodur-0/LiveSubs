@@ -957,4 +957,17 @@ First **finish the app** (each step committed and pushed; no new release unless 
   Python worker thread running) in 2 full runs and 1 of 17 single-file runs; the file does not
   import the changed code and passed 6/6 with the change stashed and 8/8 with it. Likely the
   setup dialog's worker thread emitting after the test closed the dialog — the same unexplained
-  crash as before v0.4.0. Not fixed yet.
+  crash as before v0.4.0.
+  **Fixed (same day); the cause was not the emit:** worker closures captured `self` (the
+  window) to reach its `_Bridge`. pytest-qt keeps widgets only through weakrefs, so after the
+  test the worker held the **last reference**; `Thread.run`'s `del self._target`
+  (threading.py:999 in the dump) destroyed the QDialog and its unparented bridge **outside the
+  UI thread**. Proof: a scratch test with 0-5 ms checker delays crashed 3/3 at that line
+  (50 ms did not: by then `deleteLater` had run on the UI thread). Fix in the setup dialog,
+  Models tab and main window: workers capture only the bridge and locals, never the window;
+  bridges are owned by the application (`_Bridge(QCoreApplication.instance())`), so a worker
+  never destroys a Qt object and a late result reaches no one. The Models tab's double-click
+  lambda (it kept the tab alive forever) is a bound method now. Tests assert a running worker
+  does not keep the dialog / tab alive (fail on the old code). After: scratch repro 10/10,
+  `test_setup.py` 30/30, full suite 2/2 clean. **Rule: a worker thread must never hold a
+  reference to a Qt object it could be the last owner of.**
