@@ -34,7 +34,15 @@ class ShowPreview:
     monitor: str | None
 
 
-DeviceCommand = OpenDevice | CloseDevice | ShowPreview | Shutdown
+@dataclass(frozen=True, slots=True)
+class PlayAudio:
+    """Play the card's sound on ``output`` while the preview is shown ("" = Windows' default
+    output); None = never."""
+
+    output: str | None
+
+
+DeviceCommand = OpenDevice | CloseDevice | ShowPreview | PlayAudio | Shutdown
 
 # --- Events (host -> UI) -------------------------------------------------------------------------
 
@@ -80,4 +88,13 @@ class PreviewChanged:
     by_user: bool = False  # closed from the preview window itself (Esc, double-click)
 
 
-DeviceEvent = DeviceOpened | DeviceClosed | DeviceFailed | SignalChanged | PreviewChanged
+@dataclass(frozen=True, slots=True)
+class AudioChanged:
+    playing: bool
+    error: str | None = None  # an ``AudioErrorKind`` when the sound could not start
+    message: str = ""  # technical detail (English)
+
+
+DeviceEvent = (
+    DeviceOpened | DeviceClosed | DeviceFailed | SignalChanged | PreviewChanged | AudioChanged
+)

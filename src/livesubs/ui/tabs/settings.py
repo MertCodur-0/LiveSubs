@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QKeySequence
+from PySide6.QtGui import QKeySequence, QShowEvent
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 
 from livesubs.core.config import AppConfig, HotkeySettings
 from livesubs.core.profiles import OverlayDisplay, Profile
+from livesubs.device.audio import list_outputs
 from livesubs.i18n import t
 from livesubs.platform import hotkeys, win32
 from livesubs.platform.video_devices import list_video_devices
@@ -149,7 +150,7 @@ class SettingsTab(QWidget):
         self.preview_device = QComboBox()
         self.preview_device.activated.connect(self._on_preview_device)
         refresh = QPushButton(t("source.refresh"))
-        refresh.clicked.connect(self.refresh_preview_choices)
+        refresh.clicked.connect(lambda: self.refresh_preview_choices(list_sound=True))
         device_row = QHBoxLayout()
         device_row.addWidget(self.preview_device, 1)
         device_row.addWidget(refresh)
@@ -157,13 +158,26 @@ class SettingsTab(QWidget):
         self.preview_monitor = QComboBox()
         self.preview_monitor.activated.connect(self._on_preview_monitor)
         card.add_row(t("settings.preview_monitor"), self.preview_monitor)
+        self.preview_audio = _switch(self.config.preview.audio, self._on_preview_audio)
+        card.add_row(
+            t("settings.preview_audio"),
+            self.preview_audio,
+            tip=t("settings.preview_audio_hint"),
+            expand=False,
+        )
+        self.audio_output = QComboBox()
+        self.audio_output.activated.connect(self._on_audio_output)
+        card.add_row(t("settings.audio_output"), self.audio_output)
+        self._outputs_listed = False
         self.preview_status = hint("")
         card.add_widget(self.preview_status)
         self.refresh_preview_choices()
         return card
 
-    def refresh_preview_choices(self) -> None:
-        """Connected cards and monitors; a chosen one that is missing stays listed."""
+    def refresh_preview_choices(self, *, list_sound: bool = False) -> None:
+        """Connected cards, monitors and sound outputs; a chosen one that is missing stays
+        listed. Listing the outputs starts PortAudio (~0.4 s), so it waits until the page is
+        first shown or "Yenile" is pressed."""
         preview = self.config.preview
         self.preview_device.clear()
         self.preview_device.addItem(t("settings.preview_profile_card"), "")
@@ -184,6 +198,20 @@ class SettingsTab(QWidget):
             )
             self.preview_monitor.addItem(label, monitor.device_name)
         self.preview_monitor.setCurrentIndex(max(self.preview_monitor.findData(preview.monitor), 0))
+        outputs = list_outputs() if list_sound else []
+        self._outputs_listed = self._outputs_listed or list_sound
+        if preview.audio_output and preview.audio_output not in outputs:
+            outputs.append(preview.audio_output)
+        self.audio_output.clear()
+        self.audio_output.addItem(t("settings.audio_default"), "")
+        for name in outputs:
+            self.audio_output.addItem(name, name)
+        self.audio_output.setCurrentIndex(max(self.audio_output.findData(preview.audio_output), 0))
+
+    def showEvent(self, event: QShowEvent) -> None:  # noqa: N802 - Qt override
+        super().showEvent(event)
+        if not self._outputs_listed:
+            self.refresh_preview_choices(list_sound=True)
 
     def show_preview(self, text: str) -> None:
         """The preview's state (shown where, or why not), and the checkbox in step with it."""
@@ -337,6 +365,16 @@ class SettingsTab(QWidget):
 
     def _on_preview_device(self, index: int) -> None:
         self.config.preview.device = self.preview_device.itemData(index)
+        self.config_changed.emit()
+        self.preview_changed.emit()
+
+    def _on_preview_audio(self, on: bool) -> None:
+        self.config.preview.audio = on
+        self.config_changed.emit()
+        self.preview_changed.emit()
+
+    def _on_audio_output(self, index: int) -> None:
+        self.config.preview.audio_output = self.audio_output.itemData(index)
         self.config_changed.emit()
         self.preview_changed.emit()
 

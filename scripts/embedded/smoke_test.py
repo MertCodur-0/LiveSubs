@@ -44,6 +44,7 @@ def check() -> list[str]:
 
     import windows_capture  # noqa: F401
 
+    from livesubs.device.audio import list_outputs
     from livesubs.device.host import DeviceHost  # noqa: F401
     from livesubs.device.preview import PreviewWindow
     from livesubs.engine.capture.shared_frames import SharedFrameReader, SharedFrameWriter
@@ -66,6 +67,10 @@ def check() -> list[str]:
     reader.close()
     writer.close()
     assert not PreviewWindow().grab().isNull()
+    import sounddevice  # PortAudio's DLL ships inside its wheel
+
+    assert sounddevice.get_portaudio_version()
+    list_outputs()
 
     WinRtOcr().recognize(np.full((40, 200), 255, np.uint8))
     assert b"EventSource" in render_page() and FONT.is_file()  # package data of the phone page

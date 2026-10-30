@@ -55,6 +55,8 @@ class PreviewSettings(SettingsModel):
     enabled: bool = False
     device: str = ""  # the card's name; "" = the card of the active profile
     monitor: str = ""  # display device name; "" = the primary monitor
+    audio: bool = False  # play the card's sound while the preview is on (game watched on it)
+    audio_output: str = ""  # sound output name; "" = Windows' default output
 
 
 class AppConfig(SettingsModel):

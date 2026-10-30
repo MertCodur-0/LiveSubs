@@ -3,9 +3,9 @@
 Windows lets only one app read a card at a time, and the preview must keep running while
 translation is stopped or the engine restarts. So this process opens the card, writes every
 frame to shared memory (the engine reads the newest one at its own pace) and shows the full
-screen preview. It runs a Qt event loop for the preview; the card itself is handled on a device
-thread: open (retried every ``RETRY_S`` while busy or missing), pump frames, report a black
-picture, reopen after a loss.
+screen preview, with the card's sound when asked (``device.audio``). It runs a Qt event loop
+for the preview; the card itself is handled on a device thread: open (retried every
+``RETRY_S`` while busy or missing), pump frames, report a black picture, reopen after a loss.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from livesubs.core.logs import setup_file_logging
 from livesubs.core.messages import Shutdown
 from livesubs.core.profiles import VideoDeviceSource
 from livesubs.device.messages import (
+    AudioChanged,
     CloseDevice,
     DeviceClosed,
     DeviceCommand,
@@ -30,6 +31,7 @@ from livesubs.device.messages import (
     DeviceFailed,
     DeviceOpened,
     OpenDevice,
+    PlayAudio,
     PreviewChanged,
     ShowPreview,
     SignalChanged,
@@ -194,6 +196,7 @@ def device_main(commands: Queue, events: Queue) -> None:
     from PySide6.QtWidgets import QApplication
 
     from livesubs import APP_NAME
+    from livesubs.device.audio import AudioControl
     from livesubs.device.preview import PreviewWindow
     from livesubs.platform import win32
     from livesubs.ui.icon import app_icon
@@ -203,8 +206,25 @@ def device_main(commands: Queue, events: Queue) -> None:
     app.setQuitOnLastWindowClosed(False)
     app.setWindowIcon(app_icon())
     preview = PreviewWindow()
-    preview.closed_by_user.connect(lambda: events.put(PreviewChanged(None, by_user=True)))
-    worker = DeviceWorker(events.put, preview.show_frame)
+    audio = AudioControl(
+        lambda playing, error, message: events.put(AudioChanged(playing, error, message))
+    )
+
+    def preview_closed() -> None:
+        audio.set_preview(False)
+        events.put(PreviewChanged(None, by_user=True))
+
+    def emit(event: DeviceEvent) -> None:
+        # The sound follows the card: it opens and closes on the device thread.
+        match event:
+            case DeviceOpened(device_name=name):
+                audio.set_card(name)
+            case DeviceClosed():
+                audio.set_card(None)
+        events.put(event)
+
+    preview.closed_by_user.connect(preview_closed)
+    worker = DeviceWorker(emit, preview.show_frame)
     worker.start()
 
     def handle(command: DeviceCommand) -> None:
@@ -216,12 +236,17 @@ def device_main(commands: Queue, events: Queue) -> None:
                 worker.want(None)
             case ShowPreview(monitor=None):
                 preview.hide_preview()
+                audio.set_preview(False)
                 events.put(PreviewChanged(None))
             case ShowPreview(monitor=monitor):
                 shown = preview.show_on(monitor)
+                audio.set_preview(shown)
                 events.put(PreviewChanged(monitor if shown else None))
+            case PlayAudio(output=output):
+                audio.set_output(output)
             case Shutdown():
                 worker.stop()
+                audio.close()
                 app.quit()
 
     def poll() -> None:

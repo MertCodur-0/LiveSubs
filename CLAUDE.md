@@ -88,7 +88,7 @@ share the PC).
 
 App: PySide6-Essentials (not the `PySide6` meta package — it drags in WebEngine), numpy,
 opencv-python (required by `windows-capture`; do **not** also install `-headless`, they conflict),
-windows-capture (WGC), mss (fallback), winrt-* (Media.Ocr, Graphics.Imaging, Storage.Streams,
+windows-capture (WGC), mss (fallback), sounddevice (card sound), winrt-* (Media.Ocr, Graphics.Imaging, Storage.Streams,
 Globalization, Foundation), httpx, pydantic, rapidfuzz, qrcode, platformdirs.
 Dev: pytest, pytest-qt, respx, ruff. Packaging needs no extra tool (embeddable Python, see Other).
 
@@ -255,7 +255,18 @@ Designed from the start for three source kinds; video device lands in phase 2.
   frame dialog (`ui/frame_region.py`). The host's windows are never offered as sources.
 - Exclusive-fullscreen warning: unaffected (only `QUNS_RUNNING_D3D_FULL_SCREEN`; the preview is a
   plain Qt window).
-- Audio of the card is not played (the TV has it via the splitter).
+- **Sound** (2026-10-30, user: may play from the preview later): `device/audio.py`, played by
+  the device host only while `preview.audio` is on, the card is open **and** the preview is on
+  screen (Esc on the preview silences it too). The card's WASAPI input is found by its name in
+  brackets ("Dijital Ses Arabirimi (V-Z632)", 48 kHz stereo); output `preview.audio_output`
+  ("" = Windows' default, read at each start: PortAudio is re-initialised before every start).
+  `sounddevice` (PortAudio DLL inside its wheel); two streams at 20 ms + `Ring` (30 ms target,
+  skips back from 120 ms when the clocks drift, silence + re-prime on underrun). Measured: open
+  37 ms, 0 underruns, ~80-90 ms card -> speaker on top of the card itself. Off by default (the
+  TV has the sound via the splitter). Settings rows "Kartın sesini çal" + "Ses çıkışı" (outputs
+  listed when the page is first shown: PortAudio init ~0.4 s). Errors (`AudioChanged.error`:
+  no_input / no_output / failed) go to the status bar. A lost output device mid-play is not
+  detected.
 - Not done: the latency loopback measurement (user: later).
 
 ### Translation
@@ -557,7 +568,7 @@ src/livesubs/
   assets/      icon.svg, icon.ico, header.svg, arrow_*.svg, check.svg, icons/, fonts/ (+ OFL)
   core/        config.py, profiles.py, paths.py, jsonio.py, geometry.py, messages.py, backup.py,
                translation_pack.py, child_process.py, logs.py
-  device/      host.py (device host process), messages.py, preview.py
+  device/      host.py (device host process), messages.py, preview.py, audio.py
   engine/      process.py, pipeline.py
     capture/   base.py, wgc.py, mss_fallback.py, factory.py, video_device.py, shared_frames.py
     vision/    preprocess.py, change.py

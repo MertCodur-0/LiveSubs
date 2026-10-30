@@ -267,6 +267,7 @@ class MainWindow(QMainWindow):
         self._card.failed.connect(self._on_card_failed)
         self._card.signal_changed.connect(self._on_card_signal)
         self._card.preview_changed.connect(self._on_card_preview)
+        self._card.audio_changed.connect(self._on_card_audio)
         self._card_waiting = False  # Start pressed (or card lost while running): start once open
         self._card_started_on = ""  # the shared frames the running pipeline reads
         self._card_region_pending = False  # region pick waits for the card to open
@@ -773,7 +774,8 @@ class MainWindow(QMainWindow):
             text = t("settings.preview_no_card")
         elif self._card.preview_shown_on is not None:
             name = self._card.preview_shown_on.removeprefix("\\\\.\\")
-            text = t("settings.preview_on", monitor=name)
+            key = "settings.preview_on_audio" if self._card.audio_playing else "settings.preview_on"
+            text = t(key, monitor=name)
         elif preview.monitor and preview.monitor not in {
             m.device_name for m in win32.list_monitors()
         }:
@@ -807,6 +809,11 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(text, 60000 if black else 5000)
         if black:
             self.tray.notify(APP_NAME, text)
+
+    def _on_card_audio(self, error: str) -> None:
+        if error:
+            self.statusBar().showMessage(t(f"card.audio.{error}"), 30000)
+        self._show_preview_status()
 
     def _on_card_preview(self, by_user: bool) -> None:
         if by_user:

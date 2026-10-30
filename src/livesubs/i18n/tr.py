@@ -523,6 +523,21 @@ STRINGS: dict[str, str] = {
         "yakalama kartı yapın."
     ),
     "settings.preview_no_monitor": "Seçilen monitör bağlı değil.",
+    "settings.preview_on_audio": "Önizleme açık: {monitor} · ses çalıyor",
+    "settings.preview_audio": "Kartın sesini çal",
+    "settings.preview_audio_hint": (
+        "Oyunu bu bilgisayardaki önizlemeden izliyorsanız konsolun sesini seçilen çıkıştan "
+        "çalar. Ses yalnızca önizleme açıkken çalar. Ses TV'ye zaten gidiyorsa kapalı bırakın, "
+        "yoksa iki kez duyulur."
+    ),
+    "settings.audio_output": "Ses çıkışı",
+    "settings.audio_default": "Windows varsayılanı",
+    "card.audio.no_input": (
+        "Yakalama kartının ses girişi bulunamadı; önizleme sessiz. Kart Windows'un ses "
+        "ayarlarında giriş aygıtı olarak görünüyor mu?"
+    ),
+    "card.audio.no_output": "Seçilen ses çıkışı bağlı değil; önizleme sessiz.",
+    "card.audio.failed": "Kartın sesi çalınamadı; önizleme sessiz. Ayrıntı günlük dosyasında.",
     "settings.preview_hint": (
         "Konsolun görüntüsü seçilen monitörü kenardan kenara doldurur, çeviri kapalıyken de "
         "açık kalır ve ekran uykuya geçmez. TV arkası ışık (Ambilight) uygulamaları bu monitörü "

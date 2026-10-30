@@ -41,11 +41,13 @@ from livesubs.core.profiles import (
     WindowSource,
 )
 from livesubs.device.messages import (
+    AudioChanged,
     CloseDevice,
     DeviceErrorKind,
     DeviceFailed,
     DeviceOpened,
     OpenDevice,
+    PlayAudio,
     PreviewChanged,
     ShowPreview,
     SignalChanged,
@@ -1331,6 +1333,28 @@ def test_preview_opens_the_card_on_the_chosen_monitor(card_window: MainWindow) -
     assert not card_window._config.preview.enabled
     assert not card_window.settings.preview_enabled.isChecked()
     assert host.sent[-1] == CloseDevice()
+
+
+def test_card_sound_follows_the_settings(card_window: MainWindow) -> None:
+    host = card_host_of(card_window)
+    card_window.settings.preview_device.setCurrentIndex(1)
+    card_window.settings.preview_device.activated.emit(1)
+    card_window.settings.preview_enabled.setChecked(True)
+    card_window.settings.preview_audio.setChecked(True)
+    assert host.sent[-1] == PlayAudio("")  # Windows' default output
+    assert card_window._config.preview.audio
+
+    host.events = [PreviewChanged("\\\\.\\DISPLAY1"), AudioChanged(playing=True)]
+    card_window._card.poll()
+    assert card_window.settings.preview_status.text() == t(
+        "settings.preview_on_audio", monitor="DISPLAY1"
+    )
+    host.events = [AudioChanged(playing=False, error="no_input")]
+    card_window._card.poll()
+    assert card_window.statusBar().currentMessage() == t("card.audio.no_input")
+
+    card_window.settings.preview_audio.setChecked(False)
+    assert host.sent[-1] == PlayAudio(None)
 
 
 def test_preview_shows_the_profile_card_by_default(card_window: MainWindow) -> None:

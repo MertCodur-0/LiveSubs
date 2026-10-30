@@ -18,6 +18,7 @@ from livesubs.core.geometry import Rect
 from livesubs.core.profiles import VideoDeviceSource
 from livesubs.device.host import DeviceHost
 from livesubs.device.messages import (
+    AudioChanged,
     CloseDevice,
     DeviceClosed,
     DeviceCommand,
@@ -25,6 +26,7 @@ from livesubs.device.messages import (
     DeviceFailed,
     DeviceOpened,
     OpenDevice,
+    PlayAudio,
     PreviewChanged,
     ShowPreview,
     SignalChanged,
@@ -66,6 +68,7 @@ class CaptureCard(QObject):
     failed = Signal(str, str)  # DeviceErrorKind (or "crashed"), card name
     signal_changed = Signal(bool)  # True: the picture is black (HDCP, console off)
     preview_changed = Signal(bool)  # True: closed by the user on the preview itself
+    audio_changed = Signal(str)  # "" = fine (playing or off), else an AudioErrorKind
 
     def __init__(self, settings: PreviewSettings, host: Host | None = None) -> None:
         super().__init__()
@@ -76,9 +79,11 @@ class CaptureCard(QObject):
         self._profile_card = ""  # the active profile's card, when it has one
         self._sent_device: VideoDeviceSource | None = None
         self._sent_preview: str | None = None
+        self._sent_audio: str | None = None
         self.device_name = ""  # the card that is open, "" while none is
         self.shared_frames = ""
         self.preview_shown_on: str | None = None
+        self.audio_playing = False
         self._poll_timer = QTimer(self, interval=POLL_MS, timeout=self.poll)
         self._watch_timer = QTimer(self, interval=WATCH_MS, timeout=self._watch)
 
@@ -117,7 +122,9 @@ class CaptureCard(QObject):
         if self.settings.enabled and device is not None:
             monitor = preview_monitor(self.settings)
             preview = monitor.device_name if monitor else None
-        if device == self._sent_device and preview == self._sent_preview:
+        audio = self.settings.audio_output if self.settings.audio else None
+        sent = (self._sent_device, self._sent_preview, self._sent_audio)
+        if (device, preview, audio) == sent:
             return
         if not self._host.started:
             if device is None and preview is None:
@@ -131,6 +138,9 @@ class CaptureCard(QObject):
         if preview != self._sent_preview:
             self._host.send(ShowPreview(preview))
             self._sent_preview = preview
+        if audio != self._sent_audio:
+            self._host.send(PlayAudio(audio))
+            self._sent_audio = audio
 
     def is_open(self, device_name: str) -> bool:
         return bool(self.shared_frames) and self.device_name.casefold() == device_name.casefold()
@@ -187,6 +197,9 @@ class CaptureCard(QObject):
                     self._sent_preview = None
                     self.apply()  # the card may no longer be wanted
                 self.preview_changed.emit(by_user)
+            case AudioChanged(playing=playing, error=error):
+                self.audio_playing = playing
+                self.audio_changed.emit(error or "")
 
     def _watch(self) -> None:
         if not self._host.started or self._host.alive:
@@ -194,7 +207,8 @@ class CaptureCard(QObject):
         log.error("The device host died; starting a new one")
         self._host.restart()
         self.device_name, self.shared_frames, self.preview_shown_on = "", "", None
-        self._sent_device, self._sent_preview = None, None
+        self.audio_playing = False
+        self._sent_device, self._sent_preview, self._sent_audio = None, None, None
         self.closed.emit()
         self.failed.emit("crashed", self.preview_device)
         self.apply()

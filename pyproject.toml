@@ -30,6 +30,7 @@ dependencies = [
     "opencv-python>=4.10",
     "windows-capture>=2.0,<3",
     "mss>=9.0",
+    "sounddevice>=0.5",  # the capture card's sound (PortAudio, WASAPI)
     "winrt-runtime>=2.3",
     "winrt-Windows.Foundation>=2.3",
     "winrt-Windows.Foundation.Collections>=2.3",
