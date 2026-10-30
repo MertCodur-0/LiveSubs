@@ -999,3 +999,5 @@ First **finish the app** (each step committed and pushed; no new release unless 
   Quality about even: 20 of 60 lines differ in wording; better "Partnerim", "Bölgeden
   ayrılma"; worse "Vice City de de bebeğim", "To hell with you" -> "Cehenneme git" (full:
   "Siktir git lan!"). Runs swing by ~25 % between sessions: compare variants back to back.
+- 2026-10-30: **Released v0.5.1** (user's choice: merge `translation-tuning` into main, then
+  release): the five translation fixes of the speed/quality review above.
