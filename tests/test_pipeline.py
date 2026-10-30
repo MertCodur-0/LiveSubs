@@ -24,7 +24,7 @@ from livesubs.core.messages import (
     SubtitleRead,
     SubtitleTranslated,
 )
-from livesubs.core.profiles import MonitorSource, Profile, VisionSettings
+from livesubs.core.profiles import MonitorSource, Profile, VideoDeviceSource, VisionSettings
 from livesubs.engine.capture.base import (
     BaseFrameSource,
     Frame,
@@ -32,6 +32,7 @@ from livesubs.engine.capture.base import (
     SourceKind,
     SourceUnavailableError,
 )
+from livesubs.engine.capture.shared_frames import SharedFrameWriter
 from livesubs.engine.ocr.language import english_ocr_language
 from livesubs.engine.pipeline import Pipeline
 from livesubs.engine.translate.base import (
@@ -351,3 +352,43 @@ def test_short_reply_between_long_lines_reaches_the_screen(
     translated = [e.source for e in recorder.of(SubtitleTranslated)]
     assert len(reads) == 3 and reads[1] == "Yeah."
     assert translated == reads  # every line translated, in reading order
+
+
+def _play_into(writer: SharedFrameWriter, scenes: list[tuple[np.ndarray, float]]) -> None:
+    """The device host's side: every scene written at 30 fps, then the card goes away."""
+    for image, seconds in scenes:
+        end = time.monotonic() + seconds
+        while time.monotonic() < end:
+            writer.write(image, time.monotonic())
+            time.sleep(1 / 30)
+    writer.close()
+
+
+def test_capture_card_frames_come_from_the_device_host(
+    two_lines_and_a_gap: tuple[list[Sample], list[tuple[np.ndarray, float]]],
+) -> None:
+    (a, _), scenes = two_lines_and_a_gap
+    scenes = [(cv2.resize(image[:, :, :3], (1920, 1080)), s) for image, s in scenes]
+    writer = SharedFrameWriter(1920, 1080)
+    writer.write(scenes[0][0], time.monotonic())
+    start = start_command(a)
+    profile = start.profile.model_copy(update={"source": VideoDeviceSource(device_name="Card")})
+    recorder = Recorder()
+    pipeline = Pipeline(
+        StartPipeline(profile=profile, ollama=OllamaSettings(), shared_frames=writer.name),
+        recorder,
+        backend_factory=lambda start: UpperCaseBackend(),
+    )
+    pipeline.start()  # default source opener: reads the shared frames
+    _play_into(writer, scenes)
+    deadline = time.monotonic() + 5
+    while pipeline.running and time.monotonic() < deadline:
+        time.sleep(0.02)
+
+    assert recorder.of(FrameInfo) == [FrameInfo(1920, 1080, None)]
+    reads = [e.text for e in recorder.of(SubtitleRead) if not e.upgrade]
+    assert len(reads) == 2
+    assert len(recorder.of(SubtitleTranslated)) >= 2
+    # closing the writer = the card was closed: the pipeline stops with "source lost"
+    assert [(e.kind, e.fatal) for e in recorder.of(EngineError)] == [(ErrorKind.SOURCE_LOST, True)]
+    assert recorder.states()[-1] is EngineState.STOPPED

@@ -15,6 +15,7 @@ from livesubs.engine.capture.base import (
     is_black_frame,
 )
 from livesubs.engine.capture.mss_fallback import MssSource
+from livesubs.engine.capture.shared_frames import SharedFrameSource, SharedFrameWriter
 from livesubs.engine.capture.wgc import (
     WgcMonitorSource,
     WgcWindowSource,
@@ -123,6 +124,26 @@ def test_create_monitor_source() -> None:
         source.open()  # not connected
 
 
-def test_video_devices_are_not_supported_yet() -> None:
+def test_video_device_needs_the_device_host() -> None:
+    spec = VideoDeviceSource(device_name="USB Video")
     with pytest.raises(SourceUnavailableError):
-        factory.create_source(VideoDeviceSource(device_name="USB Video"))
+        factory.create_source(spec)  # the card is open only in the device host
+    with pytest.raises(SourceUnavailableError):
+        factory.open_source(spec, shared_frames="livesubs-frames-missing")  # no mss fallback
+
+
+def test_video_device_reads_shared_frames() -> None:
+    writer = SharedFrameWriter(8, 4)
+    try:
+        writer.write(np.full((4, 8, 3), 9, np.uint8), time.monotonic())
+        spec = VideoDeviceSource(device_name="USB Video", fps=60)
+        source = factory.open_source(spec, shared_frames=writer.name)
+        try:
+            assert isinstance(source, SharedFrameSource)
+            assert source.info.name == "USB Video"
+            frame = source.latest_frame()
+            assert frame is not None and int(frame.image[0, 0, 0]) == 9
+        finally:
+            source.close()
+    finally:
+        writer.close()

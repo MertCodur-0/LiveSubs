@@ -9,6 +9,7 @@ from typing import Literal
 from livesubs.core.profiles import MonitorSource, Source, VideoDeviceSource, WindowSource
 from livesubs.engine.capture.base import FrameSource, SourceUnavailableError
 from livesubs.engine.capture.mss_fallback import MssSource
+from livesubs.engine.capture.shared_frames import SharedFrameSource
 from livesubs.engine.capture.wgc import DEFAULT_MAX_FPS, WgcMonitorSource, WgcWindowSource
 from livesubs.platform import win32
 
@@ -27,9 +28,17 @@ def find_window(spec: WindowSource) -> int:
 
 
 def create_source(
-    spec: Source, *, max_fps: float = DEFAULT_MAX_FPS, backend: Backend = "wgc"
+    spec: Source,
+    *,
+    max_fps: float = DEFAULT_MAX_FPS,
+    backend: Backend = "wgc",
+    shared_frames: str = "",
 ) -> FrameSource:
-    """An unopened source for ``spec``. Raises ``SourceUnavailableError``."""
+    """An unopened source for ``spec``. Raises ``SourceUnavailableError``.
+
+    A video device is read from the device host's ``shared_frames``: the card can be opened by
+    one process only, and the host keeps it open for the preview window.
+    """
     match spec:
         case WindowSource():
             hwnd = find_window(spec)
@@ -40,16 +49,22 @@ def create_source(
             if backend == "wgc":
                 return WgcMonitorSource(device, max_fps)
             return MssSource.for_monitor(device, max_fps)
-        case VideoDeviceSource():
-            raise SourceUnavailableError("video device sources are not supported yet")
+        case VideoDeviceSource(device_name=device):
+            if not shared_frames:
+                raise SourceUnavailableError(f"the capture card {device!r} is not open")
+            return SharedFrameSource(shared_frames, device, spec.fps)
 
 
-def open_source(spec: Source, *, max_fps: float = DEFAULT_MAX_FPS) -> FrameSource:
-    """Open ``spec`` with WGC, falling back to mss when Windows refuses WGC."""
-    source = create_source(spec, max_fps=max_fps)
+def open_source(
+    spec: Source, *, max_fps: float = DEFAULT_MAX_FPS, shared_frames: str = ""
+) -> FrameSource:
+    """Open ``spec``; windows and monitors fall back from WGC to mss when Windows refuses WGC."""
+    source = create_source(spec, max_fps=max_fps, shared_frames=shared_frames)
     try:
         source.open()
     except SourceUnavailableError as exc:
+        if isinstance(spec, VideoDeviceSource):
+            raise
         log.warning("WGC capture unavailable (%s); falling back to mss", exc)
         source = create_source(spec, max_fps=max_fps, backend="mss")
         source.open()

@@ -80,10 +80,6 @@ SourceOpener = Callable[[Source], FrameSource]
 BackendFactory = Callable[[StartPipeline], TranslationBackend]
 
 
-def _open_wgc_or_mss(spec: Source) -> FrameSource:
-    return default_open_source(spec, max_fps=CAPTURE_MAX_FPS)
-
-
 def ollama_backend(start: StartPipeline) -> OllamaBackend:
     settings = start.ollama
     return OllamaBackend(
@@ -118,7 +114,11 @@ class Pipeline:
             raise ValueError("the profile has no source")
         self._start = start
         self._emit = emit
-        self._open_source = open_source or _open_wgc_or_mss
+        self._open_source = open_source or (
+            lambda spec: default_open_source(
+                spec, max_fps=CAPTURE_MAX_FPS, shared_frames=start.shared_frames
+            )
+        )
         self._backend_factory = backend_factory
         self._cache_path = cache_path
         self._region = start.profile.region or NormRect(x=0.1, y=0.75, width=0.8, height=0.2)

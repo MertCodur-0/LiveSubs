@@ -808,3 +808,12 @@ First **finish the app** (each step committed and pushed; no new release unless 
   the newest frame with the engine through shared memory at the profile fps — 1080p60 frames over
   a `multiprocessing.Queue` would be far too heavy); our overlay stays excluded from capture so
   the LEDs never see it; the fullscreen warning must ignore our own preview.
+- 2026-10-30: **Capture card arrived**: "V-Z632" (USB UVC, VID 345F PID 2130, video + audio
+  interfaces), **no HDMI out** -> the user will add an HDMI splitter (not yet delivered; no code
+  impact; it must hand the card 1080p). User approved the **separate capture process** (owns the
+  card, fullscreen preview, newest frame to the engine via shared memory) over a preview inside
+  the engine (Stop or an engine crash would cut the Ambilight feed). Order: measure the card's
+  modes, latency and CPU cost (OBS closed; also try whether Windows' camera sharing lets two apps
+  open it), then video_device.py, then the capture process + preview. User also wants the
+  card's latency measured: HDMI loopback from the PC (our own flashing pattern -> card -> our
+  capture) for the card's share, a phone slow-motion video for button-to-screen total.

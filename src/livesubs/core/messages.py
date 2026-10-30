@@ -23,6 +23,8 @@ class StartPipeline:
     profile: Profile
     ollama: OllamaSettings
     profile_id: str = ""
+    # Video devices: the device host's shared frame buffer (the engine never opens the card).
+    shared_frames: str = ""
 
 
 @dataclass(frozen=True, slots=True)
