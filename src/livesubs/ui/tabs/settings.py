@@ -61,6 +61,7 @@ class SettingsTab(QWidget):
     theme_changed = Signal(str)
     clear_cache_requested = Signal()
     open_logs_requested = Signal()
+    setup_requested = Signal()  # the setup dialog: installs, shortcuts, settings backup
 
     def __init__(self, config: AppConfig, profile: Profile) -> None:
         super().__init__()
@@ -241,7 +242,10 @@ class SettingsTab(QWidget):
         self.clear_cache.clicked.connect(self.clear_cache_requested)
         self.open_logs = QPushButton(t("settings.open_logs"))
         self.open_logs.clicked.connect(self.open_logs_requested)
+        self.open_setup = QPushButton(t("setup.button"))
+        self.open_setup.clicked.connect(self.setup_requested)
         self.upkeep_status = _hint("")
+        row.addWidget(self.open_setup)
         row.addWidget(self.clear_cache)
         row.addWidget(self.open_logs)
         row.addWidget(self.upkeep_status, 1)

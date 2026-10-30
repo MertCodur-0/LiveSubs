@@ -12,6 +12,8 @@ STRINGS: dict[str, str] = {
     "region.select": "Altyazı bölgesini seç",
     "region.selected": "Bölge: {source} — konum {x:.0%}, {y:.0%}, boyut {w:.0%} x {h:.0%}",
     "region.none": "Bölge seçilmedi",
+    "region.label": "Bölge",
+    "region.chosen": "{source} içinde seçili",
     "region.hint": (
         "Altyazının çıktığı alanı fareyle çizin (hangi ekranda olursa olsun).\n"
         "Altındaki pencere kaynak olarak seçilir. Enter / çift tık: onayla, Esc: vazgeç"
@@ -37,7 +39,15 @@ STRINGS: dict[str, str] = {
     "sidebar.paused": "Duraklatıldı",
     "sidebar.stopped": "Durdu",
     "sidebar.ollama_off": "Ollama kapalı",
-    "live.source_card": "Kaynak ve model",
+    "live.change": "Değiştir…",
+    "live.change_title": "Kaynak ve model",
+    "live.done": "Tamam",
+    "live.no_source": "Kaynak seçilmedi",
+    "live.no_model": "model seçilmedi",
+    "live.summary_detail": "Profil: {profile} · {region}",
+    "live.region_set": "altyazı bölgesi seçili",
+    "live.region_unset": "altyazı bölgesi seçilmedi",
+    "live.average": "ort. {seconds} sn",
     "live.feed_card": "Canlı akış",
     "header.tagline": "Oyun altyazıları için canlı Türkçe çeviri",
     "tab.appearance": "Görünüm",

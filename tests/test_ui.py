@@ -2,7 +2,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QObject, QPoint, Qt, Signal
 from PySide6.QtGui import QGuiApplication, QKeySequence
 from PySide6.QtWidgets import QApplication, QLabel, QMessageBox
 from pytestqt.qtbot import QtBot
@@ -1400,3 +1400,79 @@ def test_start_on_another_source_updates_the_region_label(card_window: MainWindo
     select_card(card_window)
     card_window.toggle()
     assert CARD_NAME in card_window.region_label.text()
+
+
+# --- Live page: summary, sheet, warning card, state line ------------------------------------------
+
+
+def test_summary_card_names_source_model_and_profile(window: MainWindow) -> None:
+    window._config.ollama.gpu_model = "gemma4:12b-it-qat"
+    region = NormRect(x=0.1, y=0.8, width=0.8, height=0.1)
+    window._use_region(WindowSource(title="Oyun", exe_name="game.exe"), region)
+    assert window.summary_title.text() == "Oyun · gemma4:12b-it-qat"
+    assert window._profile.name in window.summary_detail.text()
+    assert t("live.region_set") in window.summary_detail.text()
+    # The region label names the source but keeps the percentages in its tooltip only.
+    assert "%" not in window.region_label.text()
+    assert "%" in window.region_label.toolTip()
+
+
+def test_change_sheet_holds_the_pickers(window: MainWindow) -> None:
+    window.change_button.click()
+    sheet = window.source_sheet
+    assert sheet.isVisible()
+    for widget in (
+        window.profile_combo,
+        window.source_combo,
+        window.refresh_button,
+        window.region_button,
+        window.model_combo,
+    ):
+        assert sheet.isAncestorOf(widget)
+    sheet.accept()
+    assert not sheet.isVisible()
+
+
+def test_region_pick_moves_the_sheet_aside(
+    window: MainWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pickers: list = []
+
+    class FakePicker(QObject):
+        selected = Signal(object)
+        cancelled = Signal()
+
+        def show(self) -> None:
+            pickers.append(self)
+
+    monkeypatch.setattr("livesubs.ui.main_window.RegionPicker", FakePicker)
+    window.open_source_sheet()
+    window.select_region()
+    assert not window.source_sheet.isVisible()
+    pickers[0].cancelled.emit()
+    assert window.source_sheet.isVisible()
+    window.source_sheet.accept()
+
+
+def test_warning_card_only_while_ollama_is_missing(window: MainWindow) -> None:
+    window._on_models(None)
+    assert not window.warn_card.isHidden()
+    assert window.ollama_label.text() == t("ollama.offline")
+    window._on_models([])
+    assert window.warn_card.isHidden()
+
+
+def test_state_line_shows_the_mean_translation_time(window: MainWindow) -> None:
+    engine = engine_of(window)
+    engine.queue = [
+        StateChanged(EngineState.RUNNING),
+        SubtitleRead(1, "One.", 10.0),
+        SubtitleTranslated(1, "One.", "Bir.", "m", "gpu", 10.0, 1000.0, False),
+        SubtitleRead(2, "Two.", 10.0),
+        SubtitleTranslated(2, "Two.", "İki.", "m", "gpu", 10.0, 1400.0, False),
+        SubtitleRead(3, "One.", 10.0),
+        SubtitleTranslated(3, "One.", "Bir.", "m", "gpu", 10.0, 0.0, True),  # cached: not counted
+    ]
+    window._poll()
+    assert window.state_label.text() == f"{t('state.running')} · {t('live.average', seconds='1,2')}"
+    assert window.state_dot.property("state") == "ok"
