@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 
 from livesubs.core.config import OllamaSettings
-from livesubs.core.geometry import Rect
+from livesubs.core.geometry import NormRect, Rect
 from livesubs.core.messages import (
     DEBUG_MAX_WIDTH,
     DebugFrame,
@@ -117,11 +117,15 @@ class Recorder:
 
 
 def start_command(sample: Sample) -> StartPipeline:
+    return start_command_for(sample.region, sample.vision)
+
+
+def start_command_for(region: NormRect, vision: VisionSettings | None = None) -> StartPipeline:
     profile = Profile(
         name="test",
         source=MonitorSource(device_name="scripted"),
-        region=sample.region,
-        vision=sample.vision,
+        region=region,
+        vision=vision or VisionSettings(),
     )
     return StartPipeline(profile=profile, ollama=OllamaSettings(), profile_id="test")
 
@@ -420,3 +424,58 @@ def test_capture_card_frames_come_from_the_device_host(
     # closing the writer = the card was closed: the pipeline stops with "source lost"
     assert [(e.kind, e.fatal) for e in recorder.of(EngineError)] == [(ErrorKind.SOURCE_LOST, True)]
     assert recorder.states()[-1] is EngineState.STOPPED
+
+
+def _caption(text: str) -> np.ndarray:
+    """A dark 720p frame with a white caption at the bottom (inside ``CAPTION_REGION``)."""
+    frame = np.full((720, 1280, 3), 30, np.uint8)
+    cv2.putText(frame, text, (360, 660), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 2)
+    return frame
+
+
+CAPTION_REGION = NormRect(x=0.2, y=0.85, width=0.6, height=0.12)
+
+
+@pytest.mark.parametrize("merge", [True, False])
+def test_a_sentence_split_over_two_subtitles_is_translated_whole(merge: bool) -> None:
+    """User report (Spider-Man): "I knew Fisk" then "wouldn't go quietly." - translated apart,
+    the first piece means something else. The second piece is sent as an upgrade of the first
+    line, so the whole sentence is translated and replaces the first piece's translation."""
+
+    class Slow(UpperCaseBackend):
+        def translate(self, request: TranslationRequest, cancel: CancelToken) -> TranslationResult:
+            time.sleep(0.6)
+            return super().translate(request, cancel)
+
+    source = ScriptedSource(
+        [
+            (_caption("I knew Fisk"), 1.0),
+            (_caption("would not go quietly."), 1.2),
+            (_caption("Next line here."), 1.2),
+            (_caption(""), 1.5),
+        ]
+    )
+    start = start_command_for(CAPTION_REGION)
+    start.profile.translation.merge_split_sentences = merge
+    recorder = Recorder()
+    pipeline = Pipeline(
+        start,
+        recorder,
+        open_source=lambda spec: (source.open(), source)[1],
+        backend_factory=lambda start: Slow(),
+    )
+    run(pipeline, source)
+
+    reads = [(e.line_id, e.text, e.upgrade) for e in recorder.of(SubtitleRead)]
+    translated = [(e.line_id, e.source) for e in recorder.of(SubtitleTranslated)]
+    if merge:
+        assert reads == [
+            (1, "I knew Fisk", False),
+            (1, "I knew Fisk would not go quietly.", True),
+            (2, "Next line here.", False),
+        ]
+        # The first piece's own translation may come first; the whole sentence replaces it.
+        assert dict(translated) == {1: "I knew Fisk would not go quietly.", 2: "Next line here."}
+    else:
+        assert [r[1] for r in reads] == ["I knew Fisk", "would not go quietly.", "Next line here."]
+        assert [t[1] for t in translated] == [r[1] for r in reads]

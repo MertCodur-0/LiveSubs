@@ -142,6 +142,8 @@ class Stabilizer:
         confirmed, self._candidate = self._candidate.text, None
         if self._pending:
             self._pending = False
+            if self._current is not None and self._similar(confirmed, self._current):
+                return None  # the mask changed, the text did not: the line never left
             repeat = self._previous is not None and self._similar(confirmed, self._previous)
             self._current = self._previous = confirmed
             return LineConfirmed(confirmed, repeat=repeat)

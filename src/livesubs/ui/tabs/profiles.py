@@ -181,6 +181,15 @@ class ProfilesTab(QWidget):
         self.examples.edited.connect(self._on_examples)
         form.addRow(labeled(t("profiles.examples"), t("profiles.examples_tip")), self.examples)
 
+        self.merge = QCheckBox(t("profiles.merge"))
+        self.merge.toggled.connect(self._on_merge)
+        merge = QHBoxLayout()
+        merge.setSpacing(6)
+        merge.addWidget(self.merge)
+        merge.addWidget(info(t("profiles.merge_tip")))
+        merge.addStretch(1)
+        form.addRow(merge)
+
         row = QHBoxLayout()
         row.addWidget(QPushButton(t("profiles.import_pack"), clicked=self._ask_import_pack))
         row.addStretch(1)
@@ -226,6 +235,7 @@ class ProfilesTab(QWidget):
                 self.context.setPlainText(p.translation.context)
             self.glossary.set_pairs(p.translation.glossary)
             self.examples.set_pairs(p.translation.examples)
+            self.merge.setChecked(p.translation.merge_split_sentences)
 
             inferred = infer_game_on_this_pc(p.source)
             self.location.clear()
@@ -284,6 +294,12 @@ class ProfilesTab(QWidget):
         self.profile.translation.examples = self.examples.pairs()
         self._edited()
 
+    def _on_merge(self, checked: bool) -> None:
+        if self._loading:
+            return
+        self.profile.translation.merge_split_sentences = checked
+        self._edited()
+
     def _ask_import_pack(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self, t("profiles.import_pack"), "", t("profiles.import_filter")
@@ -310,7 +326,9 @@ class ProfilesTab(QWidget):
                 self, t("profiles.import_pack"), t("profiles.import_failed", error=exc)
             )
             return False
+        merge = self.profile.translation.merge_split_sentences  # a setting, not the pack's
         self.profile.translation = pack.translation
+        self.profile.translation.merge_split_sentences = merge
         self.refresh()
         self.changed.emit()
         QMessageBox.information(

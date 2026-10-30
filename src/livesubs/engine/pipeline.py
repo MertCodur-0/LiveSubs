@@ -6,7 +6,9 @@ a new line waits for its confirming read. Frames are only processed when they ar
 the stabilizer wants another read. OCR runs inline (10-20 ms); translation runs on the
 orchestrator's thread, so a slow model never delays reading the next subtitle. The model warms up on
 a side thread while reading already runs; the newest line read meanwhile is translated once the
-model is ready.
+model is ready. A subtitle that continues the previous one's sentence (``text.sentences``) is sent
+as an upgrade of that line: the whole sentence is translated and replaces the first piece's
+translation.
 
 Without Ollama (or without the model) the pipeline keeps running and shows the English lines.
 """
@@ -43,7 +45,7 @@ from livesubs.engine.capture import FrameSource, SourceLostError, SourceUnavaila
 from livesubs.engine.capture import open_source as default_open_source
 from livesubs.engine.ocr.language import english_ocr_language
 from livesubs.engine.ocr.winrt_ocr import WinRtOcr
-from livesubs.engine.text import filters
+from livesubs.engine.text import filters, sentences
 from livesubs.engine.text.normalize import clean
 from livesubs.engine.text.stabilizer import (
     Event as LineEvent,
@@ -78,6 +80,9 @@ CAPTURE_MAX_FPS = 30.0
 # Room a translation needs after the prompt; a prompt closer to num_ctx than this gets a warning
 # (a cut prompt reports num_ctx - 1 tokens).
 CONTEXT_MARGIN_TOKENS = 128
+# Longest gap between two pieces of one sentence: from the last frame that showed the previous
+# piece to the next piece's confirmation.
+MERGE_GAP_S = 1.5
 
 SourceOpener = Callable[[Source], FrameSource]
 BackendFactory = Callable[[StartPipeline], TranslationBackend]
@@ -137,6 +142,9 @@ class Pipeline:
         self._thread = threading.Thread(target=self._run, name="pipeline", daemon=True)
         self._line_id = 0
         self._ocr_ms: dict[int, float] = {}
+        # Pieces of the sentence the current line_id stands for, and when a line was last seen.
+        self._pieces: list[str] = []
+        self._line_seen = 0.0
         # Set by the warm-up thread once the model answers; lines read before that wait.
         self._lock = threading.Lock()
         self._orchestrator: TranslationOrchestrator | None = None
@@ -306,6 +314,8 @@ class Pipeline:
                 self._last_debug = now
                 self._emit(self._debug_frame(region, processed, change))
             decision = stabilizer.update(change, cv2.countNonZero(processed.mask), now)
+            if stabilizer.current is not None:
+                self._line_seen = now
             if decision.event is not None:
                 self._on_line(decision.event, 0.0)
             if not decision.read:
@@ -338,11 +348,25 @@ class Pipeline:
                 self._emit(SubtitleCleared())
             case LineConfirmed(text=text, repeat=True):
                 self._emit(SubtitleRead(self._line_id, text, ocr_ms, repeat=True))
+            case LineConfirmed(text=text) if self._continues(text):
+                self._pieces.append(text)
+                self._submit(self._line_id, " ".join(self._pieces), ocr_ms, upgrade=True)
             case LineConfirmed(text=text):
                 self._line_id += 1
+                self._pieces = [text]
                 self._submit(self._line_id, text, ocr_ms, upgrade=False)
             case LineUpgraded(text=text):
-                self._submit(self._line_id, text, ocr_ms, upgrade=True)
+                self._pieces[-1:] = [text]
+                self._submit(self._line_id, " ".join(self._pieces), ocr_ms, upgrade=True)
+
+    def _continues(self, text: str) -> bool:
+        """``text`` is the next piece of the sentence on screen just before it."""
+        return (
+            self._start.profile.translation.merge_split_sentences
+            and 0 < len(self._pieces) < sentences.MAX_PIECES
+            and time.monotonic() - self._line_seen <= MERGE_GAP_S
+            and sentences.continues(self._pieces[-1], text)
+        )
 
     def _submit(self, line_id: int, text: str, ocr_ms: float, *, upgrade: bool) -> None:
         self._ocr_ms[line_id] = ocr_ms

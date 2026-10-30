@@ -137,6 +137,8 @@ class TranslationSettings(SettingsModel):
     # Example translations (English -> Turkish) that show the model the game's tone; when set,
     # they replace the built-in examples of the prompt.
     examples: dict[str, str] = Field(default_factory=dict)
+    # A subtitle that continues the previous one's sentence is translated together with it.
+    merge_split_sentences: bool = True
 
 
 class VramSettings(SettingsModel):

@@ -1,6 +1,6 @@
 import pytest
 
-from livesubs.engine.text import filters
+from livesubs.engine.text import filters, sentences
 from livesubs.engine.text.filters import Reject
 from livesubs.engine.text.normalize import clean, key
 from livesubs.engine.text.stabilizer import (
@@ -222,10 +222,11 @@ def test_short_line_is_confirmed_while_its_mask_keeps_changing(clock: Clock) -> 
     stab = Stabilizer()
     appear_and_confirm(stab, clock, LINE)
     events = []
-    for _ in range(3):
+    for _ in range(6):
         assert stab.update(Change.CHANGED, 300, clock(0.1)).read
         events.append(stab.on_read("I knew Fisk", clock()))
-    assert LineConfirmed("I knew Fisk") in events
+    # Confirmed once: later reads of the same text are the same line, whatever the mask says.
+    assert [e for e in events if e is not None] == [LineConfirmed("I knew Fisk")]
     stab.update(Change.CHANGED, 600, clock(0.1))
     stab.on_read("wouldn't go quietly.", clock())
     stab.update(Change.SAME, 600, clock(0.06))
@@ -240,3 +241,21 @@ def test_line_reappearing_after_a_flicker_is_a_repeat(clock: Clock) -> None:
     stab.on_read(LINE, clock())
     stab.update(Change.SAME, 1000, clock(0.06))
     assert stab.on_read(LINE, clock()) == LineConfirmed(LINE, repeat=True)
+
+
+@pytest.mark.parametrize(
+    ("previous", "text", "merged"),
+    [
+        ("I knew Fisk", "wouldn't go quietly.", True),
+        ("We need that evidence", "if we want to put him away for good.", True),
+        ("Hold on,", "...and he's hitting us with everything.", True),
+        ("I knew Fisk.", "wouldn't go quietly.", False),  # sentence ended
+        ('He said "Go!"', "and we went.", False),  # ended inside quotes
+        ("Location--", "units, report.", False),  # interrupted: another speaker
+        ("I knew Fisk", "Wouldn't go quietly.", False),  # capital: a new sentence
+        ("I KNEW FISK", "WOULDN'T GO QUIETLY", False),  # all caps never merge
+        ("I knew Fisk", "", False),
+    ],
+)
+def test_sentence_continues(previous: str, text: str, merged: bool) -> None:
+    assert sentences.continues(previous, text) is merged

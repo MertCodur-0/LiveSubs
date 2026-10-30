@@ -169,7 +169,16 @@ UI process (PySide6)                                  Engine process (multiproce
   order and adds words (`is_upgrade`), confirmed by a second read, replaces it ->
   `LineUpgraded(text, previous)` (re-translate). Mere variations never replace it (no flicker).
   Static bright scenes stay a limit. Verified end to end on the samples played as a stream: each
-  line confirmed exactly once, cleared once.
+  line confirmed exactly once, cleared once. A confirmed read that matches the line still on
+  screen (pending after a mask change) emits nothing.
+- **Split sentences** (`engine/text/sentences.py`, 2026-10-30): a confirmed line continues the
+  previous one when the previous has no sentence end (`.!?`, not interrupted `-`) **and** the new
+  one starts in lower case, it comes within `MERGE_GAP_S` (1.5 s) of the last frame showing the
+  previous line, and the sentence has < `MAX_PIECES` (3). The pipeline then sends the joined
+  text as an **upgrade of the previous line_id** (orchestrator cancels / replaces its job, the
+  feed row and the phone line update in place). Per profile
+  `TranslationSettings.merge_split_sentences` (default on, checkbox in the Profiles tab; a pack
+  import keeps it). All-caps or unpunctuated games never merge.
 - Cache: in-memory LRU + SQLite, key = (model, profile + settings digest, normalized text);
   dialogue context not in key.
 - Latency budget (8B on GPU): capture+preprocess ~10 ms, OCR 30–80 ms, confirm ~50 ms,
@@ -1030,5 +1039,20 @@ First **finish the app** (each step committed and pushed; no new release unless 
   detector compares each frame with the previous one; a short line's small mask drops under
   IoU 0.75 from a few pixels of moving background, so every read was a first read. Now
   `CHANGED` keeps the candidate and two agreeing reads confirm the line whatever the mask did.
-  Open (asked the user): a sentence split over two subtitles ("I knew Fisk" / "wouldn't go
-  quietly.") is translated piece by piece ("Fisk'i tanıyordum." is wrong on its own).
+  **Verified with the user's PS5 recording** (6 s, 1080p30, kept out of the repo): the camera
+  sweeps over bright billboards whose edges pass the white/yellow mask, so the mask is mostly
+  background (17-25k px) and IoU between frames stays 0.3-0.68 for the whole second "I knew
+  Fisk" is up, while OCR reads it right on every frame. Replayed with the loop's timing at six
+  phases: old code never confirmed it (all six), new code confirms each line exactly once.
+  A follow-up fix: a candidate matching the line still on screen emits nothing (it used to
+  re-confirm the same line as a "repeat" every ~150 ms under mask churn).
+- 2026-10-30: **Split sentences merged** (user agreed; see Stabilizer -> Split sentences).
+  The user asked whether every game's subtitles suit it: the rule needs *both* an open end and
+  a lower-case start (the session's cache had three such pairs, all lower-case), so all-caps
+  games never merge, and a per-profile switch exists. Measured on the recording, real pipeline,
+  `gemma4-text:26b`, empty cache, two runs each: without merging the last piece's translation
+  ("sessizce gitmezdi.") was out 0.9-1.2 s after it appeared, the first piece's ("Fisk'i
+  tanırdım." — wrong meaning) before it; with merging the whole sentence ("Fisk'in öylece boyun
+  eğmeyeceğini biliyordum.") 1.5 s after the second piece appeared, i.e. **~0.3-0.6 s later**
+  than the fragment (merged request 1.34-1.40 s vs fragment 0.52-0.63 s) — more than the
+  0.1-0.2 s guessed beforehand. No waiting is added: the first piece is translated at once.

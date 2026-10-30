@@ -239,6 +239,14 @@ STRINGS: dict[str, str] = {
         "replik yeterli (fazlası çeviriyi yavaşlatır); boş bırakılırsa yerleşik örnekler "
         "kullanılır. Bir sonraki Başlat'ta geçerli olur."
     ),
+    "profiles.merge": "Bölünmüş cümleleri birlikte çevir",
+    "profiles.merge_tip": (
+        'Oyun uzun bir cümleyi iki altyazıya bölerse ("I knew Fisk" / "wouldn\'t go '
+        'quietly.") ikinci parça ilkiyle birlikte çevrilir ve ilk parçanın çevirisinin yerini '
+        "alır. Yalnızca ilk parça noktalama olmadan bitip ikincisi küçük harfle başlarsa "
+        "birleştirilir; büyük harfli altyazılarda hiç devreye girmez. Bir sonraki Başlat'ta "
+        "geçerli olur."
+    ),
     "profiles.import_pack": "Çeviri paketini içe aktar…",
     "profiles.import_filter": "Çeviri paketi (*.json)",
     "profiles.import_replace": (
