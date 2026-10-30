@@ -26,7 +26,13 @@ from livesubs.engine.translate.orchestrator import (
     TranslationEvent,
     TranslationOrchestrator,
 )
-from livesubs.engine.translate.prompt import EXAMPLES, SYSTEM_PROMPT, build_messages, clean_output
+from livesubs.engine.translate.prompt import (
+    EXAMPLES,
+    SYSTEM_PROMPT,
+    build_messages,
+    clean_output,
+    relevant_terms,
+)
 
 URL = "http://ollama.test"
 
@@ -35,7 +41,7 @@ URL = "http://ollama.test"
 
 def test_messages_carry_history_as_turns() -> None:
     request = TranslationRequest(
-        text="Get in the car.",
+        text="Get in the car, cops!",
         history=[ContextLine("Yo.", "Selam."), ContextLine("We're late.", "Geç kaldık.")],
         game_context="Crime story in 1980s Miami.",
         glossary={"Vice City": "Vice City", "cop": "aynasız"},
@@ -58,7 +64,28 @@ def test_messages_carry_history_as_turns() -> None:
         {"role": "user", "content": "We're late."},
         {"role": "assistant", "content": "Geç kaldık."},
     ]
-    assert messages[-1] == {"role": "user", "content": "Get in the car."}
+    assert messages[-1] == {"role": "user", "content": "Get in the car, cops!"}
+
+
+def test_only_the_glossary_terms_of_the_line_are_sent() -> None:
+    glossary = {
+        "cop": "aynasız",
+        "Lucia": "Lucia",
+        "Vice City": "Vice City",
+        "Raymond": "Ray",
+        "Jason": "Jason",
+    }
+    assert relevant_terms(glossary, "Lucía's car. The COPS saw us in VICE CITY!") == {
+        "cop": "aynasız",
+        "Lucia": "Lucia",
+        "Vice City": "Vice City",
+    }
+    assert relevant_terms(glossary, "Copper Jasonville") == {}  # whole words only
+    system = build_messages(TranslationRequest("Hi, Jason.", glossary=glossary))[0]["content"]
+    assert "- Jason -> Jason" in system
+    assert "Raymond" not in system and "aynasız" not in system
+    system = build_messages(TranslationRequest("Hi.", glossary=glossary))[0]["content"]
+    assert system == SYSTEM_PROMPT
 
 
 def test_minimal_messages() -> None:

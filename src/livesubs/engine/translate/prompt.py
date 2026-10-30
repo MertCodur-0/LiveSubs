@@ -15,6 +15,7 @@ import json
 import re
 from collections.abc import Mapping, Sequence
 
+from livesubs.engine.text.normalize import key
 from livesubs.engine.translate.base import TranslationRequest
 
 SYSTEM_PROMPT = """\
@@ -47,12 +48,27 @@ _LABEL = re.compile(r"^(?:turkish|türkçe|translation|çeviri)\s*:\s*", re.IGNO
 _QUOTES = "\"'“”‘’«»"
 
 
+def relevant_terms(glossary: Mapping[str, str], text: str) -> dict[str, str]:
+    """The glossary entries that occur in ``text`` as whole words, ignoring case, accents and
+    punctuation; a plural or possessive "s"/"es" still matches ("Cops", "Lucia's").
+
+    Sending only these keeps the prompt short (it is processed again for every line) and stops
+    unrelated terms from leaking into a translation ("Raymond" became the glossary's "Ray")."""
+    words = f" {key(text)} "
+    terms = {}
+    for en, tr in glossary.items():
+        term = key(en)
+        if term and re.search(rf" {re.escape(term)}(?:e?s)? ", words):
+            terms[en] = tr
+    return terms
+
+
 def build_messages(request: TranslationRequest) -> list[dict[str, str]]:
     system = SYSTEM_PROMPT
     if request.game_context.strip():
         system += f"\n\nAbout the game: {request.game_context.strip()}"
-    if request.glossary:
-        terms = "\n".join(f"- {en} -> {tr}" for en, tr in request.glossary.items())
+    if glossary := relevant_terms(request.glossary, request.text):
+        terms = "\n".join(f"- {en} -> {tr}" for en, tr in glossary.items())
         system += f"\n\nAlways translate these terms this way:\n{terms}"
     messages = [{"role": "system", "content": system}]
     for source, translation in request.examples or EXAMPLES:
