@@ -15,7 +15,9 @@ altyazı bölgesini Windows'un yerleşik OCR'ı ile okur. Her satırı [Ollama](
 katmanda (overlay) ya da telefonunda gösterir. Bulut servisi kullanmaz: yakalama, OCR ve çeviri
 tamamen kendi bilgisayarında çalışır.
 
-![Ana pencere: İngilizce satırlar, Türkçe çevirileri ve süreleriyle canlı akış](docs/images/live.png)
+| Apple koyu (varsayılan) | Apple açık |
+| --- | --- |
+| ![Apple koyu temada ana pencere: kenar çubuğu, kaynak ve model özeti, İngilizce satırlar, Türkçe çevirileri ve süreleriyle canlı akış](docs/images/live.png) | ![Aynı pencere Apple açık temada](docs/images/live-light.png) |
 
 <!-- Demo GIF buraya: docs/images/demo.gif (kayıt modu açıkken kaydedin). -->
 
@@ -44,18 +46,20 @@ tamamen kendi bilgisayarında çalışır.
 - **Oyun başına profil.** Kaynak, bölge, renkler, overlay stili ve konumu, bağlam ve sözlük,
   oyuna ayrılan VRAM.
 - **Gerçek uygulama.** Exe'ye çift tıklarsın; eksik bir şey varsa kurulum penceresi kurar.
-  Genel kısayol tuşları, sistem tepsisi simgesi ve canlı Inspector'lı ayar modu var.
+  Genel kısayol tuşları, sistem tepsisi simgesi ve canlı Inspector'lı ayar modu var. macOS
+  Ayarlar benzeri, kenar çubuklu pencere; temalar: Apple koyu (varsayılan), Apple açık,
+  Windows'un açık/koyu ayarını izleyen Apple, Vice (neon gün batımı) ve Sade koyu.
 
 | Ayarlar ve telefon QR kodu | Telefon sayfası |
 | --- | --- |
-| ![Telefon çıktısı ve QR koduyla Ayarlar sekmesi](docs/images/settings.png) | <img src="docs/images/phone.png" alt="Telefon sayfası: en yeni çeviri en üstte, eskiler altta soluk" width="270"> |
+| ![Telefon çıktısı ve QR koduyla Ayarlar sayfası](docs/images/settings.png) | <img src="docs/images/phone.png" alt="Telefon sayfası: en yeni çeviri en üstte, eskiler altta soluk" width="270"> |
 
 ## Nasıl çalışır
 
 ```mermaid
 flowchart LR
     subgraph UI["Arayüz süreci (PySide6)"]
-        MW[Ana pencere<br/>sekmeler, tepsi, kısayollar]
+        MW[Ana pencere<br/>kenar çubuğu, tepsi, kısayollar]
         OV[Overlay]
         WEB[Web sunucusu<br/>SSE + QR]
         MM[Model yöneticisi]
@@ -196,9 +200,9 @@ atlanır.
 
 - Yazı tipleri: [Inter](https://rsms.me/inter/),
   [Audiowide](https://fonts.google.com/specimen/Audiowide) ve
-  [Monoton](https://fonts.google.com/specimen/Monoton), hepsi SIL Open Font License ile
-  (metinleri `src/livesubs/assets/fonts` içinde).
-- Simge ve başlık görselleri özgündür. LiveSubs hiçbir oyun ya da yayıncıyla bağlantılı
+  [Monoton](https://fonts.google.com/specimen/Monoton) (son ikisi Vice temasında), hepsi
+  SIL Open Font License ile (metinleri `src/livesubs/assets/fonts` içinde).
+- Simgeler ve başlık görseli özgündür. LiveSubs hiçbir oyun ya da yayıncıyla bağlantılı
   değildir.
 
 ## Lisans

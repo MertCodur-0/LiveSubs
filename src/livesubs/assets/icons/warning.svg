@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20">
+  <!-- Warning: an exclamation mark in a triangle. Own artwork, MIT. -->
+  <path d="M10 2.8 17.6 16.4H2.4Z" fill="none" stroke="#000000" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M10 7.8v4" fill="none" stroke="#000000" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="10" cy="14" r="1" fill="#000000"/>
+</svg>

@@ -3,7 +3,7 @@
 import logging
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from livesubs.core import paths
 from livesubs.core.jsonio import SettingsModel, StorageError, read_model, write_model
@@ -11,6 +11,8 @@ from livesubs.core.jsonio import SettingsModel, StorageError, read_model, write_
 log = logging.getLogger(__name__)
 
 CONFIG_SCHEMA_VERSION = 1
+# "system" = Apple dark or light after Windows' app mode (see ui.theme).
+THEME_CHOICES = ("apple", "apple_light", "system", "vice", "dark")
 
 
 class OllamaSettings(SettingsModel):
@@ -59,7 +61,7 @@ class AppConfig(SettingsModel):
     schema_version: int = CONFIG_SCHEMA_VERSION
     last_profile: str | None = None
     ui_language: str = "tr"
-    theme: str = "vice"
+    theme: str = "apple"
     minimize_to_tray: bool = True
     ollama: OllamaSettings = Field(default_factory=OllamaSettings)
     cpu_lane: CpuLaneSettings = Field(default_factory=CpuLaneSettings)
@@ -68,8 +70,16 @@ class AppConfig(SettingsModel):
     preview: PreviewSettings = Field(default_factory=PreviewSettings)
     # Lets OBS and screenshots see the overlay (for recordings); OCR may then read it back.
     recording_mode: bool = False
+    # The Live feed as the table with time, model and timings instead of the plain list.
+    developer_view: bool = False
     # None = detect the GPU's VRAM; set it when detection is wrong.
     total_vram_gb: float | None = Field(None, gt=0, le=256)
+
+    @field_validator("theme")
+    @classmethod
+    def _known_theme(cls, value: str) -> str:
+        # Unknown names (a typo, a removed theme) get the default instead of failing.
+        return value if value in THEME_CHOICES else "apple"
 
 
 def load_config(path: Path | None = None) -> AppConfig:

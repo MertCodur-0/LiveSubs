@@ -13,7 +13,7 @@ import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from PySide6.QtCore import QObject, QTimer, Signal
+from PySide6.QtCore import QCoreApplication, QObject, QTimer, Signal
 from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -56,6 +56,7 @@ from livesubs.ollama.client import (
 )
 from livesubs.ollama.compare import TEST_LINES, LineResult, ModelRun, run_comparison
 from livesubs.platform import gpu
+from livesubs.ui.rows import info
 from livesubs.ui.setup_check import free_bytes
 
 GB = vram.GB
@@ -115,7 +116,12 @@ def _hint(text: str = "") -> QLabel:
 
 
 class _Bridge(QObject):
-    """Carries results from worker threads to the UI thread."""
+    """Carries results from worker threads to the UI thread.
+
+    Owned by the application, and workers capture the bridge, never the window: a worker
+    may drop the last reference after the window is gone, and a Qt object destroyed outside
+    the UI thread crashes the process.
+    """
 
     snapshot = Signal(object)  # Snapshot
     progress = Signal(object)  # PullProgress
@@ -155,7 +161,7 @@ class ModelsTab(QWidget):
         self._compare_models: list[str] = []
         self._compare_times: dict[str, list[float]] = {}
         self._compare_runs: dict[str, ModelRun] = {}
-        self._bridge = _Bridge()
+        self._bridge = _Bridge(QCoreApplication.instance())
         self._bridge.snapshot.connect(self._on_snapshot)
         self._bridge.progress.connect(self._on_progress)
         self._bridge.pull_finished.connect(self._on_pull_finished)
@@ -165,8 +171,10 @@ class ModelsTab(QWidget):
         self._bridge.compare_finished.connect(self._on_compare_finished)
         self._timer = QTimer(self, interval=REFRESH_MS, timeout=self.refresh)
 
-        content = QWidget()
+        content = QWidget(objectName="page")  # transparent in the scroll area (theme)
         layout = QVBoxLayout(content)
+        layout.setContentsMargins(0, 0, 8, 0)
+        layout.setSpacing(12)
         layout.addWidget(self._status_box())
         layout.addWidget(self._installed_box())
         layout.addWidget(self._download_box())
@@ -216,7 +224,7 @@ class ModelsTab(QWidget):
         self.table.verticalHeader().hide()
         self.table.setMinimumHeight(150)
         self.table.itemSelectionChanged.connect(self._update_buttons)
-        self.table.itemDoubleClicked.connect(lambda _item: self.use_selected())
+        self.table.itemDoubleClicked.connect(self.use_selected)
         layout.addWidget(self.table)
         buttons = QHBoxLayout()
         self.use_button = QPushButton(t("models.use"), clicked=self.use_selected)
@@ -251,6 +259,7 @@ class ModelsTab(QWidget):
         self.pull_progress.hide()
         grid.addWidget(self.pull_progress, 2, 0, 1, 3)
         self.pull_status = QLabel(wordWrap=True)
+        self.pull_status.hide()  # shown with a message: no empty row in the card
         grid.addWidget(self.pull_status, 3, 0, 1, 3)
         self._update_pull_hint(self.pull_combo.currentText())
         return box
@@ -258,8 +267,9 @@ class ModelsTab(QWidget):
     def _compare_box(self) -> QGroupBox:
         box = QGroupBox(t("models.compare"))
         layout = QVBoxLayout(box)
-        layout.addWidget(_hint(t("models.compare_hint")))
+        layout.setSpacing(8)
         pick = QHBoxLayout()
+        pick.addWidget(info(t("models.compare_hint")))
         self.compare_a = QComboBox()
         self.compare_b = QComboBox()
         self.compare_button = QPushButton(t("models.compare_start"), clicked=self.toggle_compare)
@@ -299,8 +309,9 @@ class ModelsTab(QWidget):
 
     def refresh(self) -> None:
         url, known = self.config.ollama.url, set(self._archs)
+        fetch, bridge = self._fetch, self._bridge
         threading.Thread(
-            target=lambda: self._bridge.snapshot.emit(self._fetch(url, known)), daemon=True
+            target=lambda: bridge.snapshot.emit(fetch(url, known)), daemon=True
         ).start()
 
     def _on_snapshot(self, snapshot: Snapshot) -> None:
@@ -461,14 +472,15 @@ class ModelsTab(QWidget):
         ):
             return
         url = self.config.ollama.url
+        bridge = self._bridge
 
         def work() -> None:
             try:
                 delete_model(name, url)
             except OllamaError as exc:
-                self._bridge.deleted.emit(name, str(exc))
+                bridge.deleted.emit(name, str(exc))
             else:
-                self._bridge.deleted.emit(name, "")
+                bridge.deleted.emit(name, "")
 
         self.delete_button.setEnabled(False)
         threading.Thread(target=work, daemon=True).start()
@@ -483,6 +495,10 @@ class ModelsTab(QWidget):
 
     # --- download --------------------------------------------------------------------------------
 
+    def _set_pull_status(self, text: str) -> None:
+        self.pull_status.setText(text)
+        self.pull_status.setVisible(bool(text))
+
     def _update_pull_hint(self, name: str) -> None:
         entry = next((m for m in catalog.RECOMMENDED if m.name == name.strip()), None)
         if entry is None:
@@ -495,14 +511,14 @@ class ModelsTab(QWidget):
         if not name:
             return
         if any(catalog.same_model(name, m.name) for m in self.installed()):
-            self.pull_status.setText(t("models.already_installed", model=name))
+            self._set_pull_status(t("models.already_installed", model=name))
             return
         entry = next((m for m in catalog.RECOMMENDED if m.name == name), None)
         if entry is not None:
             folder = models_dir()
             free = free_bytes(folder)
             if free < entry.download_bytes * 1.05:
-                self.pull_status.setText(
+                self._set_pull_status(
                     t(
                         "setup.model.no_space",
                         need=entry.download_bytes / GB,
@@ -516,19 +532,20 @@ class ModelsTab(QWidget):
         self.pull_progress.setValue(0)
         self.pull_progress.show()
         self.pull_cancel_button.show()
-        self.pull_status.setText(t("setup.model.progress_unknown", status=name))
+        self._set_pull_status(t("setup.model.progress_unknown", status=name))
         self._update_buttons()
         url = self.config.ollama.url
+        bridge = self._bridge
 
         def work() -> None:
             try:
-                pull_model(name, self._bridge.progress.emit, cancel, url)
+                pull_model(name, bridge.progress.emit, cancel, url)
             except PullCancelledError:
-                self._bridge.pull_finished.emit(name, CANCELLED)
+                bridge.pull_finished.emit(name, CANCELLED)
             except PullError as exc:
-                self._bridge.pull_finished.emit(name, str(exc))
+                bridge.pull_finished.emit(name, str(exc))
             else:
-                self._bridge.pull_finished.emit(name, "")
+                bridge.pull_finished.emit(name, "")
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -538,10 +555,10 @@ class ModelsTab(QWidget):
 
     def _on_progress(self, progress: PullProgress) -> None:
         if not progress.total:
-            self.pull_status.setText(t("setup.model.progress_unknown", status=progress.status))
+            self._set_pull_status(t("setup.model.progress_unknown", status=progress.status))
             return
         self.pull_progress.setValue(round(1000 * progress.completed / progress.total))
-        self.pull_status.setText(
+        self._set_pull_status(
             t(
                 "models.pull_progress",
                 status=progress.status,
@@ -556,11 +573,11 @@ class ModelsTab(QWidget):
         self.pull_progress.hide()
         self.pull_cancel_button.hide()
         if error == CANCELLED:
-            self.pull_status.setText(t("setup.model.cancelled"))
+            self._set_pull_status(t("setup.model.cancelled"))
         elif error:
-            self.pull_status.setText(t("setup.model.failed", detail=error))
+            self._set_pull_status(t("setup.model.failed", detail=error))
         else:
-            self.pull_status.setText(t("models.pulled", model=name))
+            self._set_pull_status(t("models.pulled", model=name))
             self.models_changed.emit()
         self._update_buttons()
         self.refresh()
@@ -621,15 +638,17 @@ class ModelsTab(QWidget):
         context = self.profile.translation.context
         glossary = dict(self.profile.translation.glossary)
         examples = dict(self.profile.translation.examples)
+        bridge = self._bridge
+        comparison = self._comparison
 
         def work() -> None:
             try:
-                self._comparison(
+                comparison(
                     models,
                     lines,
                     settings,
-                    on_model=self._bridge.model_run.emit,
-                    on_line=self._bridge.line_result.emit,
+                    on_model=bridge.model_run.emit,
+                    on_line=bridge.line_result.emit,
                     cancel=cancel,
                     game_context=context,
                     glossary=glossary,
@@ -637,7 +656,7 @@ class ModelsTab(QWidget):
                     keep_loaded=settings.gpu_model,
                 )
             finally:
-                self._bridge.compare_finished.emit()
+                bridge.compare_finished.emit()
 
         threading.Thread(target=work, daemon=True).start()
 

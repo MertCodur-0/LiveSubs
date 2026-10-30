@@ -11,16 +11,20 @@ import subprocess
 import sys
 import threading
 import time
+from collections import deque
 from collections.abc import Callable, Collection
 from dataclasses import dataclass
 from typing import Protocol
 
-from PySide6.QtCore import QCoreApplication, QEvent, QObject, Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QCoreApplication, QEvent, QObject, QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QCloseEvent, QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QButtonGroup,
     QComboBox,
-    QGridLayout,
+    QDialog,
+    QFrame,
+    QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -28,9 +32,9 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
-    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -74,9 +78,10 @@ from livesubs.i18n import t
 from livesubs.ollama.client import DEFAULT_URL, InstalledModel, list_models, start_ollama
 from livesubs.platform import win32
 from livesubs.platform.video_devices import list_video_devices
-from livesubs.ui import screens
+from livesubs.ui import icons, rows, screens
 from livesubs.ui import theme as themes
 from livesubs.ui.capture_card import CaptureCard, Host
+from livesubs.ui.feed import FeedList
 from livesubs.ui.frame_region import FrameRegionDialog
 from livesubs.ui.header import Header
 from livesubs.ui.hotkeys import HotkeyManager
@@ -104,6 +109,11 @@ FOLLOW_MS = 300
 FULLSCREEN_CHECK_MS = 3000
 WEB_STATUS_MS = 2000
 ENGINE_CHECK_MS = 1000
+SIDEBAR_WIDTH = 200
+SHEET_WIDTH = 560
+AVERAGE_OF = 20  # translations in the state line's mean
+NAV_ICON_PX = 18
+PAGE_MARGINS = (28, 22, 28, 14)
 ACTIVE_STATES = (
     EngineState.STARTING,
     EngineState.WARMING_UP,
@@ -185,8 +195,36 @@ def available_sources(
     return options
 
 
+def _source_name(source: Source) -> str:
+    """A short name for a source: the window title (else its exe), the monitor or the card."""
+    if isinstance(source, WindowSource):
+        return source.title or source.exe_name
+    return source.device_name.removeprefix("\\\\.\\")
+
+
+def _page(title: str, content: QWidget, *, scrolls: bool) -> QWidget:
+    """A sidebar page: its large title over the content, which may scroll."""
+    if scrolls:
+        content.setObjectName("page")  # transparent inside the scroll area (theme)
+        scroll = QScrollArea(widgetResizable=True, frameShape=QScrollArea.Shape.NoFrame)
+        scroll.setWidget(content)
+        content = scroll
+    page = QWidget()
+    layout = QVBoxLayout(page)
+    layout.setContentsMargins(*PAGE_MARGINS)
+    layout.setSpacing(6)
+    layout.addWidget(QLabel(title, objectName="pageTitle"))
+    layout.addWidget(content, 1)
+    return page
+
+
 class _Bridge(QObject):
-    """Carries results from worker threads to the UI thread."""
+    """Carries results from worker threads to the UI thread.
+
+    Owned by the application, and workers capture the bridge, never the window: a worker
+    may drop the last reference after the window is gone, and a Qt object destroyed outside
+    the UI thread crashes the process.
+    """
 
     models = Signal(object)  # list[InstalledModel] | None
     spill = Signal(str, float)  # model, part of it that runs on the CPU
@@ -204,18 +242,22 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle(f"{APP_NAME} {__version__}")
         self.setWindowIcon(app_icon())
-        self.resize(1000, 720)
+        self.resize(1000, 680)
         self._engine = engine
         self._config = config or load_config()
         self._store = store or ProfileStore()
         self._profile_id, self._profile = self._initial_profile()
         self._theme = themes.apply_theme(self._config.theme)
+        QGuiApplication.styleHints().colorSchemeChanged.connect(self._on_color_scheme)
         self._sources: list[SourceOption] = []
         self._state = EngineState.IDLE
         self._frame: FrameInfo | None = None
         self._rows: dict[int, int] = {}
         self._translations: dict[int, str] = {}
         self._clear_generation = 0
+        self._ollama_ok: bool | None = None  # None until the first check
+        self._translate_ms: deque[float] = deque(maxlen=AVERAGE_OF)  # not cached ones
+        self._state_text = t("state.idle")
         self._reads = 0  # lines read since Start: tells "running" from "waiting for subtitles"
         # The capture card: the device host owns it; a start on it waits until it is open.
         self._card = CaptureCard(self._config.preview, card_host)
@@ -239,7 +281,7 @@ class MainWindow(QMainWindow):
         self._previewing = False
         self._calibrating = False
         self._paused = False
-        self._bridge = _Bridge()
+        self._bridge = _Bridge(QCoreApplication.instance())
         self._bridge.models.connect(self._on_models)
         self._bridge.spill.connect(self._on_spill)
         self._discard_changes = False  # settings were imported: never write the old ones back
@@ -256,6 +298,7 @@ class MainWindow(QMainWindow):
         self.tray.show()
 
         self._build()
+        self._update_status()
         self.refresh_sources()
         self._update_region_label()
         self._hotkeys: HotkeyManager | None = None
@@ -291,58 +334,77 @@ class MainWindow(QMainWindow):
     def _build(self) -> None:
         live = QWidget()
         layout = QVBoxLayout(live)
-        grid = QGridLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+
+        # Shown only while something is wrong (Ollama missing or stopped).
+        self.warn_card = QFrame(objectName="warnCard")
+        warn = QHBoxLayout(self.warn_card)
+        warn.setContentsMargins(12, 8, 12, 8)
+        warn.setSpacing(8)
+        self.warn_icon = QLabel()
+        self.ollama_label = QLabel(t("ollama.checking"), wordWrap=True)
+        self.ollama_button = QPushButton(t("ollama.start"), clicked=self._start_ollama)
+        self.setup_button = QPushButton(t("setup.button"), clicked=self.open_setup)
+        warn.addWidget(self.warn_icon)
+        warn.addWidget(self.ollama_label, 1)
+        warn.addWidget(self.ollama_button)
+        warn.addWidget(self.setup_button)
+        self.warn_card.hide()
+        layout.addWidget(self.warn_card)
+
+        # What runs, in one line; the pickers live in the "Change" sheet.
+        summary = QFrame(objectName="card")
+        row = QHBoxLayout(summary)
+        row.setContentsMargins(16, 12, 12, 12)
+        row.setSpacing(12)
+        text = QVBoxLayout()
+        text.setSpacing(2)
+        self.summary_title = QLabel(objectName="summaryTitle")
+        self.summary_title.setMinimumWidth(1)  # long window titles elide instead of widening
+        self.summary_detail = rows.hint("")
+        text.addWidget(self.summary_title)
+        text.addWidget(self.summary_detail)
+        self.change_button = QPushButton(t("live.change"), clicked=self.open_source_sheet)
+        row.addLayout(text, 1)
+        row.addWidget(self.change_button, 0, Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(summary)
 
         self.profile_combo = QComboBox()
         self.profile_combo.activated.connect(
             lambda i: self.switch_profile(self.profile_combo.itemData(i))
         )
-        grid.addWidget(QLabel(t("profile.label")), 0, 0)
-        grid.addWidget(self.profile_combo, 0, 1)
-
         self.source_combo = QComboBox()
         self.source_combo.setPlaceholderText(t("source.none"))
-        refresh = QPushButton(t("source.refresh"), clicked=self.refresh_sources)
-        grid.addWidget(QLabel(t("source.label")), 1, 0)
-        grid.addWidget(self.source_combo, 1, 1)
-        grid.addWidget(refresh, 1, 2)
-
+        self.refresh_button = QPushButton(t("source.refresh"), clicked=self.refresh_sources)
         self.region_label = QLabel()
         self.region_button = QPushButton(t("region.select"), clicked=self.select_region)
-        grid.addWidget(QLabel(" "), 2, 0)
-        grid.addWidget(self.region_label, 2, 1)
-        grid.addWidget(self.region_button, 2, 2)
-
         self.model_combo = QComboBox()
         self.model_combo.activated.connect(self._on_model_combo)
-        self.ollama_label = QLabel(t("ollama.checking"))
-        self.ollama_button = QPushButton(t("ollama.start"), clicked=self._start_ollama)
-        self.ollama_button.hide()
-        self.setup_button = QPushButton(t("setup.button"), clicked=self.open_setup)
-        grid.addWidget(QLabel(t("model.label")), 3, 0)
-        grid.addWidget(self.model_combo, 3, 1)
-        grid.addWidget(self.ollama_label, 3, 2)
-        ollama_buttons = QHBoxLayout()
-        ollama_buttons.addWidget(self.ollama_button)
-        ollama_buttons.addWidget(self.setup_button)
-        grid.addLayout(ollama_buttons, 4, 2)
-        grid.setColumnStretch(1, 1)
-        layout.addLayout(grid)
+        self.source_sheet = self._build_source_sheet()
 
         self.start_button = QPushButton(t("start"), clicked=self.toggle, objectName="startButton")
-        self.start_button.setMinimumHeight(52)
         themes.set_glow(self.start_button, self._theme)
         self.calibrate_button = QPushButton(
             t("calibration.button"), checkable=True, clicked=self.set_calibration
         )
-        self.calibrate_button.setMinimumHeight(48)
+        self.calibrate_button.setProperty("pill", True)  # rounded like Start (theme)
         buttons = QHBoxLayout()
+        buttons.setSpacing(12)
         buttons.addWidget(self.start_button, 3)
         buttons.addWidget(self.calibrate_button, 1)
         layout.addLayout(buttons)
 
+        self.state_dot = QLabel("●", objectName="statusDot")
         self.state_label = QLabel(t("state.idle"))
-        layout.addWidget(self.state_label)
+        self.state_label.setProperty("hint", True)
+        self.state_label.setMinimumWidth(1)
+        state = QHBoxLayout()
+        state.setContentsMargins(8, 0, 0, 0)
+        state.setSpacing(6)
+        state.addWidget(self.state_dot)
+        state.addWidget(self.state_label, 1)
+        layout.addLayout(state)
 
         self.feed = QTableWidget(0, 6)
         self.feed.setHorizontalHeaderLabels(
@@ -364,8 +426,17 @@ class MainWindow(QMainWindow):
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         self.feed.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.feed.setWordWrap(True)
+        self.feed.setShowGrid(False)
         self.feed.verticalHeader().hide()
-        layout.addWidget(self.feed, 1)
+        # The list for reading, the table (time, model, timings) in the developer view.
+        self.feed_list = FeedList()
+        self.feed_stack = QStackedWidget()
+        self.feed_stack.addWidget(self.feed_list)
+        self.feed_stack.addWidget(self.feed)
+        self._show_feed_view()
+        feed_card = QGroupBox(t("live.feed_card"))
+        QVBoxLayout(feed_card).addWidget(self.feed_stack)
+        layout.addWidget(feed_card, 1)
 
         self.appearance = AppearanceTab(self._profile.overlay)
         self.appearance.changed.connect(self._on_appearance_changed)
@@ -382,6 +453,8 @@ class MainWindow(QMainWindow):
         self.settings.theme_changed.connect(self.set_theme)
         self.settings.clear_cache_requested.connect(self.clear_cache)
         self.settings.open_logs_requested.connect(self._open_logs)
+        self.settings.setup_requested.connect(self.open_setup)
+        self.settings.developer_view_changed.connect(self._show_feed_view)
 
         self.models = ModelsTab(self._config, self._profile)
         self.models.model_selected.connect(self._on_model_selected)
@@ -389,9 +462,6 @@ class MainWindow(QMainWindow):
         self.models.start_ollama_requested.connect(self._start_ollama)
         self.models.setup_requested.connect(self.open_setup)
 
-        self.tabs = QTabWidget()
-        self.tabs.addTab(live, t("tab.live"))
-        self.tabs.addTab(self.models, t("tab.models"))
         self.profiles = ProfilesTab(self._profile)
         self.profiles.changed.connect(self._on_profile_edited)
         self.profiles.new_requested.connect(self.new_profile)
@@ -399,28 +469,151 @@ class MainWindow(QMainWindow):
         self.profiles.rename_requested.connect(self.rename_profile)
         self.profiles.delete_requested.connect(self.delete_profile)
 
-        # Long tabs scroll instead of squeezing their rows on short screens.
-        for page, title in (
-            (self.appearance, "tab.appearance"),
-            (self.profiles, "tab.profiles"),
-            (self.settings, "tab.settings"),
+        # macOS Settings style: a sidebar picks the page, each page has a large title. Long
+        # pages scroll instead of squeezing their rows on short screens (Models scrolls itself).
+        self.pages = QStackedWidget()
+        self._nav_group = QButtonGroup(self)
+        self.nav_buttons: list[QPushButton] = []
+        for index, (page, key, icon, scrolls) in enumerate(
+            (
+                (live, "tab.live", "live", False),
+                (self.appearance, "tab.appearance", "appearance", True),
+                (self.profiles, "tab.profiles", "profiles", True),
+                (self.models, "tab.models", "models", False),
+                (self.settings, "tab.settings", "settings", True),
+            )
         ):
-            scroll = QScrollArea(widgetResizable=True, frameShape=QScrollArea.Shape.NoFrame)
-            scroll.setWidget(page)
-            self.tabs.addTab(scroll, t(title))
+            button = QPushButton(t(key), objectName="navButton", checkable=True)
+            button.setProperty("icon_name", icon)
+            button.setIconSize(QSize(NAV_ICON_PX, NAV_ICON_PX))
+            button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            button.clicked.connect(lambda _=False, i=index: self.show_page(i))
+            self._nav_group.addButton(button, index)
+            self.nav_buttons.append(button)
+            self.pages.addWidget(_page(t(key), page, scrolls=scrolls))
         self._fill_profile_combo()
 
         self.header = Header(self._theme)
+        self.status_dot = QLabel("●", objectName="statusDot")
+        self.status_text = QLabel(objectName="statusText")
+        status = QHBoxLayout()
+        status.setContentsMargins(8, 0, 8, 0)
+        status.setSpacing(6)
+        status.addWidget(self.status_dot)
+        status.addWidget(self.status_text, 1)
+        settings_line = QFrame(objectName="separator")
+        sidebar = QWidget(objectName="sidebar")
+        sidebar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
+        sidebar.setFixedWidth(SIDEBAR_WIDTH)
+        side = QVBoxLayout(sidebar)
+        side.setContentsMargins(8, 12, 8, 12)
+        side.setSpacing(2)
+        side.addWidget(self.header)
+        side.addSpacing(12)
+        for button in self.nav_buttons[:-1]:
+            side.addWidget(button)
+        side.addStretch(1)
+        side.addWidget(settings_line)
+        side.addSpacing(6)
+        side.addWidget(self.nav_buttons[-1])  # Settings: apart at the bottom
+        side.addSpacing(10)
+        side.addLayout(status)
+        self._tint_nav()
+        self.show_page(0)
+
         central = QWidget()
-        column = QVBoxLayout(central)
-        column.setContentsMargins(0, 0, 0, 0)
-        column.setSpacing(0)
-        column.addWidget(self.header)
-        body = QVBoxLayout()
-        body.setContentsMargins(10, 8, 10, 4)
-        body.addWidget(self.tabs)
-        column.addLayout(body, 1)
+        row = QHBoxLayout(central)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(0)
+        row.addWidget(sidebar)
+        row.addWidget(self.pages, 1)
         self.setCentralWidget(central)
+
+    def _build_source_sheet(self) -> QDialog:
+        """Profile, source, region and model: picked here, summed up on the Live page."""
+        sheet = QDialog(self)
+        sheet.setWindowTitle(t("live.change_title"))
+        sheet.setWindowModality(Qt.WindowModality.WindowModal)
+        sheet.setMinimumWidth(SHEET_WIDTH)
+        card = rows.RowCard()
+        card.add_row(t("profile.label"), self.profile_combo)
+        source = QHBoxLayout()
+        source.addWidget(self.source_combo, 1)
+        source.addWidget(self.refresh_button)
+        card.add_row(t("source.label"), source)
+        region = QHBoxLayout()
+        region.addWidget(self.region_label, 1)
+        region.addWidget(self.region_button)
+        card.add_row(t("region.label"), region)
+        card.add_row(t("model.label"), self.model_combo)
+        done = QPushButton(t("live.done"), clicked=sheet.accept)
+        done.setDefault(True)
+        footer = QHBoxLayout()
+        footer.addStretch(1)
+        footer.addWidget(done)
+        layout = QVBoxLayout(sheet)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
+        layout.addWidget(card)
+        layout.addLayout(footer)
+        return sheet
+
+    def open_source_sheet(self) -> None:
+        self.refresh_sources()
+        self.source_sheet.show()
+        self.source_sheet.raise_()
+
+    def _update_summary(self) -> None:
+        """The Live page's summary card: "<source> · <model>" and the profile."""
+        source = self._profile.source
+        name = t("live.no_source") if source is None else _source_name(source)
+        model = self._config.ollama.gpu_model or t("live.no_model")
+        self.summary_title.setText(f"{name} · {model}")
+        self.summary_title.setToolTip(self.summary_title.text())
+        region = "live.region_set" if self._profile.region is not None else "live.region_unset"
+        self.summary_detail.setText(
+            t("live.summary_detail", profile=self._profile.name, region=t(region))
+        )
+
+    def _show_state(self, text: str) -> None:
+        """The state line; while translating it adds the mean translation time."""
+        self._state_text = text
+        if self._state == EngineState.RUNNING and self._reads and self._translate_ms:
+            seconds = sum(self._translate_ms) / len(self._translate_ms) / 1000
+            text = f"{text} · {t('live.average', seconds=f'{seconds:.1f}'.replace('.', ','))}"
+        self.state_label.setText(text)
+
+    def _show_feed_view(self) -> None:
+        developer = self._config.developer_view
+        self.feed_stack.setCurrentWidget(self.feed if developer else self.feed_list)
+
+    def show_page(self, index: int) -> None:
+        """Select a sidebar page (0 = Live, then Appearance, Profiles, Models, Settings)."""
+        self.nav_buttons[index].setChecked(True)
+        self.pages.setCurrentIndex(index)
+
+    def _tint_nav(self) -> None:
+        """Sidebar icons in the theme's text color, the warning in its own (redrawn on a theme
+        change)."""
+        self.warn_icon.setPixmap(icons.pixmap("warning", self._theme.color("warn"), 18, 2.0))
+        color = self._theme.color("text")
+        for button in self.nav_buttons:
+            button.setIcon(icons.icon(button.property("icon_name"), color, NAV_ICON_PX))
+
+    def _update_status(self) -> None:
+        """The sidebar's dot: translating, paused, Ollama off, or stopped."""
+        if self._state in ACTIVE_STATES or self._card_waiting:
+            paused = self._state == EngineState.PAUSED
+            state, text = ("warn", "sidebar.paused") if paused else ("ok", "sidebar.running")
+        elif self._ollama_ok is False:
+            state, text = "warn", "sidebar.ollama_off"
+        else:
+            state, text = "idle", "sidebar.stopped"
+        self.status_text.setText(t(text))
+        for dot in (self.status_dot, self.state_dot):
+            if dot.property("state") != state:
+                dot.setProperty("state", state)  # colored by the theme
+                themes.repolish(dot)
 
     # --- settings tab, tray and warnings ----------------------------------------------------------
 
@@ -435,10 +628,18 @@ class MainWindow(QMainWindow):
         if failed:
             self.statusBar().showMessage(t("hotkey.failed", keys=", ".join(failed)), 15000)
 
-    def set_theme(self, name: str) -> None:
-        self._theme = themes.apply_theme(name)
+    def set_theme(self, choice: str) -> None:
+        self._theme = themes.apply_theme(choice)
         self.header.set_theme(self._theme)
         themes.set_glow(self.start_button, self._theme)
+        self._tint_nav()
+
+    def _on_color_scheme(self) -> None:
+        """Windows switched light/dark: follow it when the theme is "system"."""
+        if self._config.theme in themes.THEMES:
+            return  # a forced theme ignores Windows
+        if themes.resolve(self._config.theme) != self._theme.name:
+            self.set_theme(self._config.theme)
 
     def _on_recording_changed(self, on: bool) -> None:
         self._overlay.set_capture_visible(on)
@@ -766,8 +967,13 @@ class MainWindow(QMainWindow):
         ):
             self._pick_on_card_frame(option.spec)
             return
+        reopen = self.source_sheet.isVisible()
+        self.source_sheet.hide()  # out of the way of the marking
         picker = RegionPicker()
         picker.selected.connect(self._on_picked)
+        if reopen:
+            picker.selected.connect(lambda _: self.open_source_sheet())
+            picker.cancelled.connect(self.open_source_sheet)
         picker.show()
         self._picker = picker  # keep a reference while it is open
 
@@ -825,12 +1031,15 @@ class MainWindow(QMainWindow):
 
     def _update_region_label(self) -> None:
         r, source = self._profile.region, self._profile.source
+        self._update_summary()
         if r is None or source is None:
             self.region_label.setText(t("region.none"))
+            self.region_label.setToolTip("")
             return
-        name = source.title if isinstance(source, WindowSource) else source.device_name
-        self.region_label.setText(
-            t("region.selected", source=name[:70], x=r.x, y=r.y, w=r.width, h=r.height)
+        name = _source_name(source)[:70]
+        self.region_label.setText(t("region.chosen", source=name))
+        self.region_label.setToolTip(
+            t("region.selected", source=name, x=r.x, y=r.y, w=r.width, h=r.height)
         )
 
     # --- Ollama ----------------------------------------------------------------------------------
@@ -840,15 +1049,19 @@ class MainWindow(QMainWindow):
         # While translating: is the model slowed down by running partly on the CPU?
         watch = self._state == EngineState.RUNNING and not self._warned_spill
         model = self._config.ollama.gpu_model if watch else ""
+        bridge = self._bridge
 
         def work() -> None:
-            self._bridge.models.emit(list_models(url))
+            bridge.models.emit(list_models(url))
             if model and (share := cpu_share(url, model)) is not None:
-                self._bridge.spill.emit(model, share)
+                bridge.spill.emit(model, share)
 
         threading.Thread(target=work, daemon=True).start()
 
     def _on_models(self, models: list[InstalledModel] | None) -> None:
+        self._ollama_ok = models is not None
+        self._update_status()
+        self.warn_card.setVisible(models is None)
         if models is None:
             self.ollama_label.setText(t("ollama.offline"))
             self.ollama_button.show()
@@ -873,11 +1086,14 @@ class MainWindow(QMainWindow):
     def _on_model_combo(self, index: int) -> None:
         self._config.ollama.gpu_model = self.model_combo.itemText(index)
         self._save()
+        self._update_summary()
         self.models.mark_in_use()
 
     def _start_ollama(self) -> None:
         if not start_ollama():
             self.ollama_label.setText(t("ollama.not_installed"))
+            self.ollama_button.hide()
+            self.warn_card.show()
             self.open_setup()
 
     # --- setup -----------------------------------------------------------------------------------
@@ -896,6 +1112,7 @@ class MainWindow(QMainWindow):
         self._config.ollama.gpu_model = name
         self._save()
         self.models.mark_in_use()
+        self._update_summary()
         self.model_combo.clear()  # refilled by the check with the new model selected
         self.check_ollama()
 
@@ -945,7 +1162,7 @@ class MainWindow(QMainWindow):
                 self._engine.send(StopPipeline())
             self._card_waiting = True
             self._show_running(True)
-            self.state_label.setText(t("state.card_opening"))
+            self._show_state(t("state.card_opening"))
             return
         self._card_waiting = False
         self._card_started_on = self._card.shared_frames if card is not None else ""
@@ -953,6 +1170,7 @@ class MainWindow(QMainWindow):
             self._config.ollama.gpu_model = self.model_combo.currentText()
         self._save()
         self._reads = 0
+        self._translate_ms.clear()
         self._warned_spill = False
         # Line ids start again: old rows stay in the feed but no new line may land in them.
         self._rows.clear()
@@ -1032,11 +1250,12 @@ class MainWindow(QMainWindow):
         # by stop(), by a start on another source and by a fatal error.
         if self._card_waiting and state not in ACTIVE_STATES:
             text = t("state.card_opening")
-        self.state_label.setText(text)
+        self._show_state(text)
         running = state in ACTIVE_STATES or self._card_waiting
         self._show_running(running)
         self.tray.set_running(running)
         self.models.set_busy(state in ACTIVE_STATES)
+        self._update_status()
         if state in (EngineState.PAUSED, EngineState.STOPPED) and not self._calibrating:
             self._overlay.clear()
             if self._web is not None:
@@ -1216,8 +1435,10 @@ class MainWindow(QMainWindow):
             return self._rows[line_id]
         if self.feed.rowCount() >= FEED_LIMIT:
             self.feed.removeRow(self.feed.rowCount() - 1)
+            self.feed_list.remove_last()
             self._rows = {k: v for k, v in self._rows.items() if v < FEED_LIMIT - 1}
         self.feed.insertRow(0)
+        self.feed_list.insert_top()
         self._rows = {k: v + 1 for k, v in self._rows.items()}
         self._rows[line_id] = 0
         return 0
@@ -1225,13 +1446,17 @@ class MainWindow(QMainWindow):
     def _set_cells(self, row: int, values: dict[int, str]) -> None:
         for column, value in values.items():
             self.feed.setItem(row, column, QTableWidgetItem(value))
+        english, turkish = (self.feed.item(row, c) for c in (1, 2))
+        self.feed_list.set_line(
+            row, turkish.text() if turkish else "", english.text() if english else ""
+        )
 
     def _on_read(self, event: SubtitleRead) -> None:
         """A line was read. The overlay keeps the previous translation until this line's own
         arrives: a blank overlay while the model works looked like subtitles vanishing early."""
         self._clear_generation += 1  # a subtitle is up: cancel a pending clear
         if self._reads == 0 and self._state == EngineState.RUNNING:
-            self.state_label.setText(t("state.running"))
+            self._show_state(t("state.running"))
         self._reads += 1
         if event.repeat:
             if (text := self._translations.get(event.line_id)) is not None:
@@ -1252,6 +1477,9 @@ class MainWindow(QMainWindow):
 
     def _on_translated(self, event: SubtitleTranslated) -> None:
         self._translations[event.line_id] = event.translation
+        if not event.cached:
+            self._translate_ms.append(event.translate_ms)
+            self._show_state(self._state_text)
         row = self._row_for(event.line_id)
         timing = t("feed.cached") if event.cached else f"{event.translate_ms:.0f}"
         self._set_cells(row, {2: event.translation, 3: event.model, 5: timing})

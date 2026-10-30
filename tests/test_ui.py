@@ -2,9 +2,9 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QObject, QPoint, Qt, Signal
 from PySide6.QtGui import QGuiApplication, QKeySequence
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication, QLabel, QMessageBox
 from pytestqt.qtbot import QtBot
 
 from livesubs.core import paths
@@ -55,6 +55,8 @@ from livesubs.i18n import t
 from livesubs.platform import hotkeys, win32
 from livesubs.platform.video_devices import VideoDevice
 from livesubs.platform.win32 import MonitorInfo, WindowInfo
+from livesubs.ui import theme as themes
+from livesubs.ui import wheel
 from livesubs.ui.frame_region import FrameRegionDialog
 from livesubs.ui.inspector import Inspector
 from livesubs.ui.main_window import DEFAULT_PROFILE_ID, MainWindow
@@ -1034,15 +1036,69 @@ def test_translation_can_go_to_another_monitor(window: MainWindow) -> None:
 def test_theme_switch_from_settings(window: MainWindow) -> None:
     app = QGuiApplication.instance()
     combo = window.settings.theme
+    assert [combo.itemData(i) for i in range(combo.count())] == list(themes.CHOICES)
+    assert combo.currentData() == "apple"  # the default
     try:
+        combo.setCurrentIndex(combo.findData("apple_light"))
+        assert window._config.theme == "apple_light"
+        assert app.palette().window().color().name() == "#f5f5f7"
+        assert window.start_button.graphicsEffect() is None  # no glow
+        combo.setCurrentIndex(combo.findData("vice"))
+        assert window.header._theme.name == "vice"
+        assert window.start_button.graphicsEffect() is not None  # Vice glows
         combo.setCurrentIndex(combo.findData("dark"))
-        assert window._config.theme == "dark"
-        assert window.header._theme.name == "dark"
-        assert window.start_button.graphicsEffect() is None  # no glow in the plain theme
         assert app.palette().window().color().name() == "#17181c"
     finally:
-        combo.setCurrentIndex(combo.findData("vice"))
-    assert window.start_button.graphicsEffect() is not None
+        combo.setCurrentIndex(combo.findData("apple"))
+    assert app.palette().window().color().name() == "#1c1c1e"
+    assert window.start_button.graphicsEffect() is None
+
+
+def test_system_theme_follows_windows_live(
+    window: MainWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    combo = window.settings.theme
+    combo.setCurrentIndex(combo.findData("system"))
+    for scheme, expected in (("light", "apple_light"), ("dark", "apple"), ("light", "apple_light")):
+        monkeypatch.setattr(themes, "system_scheme", lambda s=scheme: s)
+        window._on_color_scheme()  # what Qt's colorSchemeChanged calls
+        assert window._theme.name == expected
+    combo.setCurrentIndex(combo.findData("vice"))
+    window._on_color_scheme()  # a chosen theme ignores Windows
+    assert window._theme.name == "vice"
+    combo.setCurrentIndex(combo.findData("apple"))
+
+
+def test_sidebar_switches_pages(window: MainWindow) -> None:
+    titles = [button.text() for button in window.nav_buttons]
+    keys = ("tab.live", "tab.appearance", "tab.profiles", "tab.models", "tab.settings")
+    assert titles == [t(k) for k in keys]
+    assert window.pages.count() == 5
+    for index, button in enumerate(window.nav_buttons):
+        assert not button.icon().isNull()
+        button.click()
+        assert window.pages.currentIndex() == index
+        assert button.isChecked()
+        assert sum(b.isChecked() for b in window.nav_buttons) == 1
+        title = window.pages.currentWidget().findChild(QLabel, "pageTitle")
+        assert title is not None and title.text() == titles[index]
+    window.show_page(0)
+    assert window.nav_buttons[0].isChecked()
+
+
+def test_sidebar_status(window: MainWindow) -> None:
+    window._on_models(None)  # the fixture's Ollama check finds nothing either
+    assert window.status_text.text() == t("sidebar.ollama_off")
+    assert window.status_dot.property("state") == "warn"
+    window._on_models([])
+    assert window.status_text.text() == t("sidebar.stopped")
+    engine_of(window).queue.append(StateChanged(EngineState.RUNNING))
+    window._poll()
+    assert window.status_text.text() == t("sidebar.running")
+    assert window.status_dot.property("state") == "ok"
+    engine_of(window).queue.append(StateChanged(EngineState.PAUSED))
+    window._poll()
+    assert window.status_text.text() == t("sidebar.paused")
 
 
 def test_start_button_shows_the_running_state(window: MainWindow) -> None:
@@ -1345,3 +1401,130 @@ def test_start_on_another_source_updates_the_region_label(card_window: MainWindo
     select_card(card_window)
     card_window.toggle()
     assert CARD_NAME in card_window.region_label.text()
+
+
+# --- Live page: summary, sheet, warning card, state line ------------------------------------------
+
+
+def test_summary_card_names_source_model_and_profile(window: MainWindow) -> None:
+    window._config.ollama.gpu_model = "gemma4:12b-it-qat"
+    region = NormRect(x=0.1, y=0.8, width=0.8, height=0.1)
+    window._use_region(WindowSource(title="Oyun", exe_name="game.exe"), region)
+    assert window.summary_title.text() == "Oyun · gemma4:12b-it-qat"
+    assert window._profile.name in window.summary_detail.text()
+    assert t("live.region_set") in window.summary_detail.text()
+    # The region label names the source but keeps the percentages in its tooltip only.
+    assert "%" not in window.region_label.text()
+    assert "%" in window.region_label.toolTip()
+
+
+def test_change_sheet_holds_the_pickers(window: MainWindow) -> None:
+    window.change_button.click()
+    sheet = window.source_sheet
+    assert sheet.isVisible()
+    for widget in (
+        window.profile_combo,
+        window.source_combo,
+        window.refresh_button,
+        window.region_button,
+        window.model_combo,
+    ):
+        assert sheet.isAncestorOf(widget)
+    sheet.accept()
+    assert not sheet.isVisible()
+
+
+def test_region_pick_moves_the_sheet_aside(
+    window: MainWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pickers: list = []
+
+    class FakePicker(QObject):
+        selected = Signal(object)
+        cancelled = Signal()
+
+        def show(self) -> None:
+            pickers.append(self)
+
+    monkeypatch.setattr("livesubs.ui.main_window.RegionPicker", FakePicker)
+    window.open_source_sheet()
+    window.select_region()
+    assert not window.source_sheet.isVisible()
+    pickers[0].cancelled.emit()
+    assert window.source_sheet.isVisible()
+    window.source_sheet.accept()
+
+
+def test_warning_card_only_while_ollama_is_missing(window: MainWindow) -> None:
+    window._on_models(None)
+    assert not window.warn_card.isHidden()
+    assert window.ollama_label.text() == t("ollama.offline")
+    window._on_models([])
+    assert window.warn_card.isHidden()
+
+
+def test_state_line_shows_the_mean_translation_time(window: MainWindow) -> None:
+    engine = engine_of(window)
+    engine.queue = [
+        StateChanged(EngineState.RUNNING),
+        SubtitleRead(1, "One.", 10.0),
+        SubtitleTranslated(1, "One.", "Bir.", "m", "gpu", 10.0, 1000.0, False),
+        SubtitleRead(2, "Two.", 10.0),
+        SubtitleTranslated(2, "Two.", "İki.", "m", "gpu", 10.0, 1400.0, False),
+        SubtitleRead(3, "One.", 10.0),
+        SubtitleTranslated(3, "One.", "Bir.", "m", "gpu", 10.0, 0.0, True),  # cached: not counted
+    ]
+    window._poll()
+    assert window.state_label.text() == f"{t('state.running')} · {t('live.average', seconds='1,2')}"
+    assert window.state_dot.property("state") == "ok"
+
+
+def test_advanced_settings_are_folded_away(window: MainWindow) -> None:
+    settings = window.settings
+    advanced = settings.advanced
+    for widget in (
+        settings.ollama_url,
+        settings.context_lines,
+        settings.keep_alive,
+        settings.fps,
+        settings.clear_cache,
+        settings.open_logs,
+        settings.setup_button,
+    ):
+        assert advanced.card.isAncestorOf(widget)
+    assert advanced.card.isHidden()
+    advanced.toggle.click()
+    assert not advanced.card.isHidden()
+    advanced.toggle.click()
+    assert advanced.card.isHidden()
+    # Everyday settings stay outside it.
+    for widget in (settings.theme, settings.web_enabled, settings.developer_view):
+        assert not advanced.card.isAncestorOf(widget)
+
+
+def test_setup_is_reachable_from_settings(window: MainWindow, qtbot: QtBot) -> None:
+    with qtbot.waitSignal(window.settings.setup_requested, timeout=1000):
+        window.settings.setup_button.click()
+    window.setup.hide()
+
+
+def test_wheel_never_changes_settings(window: MainWindow, qapp: QApplication) -> None:
+    from test_wheel import _wheel
+
+    wheel.install(qapp)
+    window.resize(1000, 680)
+    window.show()
+    for page, widget in (
+        (4, window.settings.theme),
+        (1, window.appearance.size),
+        (1, window.appearance.font),
+        (1, window.appearance.opacity),
+    ):
+        window.show_page(page)
+        before = widget.currentIndex() if hasattr(widget, "currentIndex") else widget.value()
+        _wheel(widget)
+        _wheel(widget, steps=1)
+        after = widget.currentIndex() if hasattr(widget, "currentIndex") else widget.value()
+        assert after == before, widget
+    assert window._config.theme == "apple"
+    window.hide()

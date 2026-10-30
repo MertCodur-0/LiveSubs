@@ -57,7 +57,7 @@ class Inspector(QWidget):
         for label in (self.region_image, self.ocr_image):
             label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             label.setMinimumHeight(90)
-            label.setStyleSheet("background: #111; border: 1px solid #333;")
+            label.setStyleSheet("background: #111; border: 1px solid #333; border-radius: 8px;")
         self.stats = QLabel()
         self.last_read = QLabel()
         self.last_read.setWordWrap(True)
@@ -178,7 +178,7 @@ class Inspector(QWidget):
 
     def _paint_custom(self) -> None:
         self.custom_color.setStyleSheet(
-            f"background-color: {self._custom}; border: 1px solid #888;"
+            f"background-color: {self._custom}; border: 1px solid #8E8E93; border-radius: 8px;"
         )
 
     # --- frames ----------------------------------------------------------------------------------

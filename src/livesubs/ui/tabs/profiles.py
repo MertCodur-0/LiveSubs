@@ -35,14 +35,19 @@ from livesubs.core.profiles import OverlayDisplay, Profile, infer_game_on_this_p
 from livesubs.core.translation_pack import PackError, load_pack
 from livesubs.i18n import t
 from livesubs.platform import win32
+from livesubs.ui.rows import info, labeled
 
+TABLE_MIN_HEIGHT = 120  # a few rows visible even when the page is short
+CONTEXT_HEIGHT = 64  # three lines of the game description
 GAME_LOCATIONS = (None, True, False)  # VramSettings.game_on_this_pc: auto, this PC, elsewhere
 
 
-def _hint(text: str) -> QLabel:
-    label = QLabel(text, wordWrap=True)
-    label.setProperty("hint", True)  # muted, styled by the theme
-    return label
+def _form(box: QWidget) -> QFormLayout:
+    """A card's form on the 8 px spacing scale, labels in one column."""
+    form = QFormLayout(box)
+    form.setHorizontalSpacing(12)
+    form.setVerticalSpacing(8)
+    return form
 
 
 class PairTable(QWidget):
@@ -54,6 +59,7 @@ class PairTable(QWidget):
         super().__init__()
         self._loading = False
         self.table = QTableWidget(0, 2)
+        self.table.setMinimumHeight(TABLE_MIN_HEIGHT)
         self.table.setHorizontalHeaderLabels([t("feed.english"), t("feed.turkish")])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.table.verticalHeader().hide()
@@ -126,6 +132,7 @@ class ProfilesTab(QWidget):
         self._monitors = monitors
         self._loading = False
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 8, 0)
         layout.addWidget(self._manage_box())
         layout.addWidget(self._translation_box(), 1)
         layout.addWidget(self._game_box())
@@ -147,28 +154,32 @@ class ProfilesTab(QWidget):
         ):
             buttons.addWidget(QPushButton(t(key), clicked=slot))
         buttons.addStretch(1)
-        layout.addWidget(self.active_label)
+        active = QHBoxLayout()
+        active.setSpacing(6)
+        active.addWidget(self.active_label)
+        active.addWidget(info(t("profiles.hint")))
+        active.addStretch(1)
+        layout.setSpacing(8)
+        layout.addLayout(active)
         layout.addLayout(buttons)
-        layout.addWidget(_hint(t("profiles.hint")))
         return box
 
     def _translation_box(self) -> QGroupBox:
         box = QGroupBox(t("profiles.translation"))
-        form = QFormLayout(box)
+        form = _form(box)
         self.context = QPlainTextEdit()
         self.context.setPlaceholderText(t("profiles.context_placeholder"))
-        self.context.setMaximumHeight(80)
+        self.context.setFixedHeight(CONTEXT_HEIGHT)
         self.context.textChanged.connect(self._on_context)
         form.addRow(t("profiles.context"), self.context)
 
         self.glossary = PairTable()
         self.glossary.edited.connect(self._on_glossary)
-        form.addRow(t("profiles.glossary"), self.glossary)
+        form.addRow(labeled(t("profiles.glossary"), t("profiles.glossary_tip")), self.glossary)
 
         self.examples = PairTable()
         self.examples.edited.connect(self._on_examples)
-        form.addRow(t("profiles.examples"), self.examples)
-        form.addRow(_hint(t("profiles.translation_hint")))
+        form.addRow(labeled(t("profiles.examples"), t("profiles.examples_tip")), self.examples)
 
         row = QHBoxLayout()
         row.addWidget(QPushButton(t("profiles.import_pack"), clicked=self._ask_import_pack))
@@ -178,7 +189,7 @@ class ProfilesTab(QWidget):
 
     def _game_box(self) -> QGroupBox:
         box = QGroupBox(t("profiles.game"))
-        form = QFormLayout(box)
+        form = _form(box)
         self.location = QComboBox()
         self.location.currentIndexChanged.connect(self._on_location)
         form.addRow(t("profiles.location"), self.location)
@@ -189,15 +200,15 @@ class ProfilesTab(QWidget):
         self.reserve.setRange(0, 64)
         self.reserve.valueChanged.connect(self._on_reserve)
         row = QHBoxLayout()
+        row.setSpacing(12)
         row.addWidget(self.reserve_auto)
         row.addWidget(self.reserve)
         row.addStretch(1)
-        form.addRow(t("profiles.reserve"), row)
+        form.addRow(labeled(t("profiles.reserve"), t("profiles.reserve_tip")), row)
 
         self.display = QComboBox()
         self.display.currentIndexChanged.connect(self._on_display)
-        form.addRow(t("profiles.display"), self.display)
-        form.addRow(_hint(t("profiles.game_hint")))
+        form.addRow(labeled(t("profiles.display"), t("profiles.display_tip")), self.display)
         return box
 
     # --- showing a profile -----------------------------------------------------------------------

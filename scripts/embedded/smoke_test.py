@@ -2,7 +2,7 @@
 
 LiveSubs.exe is a windowless pythonw.exe, so the result goes to the report file: "ok" plus the
 loaded Qt plugins, or the traceback. Exercises the native parts that a trimmed or incomplete
-package would break: Qt widgets, the theme with its bundled fonts and SVG art, the SVG/image
+package would break: Qt widgets, every theme with the bundled fonts and SVG art, the SVG/image
 plugins, OpenCV, WinRT OCR, windows-capture, the capture card parts (Media Foundation listing,
 shared frames, the preview) and the UI and engine modules.
 """
@@ -25,7 +25,8 @@ def check() -> list[str]:
     from livesubs.ui.icon import app_icon
 
     theme.prepare(app)
-    theme.apply_theme(theme.DEFAULT_THEME)  # template, token files, bundled fonts
+    for name in theme.CHOICES:
+        theme.apply_theme(name)  # template, token files, bundled fonts, system scheme
     missing = {"Inter", "Audiowide", "Monoton"} - set(QFontDatabase.families())
     if missing:
         raise RuntimeError(f"Bundled fonts missing: {sorted(missing)}")

@@ -1,7 +1,9 @@
 """First-run setup: model recommendation, model download, settings backup and the dialog."""
 
+import gc
 import json
 import threading
+import weakref
 import zipfile
 from collections.abc import Callable
 from pathlib import Path
@@ -331,6 +333,26 @@ def test_installed_model_is_used_without_downloading(qtbot: QtBot) -> None:
     with qtbot.waitSignal(dlg.model_selected) as signal:
         dlg.model_button.click()
     assert signal.args == [SMALL]
+
+
+def test_a_running_check_does_not_keep_the_dialog_alive(qtbot: QtBot) -> None:
+    # A worker holding the last reference destroyed the dialog outside the UI thread when it
+    # finished: a native crash that made this file fail now and then.
+    release = threading.Event()
+
+    def checker(url: str) -> SetupStatus:
+        release.wait(5)
+        return READY
+
+    dlg = SetupDialog(AppConfig(), checker=checker, ram_gb=32)
+    bridge = dlg._bridge
+    dlg.refresh()
+    alive = weakref.ref(dlg)
+    del dlg
+    gc.collect()
+    assert alive() is None
+    with qtbot.waitSignal(bridge.status):  # the late result reaches no one
+        release.set()
 
 
 def fake_pull(updates: list[PullProgress], error: Exception | None = None) -> Callable[..., None]:
