@@ -1006,3 +1006,5 @@ First **finish the app** (each step committed and pushed; no new release unless 
   (`rows.InfoIcon`) now shows its text itself on hover and on click; the main window sets
   `WA_AlwaysShowToolTips` for its other tooltips. Regression test hovers with another window
   active (fails on the old code).
+- 2026-10-30: **Released v0.5.2** (user's request): the (i) explanations show while another
+  app has focus.
