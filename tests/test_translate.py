@@ -28,6 +28,7 @@ from livesubs.engine.translate.orchestrator import (
 )
 from livesubs.engine.translate.prompt import (
     EXAMPLES,
+    GLOSSARY_HEADER,
     SYSTEM_PROMPT,
     build_messages,
     clean_output,
@@ -49,11 +50,11 @@ def test_messages_carry_history_as_turns() -> None:
     messages = build_messages(request)
     examples = 2 * len(EXAMPLES)
     turns = len(EXAMPLES) + len(request.history)
-    assert [m["role"] for m in messages] == ["system", *["user", "assistant"] * turns, "user"]
+    roles = ["system", *["user", "assistant"] * turns, "system", "user"]
+    assert [m["role"] for m in messages] == roles
     assert messages[0]["content"].startswith(SYSTEM_PROMPT)
     assert "1980s Miami" in messages[0]["content"]
-    assert "- cop -> aynasız" in messages[0]["content"]
-    # Fixed examples first, then the dialogue so far, then the line to translate.
+    # Fixed examples first, then the dialogue so far, the line's terms, the line to translate.
     assert messages[1:3] == [
         {"role": "user", "content": EXAMPLES[0][0]},
         {"role": "assistant", "content": EXAMPLES[0][1]},
@@ -64,6 +65,7 @@ def test_messages_carry_history_as_turns() -> None:
         {"role": "user", "content": "We're late."},
         {"role": "assistant", "content": "Geç kaldık."},
     ]
+    assert messages[-2] == {"role": "system", "content": f"{GLOSSARY_HEADER}\n- cop -> aynasız"}
     assert messages[-1] == {"role": "user", "content": "Get in the car, cops!"}
 
 
@@ -81,11 +83,12 @@ def test_only_the_glossary_terms_of_the_line_are_sent() -> None:
         "Vice City": "Vice City",
     }
     assert relevant_terms(glossary, "Copper Jasonville") == {}  # whole words only
-    system = build_messages(TranslationRequest("Hi, Jason.", glossary=glossary))[0]["content"]
-    assert "- Jason -> Jason" in system
-    assert "Raymond" not in system and "aynasız" not in system
-    system = build_messages(TranslationRequest("Hi.", glossary=glossary))[0]["content"]
-    assert system == SYSTEM_PROMPT
+    messages = build_messages(TranslationRequest("Hi, Jason.", glossary=glossary))
+    # The first system message stays the same for every line (Ollama's prompt cache).
+    assert messages[0]["content"] == SYSTEM_PROMPT
+    assert messages[-2]["content"] == f"{GLOSSARY_HEADER}\n- Jason -> Jason"
+    messages = build_messages(TranslationRequest("Hi.", glossary=glossary))
+    assert [m["role"] for m in messages[-2:]] == ["assistant", "user"]  # no terms, no message
 
 
 def test_minimal_messages() -> None:

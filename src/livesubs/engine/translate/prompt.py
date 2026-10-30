@@ -6,6 +6,12 @@ its game; otherwise the fixed ones below are used, which are deliberately not ta
 samples. Earlier lines of the dialogue follow as real user/assistant turns, so small models
 keep the tone and terms consistent and never translate the context lines themselves, which they
 tend to do when the context is pasted into one message.
+
+Everything that is the same for every line (system prompt, game context, examples) comes first,
+so Ollama reuses that prefix from its prompt cache; the glossary terms of the line come last, in
+a system message right before it. Terms inside the first system message changed it per line and
+made every request process the whole prompt again (filtered glossary there: median 882 ->
+1152 ms).
 """
 
 from __future__ import annotations
@@ -43,6 +49,8 @@ EXAMPLES: tuple[tuple[str, str], ...] = (
     ),
 )
 
+GLOSSARY_HEADER = "Always translate these terms this way:"
+
 _THINK_BLOCK = re.compile(r"<think>.*?</think>", re.DOTALL)
 _LABEL = re.compile(r"^(?:turkish|türkçe|translation|çeviri)\s*:\s*", re.IGNORECASE)
 _QUOTES = "\"'“”‘’«»"
@@ -52,8 +60,8 @@ def relevant_terms(glossary: Mapping[str, str], text: str) -> dict[str, str]:
     """The glossary entries that occur in ``text`` as whole words, ignoring case, accents and
     punctuation; a plural or possessive "s"/"es" still matches ("Cops", "Lucia's").
 
-    Sending only these keeps the prompt short (it is processed again for every line) and stops
-    unrelated terms from leaking into a translation ("Raymond" became the glossary's "Ray")."""
+    Sending only these keeps the prompt short and stops unrelated terms from leaking into a
+    translation ("Raymond" became the glossary's "Ray")."""
     words = f" {key(text)} "
     terms = {}
     for en, tr in glossary.items():
@@ -67,9 +75,6 @@ def build_messages(request: TranslationRequest) -> list[dict[str, str]]:
     system = SYSTEM_PROMPT
     if request.game_context.strip():
         system += f"\n\nAbout the game: {request.game_context.strip()}"
-    if glossary := relevant_terms(request.glossary, request.text):
-        terms = "\n".join(f"- {en} -> {tr}" for en, tr in glossary.items())
-        system += f"\n\nAlways translate these terms this way:\n{terms}"
     messages = [{"role": "system", "content": system}]
     for source, translation in request.examples or EXAMPLES:
         messages.append({"role": "user", "content": source})
@@ -77,6 +82,9 @@ def build_messages(request: TranslationRequest) -> list[dict[str, str]]:
     for line in request.history:
         messages.append({"role": "user", "content": line.source})
         messages.append({"role": "assistant", "content": line.translation})
+    if glossary := relevant_terms(request.glossary, request.text):
+        terms = "\n".join(f"- {en} -> {tr}" for en, tr in glossary.items())
+        messages.append({"role": "system", "content": f"{GLOSSARY_HEADER}\n{terms}"})
     messages.append({"role": "user", "content": request.text})
     return messages
 

@@ -279,7 +279,10 @@ Implementation (step 7, `engine/translate/`):
   cancel works even while the model is still loading).
 - `prompt.py`: English system prompt (rules above); history as real user/assistant turns
   (EN -> TR), which keeps small models from translating the context lines; `clean_output` strips
-  `<think>` blocks, "Türkçe:" labels, wrapping quotes, line breaks.
+  `<think>` blocks, "Türkçe:" labels, wrapping quotes, line breaks. Order: system (rules + game
+  context, the same for every line) -> examples -> history -> a second system message with only
+  the glossary terms found in the line (`relevant_terms`: whole words, case/accents/punctuation
+  ignored, plural "s" allowed) -> the line. The stable prefix is reused by Ollama's prompt cache.
 - `ollama.py`: `/api/chat` stream, `think: false`, `num_ctx`, optional `num_gpu`, `num_predict` 200,
   temperature 0, `keep_alive` 30m; `load()`, `unload()` (`keep_alive: 0`) and **`warm_up()`**:
   the first chat after a load took ~4 s (measured twice) even with the model already loaded,
@@ -977,3 +980,18 @@ First **finish the app** (each step committed and pushed; no new release unless 
 - 2026-10-30: **Released v0.5.0** (user's choice: merge `ui-redesign` into main, then release):
   Apple theme + sidebar redesign, mouse wheel no longer changes values, the worker-thread
   crash fix above.
+- 2026-10-30: **Speed/quality review** (user asked what slows the app or hurts translations;
+  user OK'd the five fixes, worked through while the user was away, one commit each): cache key
+  gains a settings digest; glossary filtered per line; history dropped after 60 s of silence;
+  the model kept loaded while running; a warning when the prompt nears `num_ctx`. Kept as they
+  were: backlog of 3, "newest wins" while warming up, the examples' swearing level (user: fine).
+  **Glossary measurement** (GTA VI pack, 60 lines, seed 6, `gemma4-text:26b`, `--only-pack`):
+  prompt 1116 -> 706 tokens. Full glossary median 882 (outlier first run) / 1164 / 1170 ms;
+  filtered terms *inside the first system message* 1152 ms — no gain, because the system
+  message then changes per line and **Ollama's prompt cache** (it does reuse the prefix with
+  Gemma 4, contrary to the 2026-10-21 note: "Lucia..." 270 ms with a stable prefix vs 1045 ms)
+  starts over; filtered terms in a **system message right before the line**: 1053 / 1060 ms
+  (~9 % faster). Gemma 4 obeys a mid-conversation system message (checked: "cop -> zabıta").
+  Quality about even: 20 of 60 lines differ in wording; better "Partnerim", "Bölgeden
+  ayrılma"; worse "Vice City de de bebeğim", "To hell with you" -> "Cehenneme git" (full:
+  "Siktir git lan!"). Runs swing by ~25 % between sessions: compare variants back to back.
