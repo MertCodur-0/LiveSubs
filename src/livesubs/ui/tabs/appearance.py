@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFontComboBox,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -44,7 +45,10 @@ class _ColorButton(QPushButton):
 
     def set_color(self, color: str) -> None:
         self._color = color
-        self.setStyleSheet(f"background-color: {color}; border: 1px solid #888; min-height: 20px;")
+        self.setStyleSheet(
+            f"background-color: {color}; border: 1px solid #8E8E93; border-radius: 8px;"
+            " min-height: 20px;"
+        )
 
     def _pick(self) -> None:
         chosen = QColorDialog.getColor(QColor(self._color), self, t("appearance.pick_color"))
@@ -60,7 +64,8 @@ class AppearanceTab(QWidget):
     def __init__(self, settings: OverlaySettings) -> None:
         super().__init__()
         self.settings = settings
-        form = QFormLayout()
+        look = QGroupBox(t("appearance.card.look"))
+        form = QFormLayout(look)
 
         self.style_combo = QComboBox()
         for style in OverlayStyle:
@@ -89,6 +94,8 @@ class AppearanceTab(QWidget):
         row.addWidget(self.opacity_label)
         form.addRow(t("appearance.box"), row)
 
+        text = QGroupBox(t("appearance.card.text"))
+        form = QFormLayout(text)
         self.font = QFontComboBox()
         self.font.currentFontChanged.connect(lambda f: self._set("font_family", f.family()))
         self.size = QSpinBox(suffix=" pt")
@@ -129,6 +136,8 @@ class AppearanceTab(QWidget):
         self.show_original.toggled.connect(lambda v: self._set("show_original", v))
         form.addRow("", self.show_original)
 
+        timing = QGroupBox(t("appearance.card.timing"))
+        form = QFormLayout(timing)
         self.clear_delay = QDoubleSpinBox(suffix=" sn", decimals=1, singleStep=0.5)
         self.clear_delay.setRange(0, 10)
         self.clear_delay.valueChanged.connect(
@@ -142,10 +151,17 @@ class AppearanceTab(QWidget):
         hint.setWordWrap(True)
         hint.setProperty("hint", True)  # muted, styled by the theme
 
+        self.preview.setProperty("pill", True)  # rounded (theme)
+        preview_row = QHBoxLayout()
+        preview_row.addWidget(self.preview)
+        preview_row.addStretch(1)
+        form.addRow("", preview_row)
+        form.addRow("", hint)
+
         layout = QVBoxLayout(self)
-        layout.addLayout(form)
-        layout.addWidget(self.preview)
-        layout.addWidget(hint)
+        layout.setContentsMargins(0, 0, 8, 0)
+        for card in (look, text, timing):
+            layout.addWidget(card)
         layout.addStretch(1)
         self.refresh()
 

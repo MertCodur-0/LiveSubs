@@ -3,7 +3,7 @@
 import logging
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from livesubs.core import paths
 from livesubs.core.jsonio import SettingsModel, StorageError, read_model, write_model
@@ -11,6 +11,8 @@ from livesubs.core.jsonio import SettingsModel, StorageError, read_model, write_
 log = logging.getLogger(__name__)
 
 CONFIG_SCHEMA_VERSION = 1
+# "system" follows Windows' light/dark app mode (see ui.theme).
+THEME_CHOICES = ("system", "dark", "light")
 
 
 class OllamaSettings(SettingsModel):
@@ -59,7 +61,7 @@ class AppConfig(SettingsModel):
     schema_version: int = CONFIG_SCHEMA_VERSION
     last_profile: str | None = None
     ui_language: str = "tr"
-    theme: str = "vice"
+    theme: str = "system"
     minimize_to_tray: bool = True
     ollama: OllamaSettings = Field(default_factory=OllamaSettings)
     cpu_lane: CpuLaneSettings = Field(default_factory=CpuLaneSettings)
@@ -70,6 +72,12 @@ class AppConfig(SettingsModel):
     recording_mode: bool = False
     # None = detect the GPU's VRAM; set it when detection is wrong.
     total_vram_gb: float | None = Field(None, gt=0, le=256)
+
+    @field_validator("theme")
+    @classmethod
+    def _known_theme(cls, value: str) -> str:
+        # Removed themes ("vice" before 0.5) and typos follow Windows instead of failing.
+        return value if value in THEME_CHOICES else "system"
 
 
 def load_config(path: Path | None = None) -> AppConfig:

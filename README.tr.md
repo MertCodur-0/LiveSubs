@@ -15,7 +15,9 @@ altyazı bölgesini Windows'un yerleşik OCR'ı ile okur. Her satırı [Ollama](
 katmanda (overlay) ya da telefonunda gösterir. Bulut servisi kullanmaz: yakalama, OCR ve çeviri
 tamamen kendi bilgisayarında çalışır.
 
-![Ana pencere: İngilizce satırlar, Türkçe çevirileri ve süreleriyle canlı akış](docs/images/live.png)
+| Koyu | Açık |
+| --- | --- |
+| ![Koyu temada ana pencere: İngilizce satırlar, Türkçe çevirileri ve süreleriyle canlı akış](docs/images/live.png) | ![Aynı pencere açık temada](docs/images/live-light.png) |
 
 <!-- Demo GIF buraya: docs/images/demo.gif (kayıt modu açıkken kaydedin). -->
 
@@ -44,7 +46,8 @@ tamamen kendi bilgisayarında çalışır.
 - **Oyun başına profil.** Kaynak, bölge, renkler, overlay stili ve konumu, bağlam ve sözlük,
   oyuna ayrılan VRAM.
 - **Gerçek uygulama.** Exe'ye çift tıklarsın; eksik bir şey varsa kurulum penceresi kurar.
-  Genel kısayol tuşları, sistem tepsisi simgesi ve canlı Inspector'lı ayar modu var.
+  Genel kısayol tuşları, sistem tepsisi simgesi ve canlı Inspector'lı ayar modu var. Koyu ve
+  açık tema; varsayılan olarak Windows'un açık/koyu ayarını izler ve onunla birlikte değişir.
 
 | Ayarlar ve telefon QR kodu | Telefon sayfası |
 | --- | --- |
@@ -194,11 +197,9 @@ atlanır.
 
 ## Teşekkürler
 
-- Yazı tipleri: [Inter](https://rsms.me/inter/),
-  [Audiowide](https://fonts.google.com/specimen/Audiowide) ve
-  [Monoton](https://fonts.google.com/specimen/Monoton), hepsi SIL Open Font License ile
-  (metinleri `src/livesubs/assets/fonts` içinde).
-- Simge ve başlık görselleri özgündür. LiveSubs hiçbir oyun ya da yayıncıyla bağlantılı
+- Yazı tipi: [Inter](https://rsms.me/inter/), SIL Open Font License ile (metni
+  `src/livesubs/assets/fonts` içinde).
+- Simge özgündür. LiveSubs hiçbir oyun ya da yayıncıyla bağlantılı
   değildir.
 
 ## Lisans

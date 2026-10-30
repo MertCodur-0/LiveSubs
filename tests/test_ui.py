@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QGuiApplication, QKeySequence
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication, QLabel, QMessageBox
 from pytestqt.qtbot import QtBot
 
 from livesubs.core import paths
@@ -55,6 +55,7 @@ from livesubs.i18n import t
 from livesubs.platform import hotkeys, win32
 from livesubs.platform.video_devices import VideoDevice
 from livesubs.platform.win32 import MonitorInfo, WindowInfo
+from livesubs.ui import theme as themes
 from livesubs.ui.frame_region import FrameRegionDialog
 from livesubs.ui.inspector import Inspector
 from livesubs.ui.main_window import DEFAULT_PROFILE_ID, MainWindow
@@ -1034,15 +1035,43 @@ def test_translation_can_go_to_another_monitor(window: MainWindow) -> None:
 def test_theme_switch_from_settings(window: MainWindow) -> None:
     app = QGuiApplication.instance()
     combo = window.settings.theme
+    assert [combo.itemData(i) for i in range(combo.count())] == ["system", "dark", "light"]
     try:
+        combo.setCurrentIndex(combo.findData("light"))
+        assert window._config.theme == "light"
+        assert window._theme.name == "light"
+        assert app.palette().window().color().name() == "#f5f5f7"
         combo.setCurrentIndex(combo.findData("dark"))
-        assert window._config.theme == "dark"
-        assert window.header._theme.name == "dark"
-        assert window.start_button.graphicsEffect() is None  # no glow in the plain theme
-        assert app.palette().window().color().name() == "#17181c"
+        assert app.palette().window().color().name() == "#1c1c1e"
+        assert window.start_button.graphicsEffect() is None  # no glow
     finally:
-        combo.setCurrentIndex(combo.findData("vice"))
-    assert window.start_button.graphicsEffect() is not None
+        combo.setCurrentIndex(combo.findData("system"))
+
+
+def test_system_theme_follows_windows_live(
+    window: MainWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    combo = window.settings.theme
+    combo.setCurrentIndex(combo.findData("system"))
+    for system in ("light", "dark", "light"):
+        monkeypatch.setattr(themes, "system_theme", lambda s=system: s)
+        window._on_color_scheme()  # what Qt's colorSchemeChanged calls
+        assert window._theme.name == system
+    combo.setCurrentIndex(combo.findData("dark"))
+    window._on_color_scheme()  # a forced theme ignores Windows
+    assert window._theme.name == "dark"
+    combo.setCurrentIndex(combo.findData("system"))
+
+
+def test_sidebar_switches_pages(window: MainWindow) -> None:
+    titles = [window.nav.item(i).text() for i in range(window.nav.count())]
+    assert len(titles) == window.pages.count() == 5
+    for index in range(window.nav.count()):
+        window.show_page(index)
+        assert window.pages.currentIndex() == index
+        title = window.pages.currentWidget().findChild(QLabel, "pageTitle")
+        assert title is not None and title.text() == titles[index]
+    window.show_page(0)
 
 
 def test_start_button_shows_the_running_state(window: MainWindow) -> None:

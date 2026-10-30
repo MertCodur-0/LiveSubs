@@ -15,22 +15,25 @@ from collections.abc import Callable, Collection
 from dataclasses import dataclass
 from typing import Protocol
 
-from PySide6.QtCore import QCoreApplication, QEvent, QObject, Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QCoreApplication, QEvent, QObject, QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QCloseEvent, QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
     QGridLayout,
+    QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
-    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -104,6 +107,9 @@ FOLLOW_MS = 300
 FULLSCREEN_CHECK_MS = 3000
 WEB_STATUS_MS = 2000
 ENGINE_CHECK_MS = 1000
+SIDEBAR_WIDTH = 210
+NAV_ITEM_HEIGHT = 32
+PAGE_MARGINS = (28, 22, 28, 14)
 ACTIVE_STATES = (
     EngineState.STARTING,
     EngineState.WARMING_UP,
@@ -185,6 +191,22 @@ def available_sources(
     return options
 
 
+def _page(title: str, content: QWidget, *, scrolls: bool) -> QWidget:
+    """A sidebar page: its large title over the content, which may scroll."""
+    if scrolls:
+        content.setObjectName("page")  # transparent inside the scroll area (theme)
+        scroll = QScrollArea(widgetResizable=True, frameShape=QScrollArea.Shape.NoFrame)
+        scroll.setWidget(content)
+        content = scroll
+    page = QWidget()
+    layout = QVBoxLayout(page)
+    layout.setContentsMargins(*PAGE_MARGINS)
+    layout.setSpacing(6)
+    layout.addWidget(QLabel(title, objectName="pageTitle"))
+    layout.addWidget(content, 1)
+    return page
+
+
 class _Bridge(QObject):
     """Carries results from worker threads to the UI thread."""
 
@@ -210,6 +232,7 @@ class MainWindow(QMainWindow):
         self._store = store or ProfileStore()
         self._profile_id, self._profile = self._initial_profile()
         self._theme = themes.apply_theme(self._config.theme)
+        QGuiApplication.styleHints().colorSchemeChanged.connect(self._on_color_scheme)
         self._sources: list[SourceOption] = []
         self._state = EngineState.IDLE
         self._frame: FrameInfo | None = None
@@ -291,7 +314,12 @@ class MainWindow(QMainWindow):
     def _build(self) -> None:
         live = QWidget()
         layout = QVBoxLayout(live)
-        grid = QGridLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+        source_card = QGroupBox(t("live.source_card"))
+        grid = QGridLayout(source_card)
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(8)
 
         self.profile_combo = QComboBox()
         self.profile_combo.activated.connect(
@@ -308,8 +336,8 @@ class MainWindow(QMainWindow):
         grid.addWidget(refresh, 1, 2)
 
         self.region_label = QLabel()
+        self.region_label.setProperty("hint", True)  # muted, styled by the theme
         self.region_button = QPushButton(t("region.select"), clicked=self.select_region)
-        grid.addWidget(QLabel(" "), 2, 0)
         grid.addWidget(self.region_label, 2, 1)
         grid.addWidget(self.region_button, 2, 2)
 
@@ -327,21 +355,23 @@ class MainWindow(QMainWindow):
         ollama_buttons.addWidget(self.setup_button)
         grid.addLayout(ollama_buttons, 4, 2)
         grid.setColumnStretch(1, 1)
-        layout.addLayout(grid)
+        layout.addWidget(source_card)
 
         self.start_button = QPushButton(t("start"), clicked=self.toggle, objectName="startButton")
-        self.start_button.setMinimumHeight(52)
-        themes.set_glow(self.start_button, self._theme)
         self.calibrate_button = QPushButton(
             t("calibration.button"), checkable=True, clicked=self.set_calibration
         )
-        self.calibrate_button.setMinimumHeight(48)
+        self.calibrate_button.setProperty("pill", True)  # rounded like Start (theme)
         buttons = QHBoxLayout()
+        buttons.setContentsMargins(0, 6, 0, 0)
+        buttons.setSpacing(10)
         buttons.addWidget(self.start_button, 3)
         buttons.addWidget(self.calibrate_button, 1)
         layout.addLayout(buttons)
 
         self.state_label = QLabel(t("state.idle"))
+        self.state_label.setProperty("hint", True)
+        self.state_label.setContentsMargins(6, 0, 0, 0)
         layout.addWidget(self.state_label)
 
         self.feed = QTableWidget(0, 6)
@@ -364,8 +394,11 @@ class MainWindow(QMainWindow):
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         self.feed.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.feed.setWordWrap(True)
+        self.feed.setShowGrid(False)
         self.feed.verticalHeader().hide()
-        layout.addWidget(self.feed, 1)
+        feed_card = QGroupBox(t("live.feed_card"))
+        QVBoxLayout(feed_card).addWidget(self.feed)
+        layout.addWidget(feed_card, 1)
 
         self.appearance = AppearanceTab(self._profile.overlay)
         self.appearance.changed.connect(self._on_appearance_changed)
@@ -389,9 +422,6 @@ class MainWindow(QMainWindow):
         self.models.start_ollama_requested.connect(self._start_ollama)
         self.models.setup_requested.connect(self.open_setup)
 
-        self.tabs = QTabWidget()
-        self.tabs.addTab(live, t("tab.live"))
-        self.tabs.addTab(self.models, t("tab.models"))
         self.profiles = ProfilesTab(self._profile)
         self.profiles.changed.connect(self._on_profile_edited)
         self.profiles.new_requested.connect(self.new_profile)
@@ -399,28 +429,48 @@ class MainWindow(QMainWindow):
         self.profiles.rename_requested.connect(self.rename_profile)
         self.profiles.delete_requested.connect(self.delete_profile)
 
-        # Long tabs scroll instead of squeezing their rows on short screens.
-        for page, title in (
-            (self.appearance, "tab.appearance"),
-            (self.profiles, "tab.profiles"),
-            (self.settings, "tab.settings"),
+        # macOS Settings style: a sidebar picks the page, each page has a large title. Long
+        # pages scroll instead of squeezing their rows on short screens (Models scrolls itself).
+        self.nav = QListWidget(objectName="nav")
+        self.nav.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.nav.setSpacing(1)
+        self.pages = QStackedWidget()
+        for page, title, scrolls in (
+            (live, "tab.live", False),
+            (self.models, "tab.models", False),
+            (self.appearance, "tab.appearance", True),
+            (self.profiles, "tab.profiles", True),
+            (self.settings, "tab.settings", True),
         ):
-            scroll = QScrollArea(widgetResizable=True, frameShape=QScrollArea.Shape.NoFrame)
-            scroll.setWidget(page)
-            self.tabs.addTab(scroll, t(title))
+            item = QListWidgetItem(t(title))
+            item.setSizeHint(QSize(0, NAV_ITEM_HEIGHT))  # QSS padding does not size list rows
+            self.nav.addItem(item)
+            self.pages.addWidget(_page(t(title), page, scrolls=scrolls))
+        self.nav.currentRowChanged.connect(self.pages.setCurrentIndex)
+        self.nav.setCurrentRow(0)
         self._fill_profile_combo()
 
-        self.header = Header(self._theme)
+        self.header = Header()
+        sidebar = QWidget(objectName="sidebar")
+        sidebar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
+        sidebar.setFixedWidth(SIDEBAR_WIDTH)
+        side = QVBoxLayout(sidebar)
+        side.setContentsMargins(12, 22, 12, 12)
+        side.setSpacing(20)
+        side.addWidget(self.header)
+        side.addWidget(self.nav, 1)
+
         central = QWidget()
-        column = QVBoxLayout(central)
-        column.setContentsMargins(0, 0, 0, 0)
-        column.setSpacing(0)
-        column.addWidget(self.header)
-        body = QVBoxLayout()
-        body.setContentsMargins(10, 8, 10, 4)
-        body.addWidget(self.tabs)
-        column.addLayout(body, 1)
+        row = QHBoxLayout(central)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(0)
+        row.addWidget(sidebar)
+        row.addWidget(self.pages, 1)
         self.setCentralWidget(central)
+
+    def show_page(self, index: int) -> None:
+        """Select a sidebar page (0 = Live, then Models, Appearance, Profiles, Settings)."""
+        self.nav.setCurrentRow(index)
 
     # --- settings tab, tray and warnings ----------------------------------------------------------
 
@@ -435,10 +485,15 @@ class MainWindow(QMainWindow):
         if failed:
             self.statusBar().showMessage(t("hotkey.failed", keys=", ".join(failed)), 15000)
 
-    def set_theme(self, name: str) -> None:
-        self._theme = themes.apply_theme(name)
-        self.header.set_theme(self._theme)
-        themes.set_glow(self.start_button, self._theme)
+    def set_theme(self, choice: str) -> None:
+        self._theme = themes.apply_theme(choice)
+
+    def _on_color_scheme(self) -> None:
+        """Windows switched light/dark: follow it when the theme is "system"."""
+        if self._config.theme in themes.THEMES:
+            return  # a forced theme ignores Windows
+        if themes.resolve(self._config.theme) != self._theme.name:
+            self.set_theme(self._config.theme)
 
     def _on_recording_changed(self, on: bool) -> None:
         self._overlay.set_capture_visible(on)

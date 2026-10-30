@@ -30,7 +30,7 @@ from livesubs.i18n import t
 from livesubs.platform import hotkeys, win32
 from livesubs.platform.video_devices import list_video_devices
 from livesubs.ui.qr import qr_pixmap
-from livesubs.ui.theme import THEMES
+from livesubs.ui.theme import CHOICES as THEME_CHOICES
 
 KEEP_ALIVE = ("5m", "30m", "2h", "-1")  # Ollama durations; -1 keeps the model loaded
 HOTKEY_ACTIONS = ("calibration", "toggle_overlay", "pause")
@@ -67,6 +67,7 @@ class SettingsTab(QWidget):
         self.config = config
         self.profile = profile
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 8, 0)
         layout.addWidget(self._translation_box())
         layout.addWidget(self._web_box())
         layout.addWidget(self._preview_box())
@@ -216,7 +217,7 @@ class SettingsTab(QWidget):
         box = QGroupBox(t("settings.window"))
         form = QFormLayout(box)
         self.theme = QComboBox()
-        for name in THEMES:
+        for name in THEME_CHOICES:
             self.theme.addItem(t(f"settings.theme.{name}"), name)
         self.theme.setCurrentIndex(max(self.theme.findData(self.config.theme), 0))
         self.theme.currentIndexChanged.connect(self._on_theme)

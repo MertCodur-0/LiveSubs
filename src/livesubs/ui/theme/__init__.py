@@ -1,9 +1,11 @@
-"""Themes: ``base.qss`` filled from a token file (``vice.json``, ``dark.json``) over Fusion.
+"""Themes: ``base.qss`` filled from a token file (``dark.json``, ``light.json``) over Fusion.
 
-``prepare`` runs once before any widget; ``apply_theme`` restyles at any time. Fusion gets a
-palette built from the same tokens, so every corner the style sheet does not reach (popups,
-check boxes, dialogs) matches the theme too. Fonts are bundled (OFL, see ``assets/fonts``) and
-registered once per process.
+``prepare`` runs once before any widget; ``apply_theme`` restyles at any time. The user picks
+"system", "dark" or "light"; "system" follows Windows' app mode (``resolve``) and the main window
+re-applies it when Windows switches (``QStyleHints.colorSchemeChanged``). Fusion gets a palette
+built from the same tokens, so every corner the style sheet does not reach (popups, check boxes,
+dialogs) matches the theme too. Inter is bundled (OFL, see ``assets/fonts``) and registered once
+per process.
 """
 
 from __future__ import annotations
@@ -11,21 +13,25 @@ from __future__ import annotations
 import json
 import logging
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtGui import QColor, QFont, QFontDatabase, QPalette
-from PySide6.QtWidgets import QApplication, QGraphicsDropShadowEffect, QWidget
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QGuiApplication, QPalette
+from PySide6.QtWidgets import QApplication, QWidget
 
 log = logging.getLogger(__name__)
 
 THEME_DIR = Path(__file__).resolve().parent
 ASSETS = THEME_DIR.parents[1] / "assets"
-THEMES = ("vice", "dark")
-DEFAULT_THEME = "vice"
+THEMES = ("dark", "light")
+SYSTEM = "system"
+CHOICES = (SYSTEM, *THEMES)  # what the user picks in Settings
+DEFAULT_CHOICE = SYSTEM
+FALLBACK_THEME = "dark"  # when Windows' choice cannot be read
 BODY_FONT = "Inter"
 BODY_POINT_SIZE = 10
-GLOW_BLUR = 28
 
 _TOKEN = re.compile(r"\{\{(\w+)\}\}")
 _COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
@@ -36,28 +42,50 @@ _fonts_loaded = False
 class Theme:
     name: str
     tokens: dict[str, str]
-    header_art: bool  # the sunset banner behind the logo
 
     def color(self, token: str) -> QColor:
         return QColor(self.tokens[token])
-
-    @property
-    def glow(self) -> QColor | None:
-        value = self.tokens.get("glow", "")
-        return QColor(value) if value else None
 
 
 def asset(name: str) -> Path:
     return ASSETS / name
 
 
+def system_theme() -> str:
+    """Windows' app mode: Qt's color scheme, else the registry (Qt reports Unknown offscreen)."""
+    app = QGuiApplication.instance()
+    if isinstance(app, QGuiApplication):
+        scheme = app.styleHints().colorScheme()
+        if scheme == Qt.ColorScheme.Dark:
+            return "dark"
+        if scheme == Qt.ColorScheme.Light:
+            return "light"
+    if sys.platform == "win32":
+        import winreg
+
+        key = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key) as handle:
+                light, _ = winreg.QueryValueEx(handle, "AppsUseLightTheme")
+        except OSError:
+            return FALLBACK_THEME
+        return "light" if light else "dark"
+    return FALLBACK_THEME
+
+
+def resolve(choice: str) -> str:
+    """The theme to show for a Settings choice; anything but "dark"/"light" follows Windows
+    (also an old config's removed "vice")."""
+    return choice if choice in THEMES else system_theme()
+
+
 def load_theme(name: str) -> Theme:
-    """The named theme; an unknown name (e.g. a hand-edited config) gives the default."""
+    """The named theme; an unknown name gives the fallback."""
     if name not in THEMES:
-        log.warning("Unknown theme %r, using %r", name, DEFAULT_THEME)
-        name = DEFAULT_THEME
+        log.warning("Unknown theme %r, using %r", name, FALLBACK_THEME)
+        name = FALLBACK_THEME
     data = json.loads((THEME_DIR / f"{name}.json").read_text(encoding="utf-8"))
-    return Theme(name, data["tokens"], bool(data.get("header_art", False)))
+    return Theme(name, data["tokens"])
 
 
 def render_qss(theme: Theme) -> str:
@@ -91,21 +119,22 @@ def palette(theme: Theme) -> QPalette:
     for r, token in (
         (role.Window, "window"),
         (role.WindowText, "text"),
-        (role.Base, "surface"),
-        (role.AlternateBase, "surface_alt"),
+        (role.Base, "field"),
+        (role.AlternateBase, "surface"),
         (role.Text, "text"),
-        (role.Button, "surface_alt"),
+        (role.Button, "control"),
         (role.ButtonText, "text"),
         (role.BrightText, "accent_text"),
-        (role.Highlight, "accent"),
-        (role.HighlightedText, "accent_text"),
-        (role.ToolTipBase, "surface_alt"),
+        (role.Highlight, "selection"),
+        (role.HighlightedText, "selection_text"),
+        (role.ToolTipBase, "surface"),
         (role.ToolTipText, "text"),
         (role.PlaceholderText, "text_muted"),
-        (role.Link, "accent_2"),
-        (role.Mid, "border"),
-        (role.Dark, "window"),
-        (role.Light, "surface_alt"),
+        (role.Link, "accent"),
+        (role.Mid, "separator"),
+        (role.Dark, "field_border"),
+        (role.Light, "surface"),
+        (role.Accent, "accent"),
     ):
         pal.setColor(r, theme.color(token))
     for r in (role.WindowText, role.Text, role.ButtonText):
@@ -120,10 +149,25 @@ def prepare(app: QApplication) -> None:
     load_fonts()
 
 
-def apply_theme(name: str) -> Theme:
-    """Restyle the whole application; returns the theme for widgets that paint themselves."""
-    theme = load_theme(name)
+def apply_theme(choice: str) -> Theme:
+    """Restyle the whole application for a Settings choice ("system", "dark", "light"); returns
+    the theme for widgets that paint themselves."""
     app = QApplication.instance()
+    if isinstance(app, QApplication):
+        # A forced scheme also colors the Windows title bar; "system" hands it back to Windows,
+        # so the color scheme reported afterwards is Windows' own again. Our own change is no
+        # news: colorSchemeChanged fires synchronously and would call us again.
+        hints = app.styleHints()
+        wanted = {"dark": Qt.ColorScheme.Dark, "light": Qt.ColorScheme.Light}.get(choice)
+        blocked = hints.blockSignals(True)
+        try:
+            if wanted is None:
+                hints.unsetColorScheme()
+            elif hints.colorScheme() != wanted:
+                hints.setColorScheme(wanted)
+        finally:
+            hints.blockSignals(blocked)
+    theme = load_theme(resolve(choice))
     if not isinstance(app, QApplication):
         return theme
     load_fonts()
@@ -133,19 +177,6 @@ def apply_theme(name: str) -> Theme:
     app.setFont(font)
     app.setStyleSheet(render_qss(theme))
     return theme
-
-
-def set_glow(widget: QWidget, theme: Theme) -> None:
-    """A neon glow behind the widget; used sparingly (logo, Start) since it costs a redraw."""
-    color = theme.glow
-    if color is None:
-        widget.setGraphicsEffect(None)
-        return
-    effect = QGraphicsDropShadowEffect(widget)
-    effect.setBlurRadius(GLOW_BLUR)
-    effect.setOffset(0, 0)
-    effect.setColor(color)
-    widget.setGraphicsEffect(effect)
 
 
 def repolish(widget: QWidget) -> None:

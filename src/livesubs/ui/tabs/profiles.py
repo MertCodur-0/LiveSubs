@@ -126,6 +126,7 @@ class ProfilesTab(QWidget):
         self._monitors = monitors
         self._loading = False
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 8, 0)
         layout.addWidget(self._manage_box())
         layout.addWidget(self._translation_box(), 1)
         layout.addWidget(self._game_box())

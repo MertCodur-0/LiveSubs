@@ -397,7 +397,7 @@ font size, text color, outline/shadow, background opacity, max lines shown.
 
 Source + profile pick, Ollama status (connected, model loaded), names of the models in use, big
 Start/Stop. Live feed: English line, Turkish line, model, lane, OCR ms + translation ms. Tabs:
-Live / Models / Profiles / Settings (fps, thresholds, language, theme, port, hotkeys -> config).
+Live / Models / Appearance / Profiles / Settings in a sidebar (fps, thresholds, language, theme, port, hotkeys -> config).
 Models tab shows what to do when Ollama is missing/not running; pull shows progress, downloaded /
 remaining size, cancel. Minimizes to tray.
 
@@ -458,29 +458,39 @@ remaining size, cancel. Minimizes to tray.
   desktop + Start menu shortcuts for the packaged exe (`platform/shortcuts.py`, WScript.Shell via
   PowerShell), settings export/import (`core/backup.py`: zip of `config.json` + `profiles/*.json`;
   import takes only those names, then offers a restart and stops saving the old settings).
-- Theme (step 16, done 2026-10-22): `ui/theme/` — `base.qss` template with `{{token}}`
-  placeholders (comments stripped first; `{{assets}}` = the assets folder for `url(...)`), token
-  files `vice.json` (default) and `dark.json` ("Sade koyu": same token set, a test enforces it).
-  `theme.prepare(app)` (in `app.py`, before any widget): Fusion + bundled fonts; `apply_theme(name)`
-  sets palette (from the tokens, so popups/dialogs/check boxes match), app font (Inter 10 pt) and
-  the style sheet — switchable live from Ayarlar -> Tema. Muted hint labels use the dynamic
-  property `hint=true` (no inline colors); Start/Stop = `#startButton` with `running` property
-  (pink -> orange -> purple gradient; cyan outline while running). Long tabs (Görünüm, Profiller,
-  Ayarlar) sit in scroll areas; window 1000x720.
-  Fonts in `src/livesubs/assets/fonts/` (OFL texts next to them; Google Fonts repo / Inter 4.1
-  release statics): **Monoton** (logo), **Audiowide** (tabs, group titles, Start), **Inter**
-  Regular/SemiBold/Bold (body, overlay). All cover Turkish (test). List them in the README.
-  Palette: dark purple/night-blue base; neon pink/magenta, cyan, sunset orange accents.
-  Own SVG art in `src/livesubs/assets/`: `icon.svg` (striped sunset sun, palm, two subtitle
-  bars), `header.svg` (night sky, striped sun over a neon grid, palms; right-aligned at the
-  header's height, its left side fades into the window color behind the logo; the dark theme has
-  no art), `arrow_up/down.svg` (spin boxes). `ui/icon.py` renders the SVG itself (no SVG icon
-  engine plugin needed) and writes `icon.ico` (PNG-in-ICO) via `scripts/make_icon.py` — rerun it
-  after editing the SVG. The packaged exe keeps pythonw's own icon (changing it would break the
-  signature), so shortcuts get `IconLocation = icon.ico` (setup dialog + `create_shortcut.ps1`).
-  No Rockstar/GTA logos, fonts, art or names.
-  Glow (`QGraphicsDropShadowEffect`, `theme.set_glow`) only on the logo and Start button, and
-  only when the theme has a `glow` token.
+- Theme (step 16 2026-10-22; **redesigned 2026-10-30 on branch `ui-redesign`**, Apple-like):
+  `ui/theme/` — `base.qss` template with `{{token}}` placeholders (comments stripped first;
+  `{{assets}}` = the assets folder for `url(...)`), token files `dark.json` (window #1C1C1E,
+  cards #2C2C2E, accent #0A84FF) and `light.json` (#F5F5F7, white cards with a hairline
+  border, text #1D1D1F, accent #007AFF); same token set (test). Settings choice
+  `config.theme` = **"system" (default)** / "dark" / "light"; unknown values (the removed
+  "vice") validate to "system". `resolve(choice)`: "system" -> Qt's `colorScheme()`, else the
+  registry's `AppsUseLightTheme` (offscreen Qt reports Unknown). `apply_theme(choice)` also
+  sets / unsets Qt's color scheme (the Windows title bar follows) **with the style hints'
+  signals blocked** — `colorSchemeChanged` fires synchronously and ping-ponged between windows
+  into infinite recursion (found by the UI tests). `MainWindow._on_color_scheme` re-applies on
+  a live Windows switch, only for "system". `theme.prepare(app)` (in `app.py`, before any
+  widget): Fusion + Inter. Palette from the tokens (popups, dialogs match), app font Inter 10 pt.
+  Shape: cards = `QGroupBox` (12 px radius, title above the card, muted semibold), fields and
+  buttons 8 px, check boxes/radios drawn by QSS (`check.svg`), Start/Stop `#startButton` a
+  44 px pill (radius 22; accent, `running=true` -> calm red `stop` token), calibration and
+  preview buttons `pill=true`. No glow, no gradients, no shadows (cards stand out by color).
+  Main window: **macOS-Settings sidebar** (`QListWidget#nav`, row height set in code — QSS
+  padding does not size list rows) with the logo "LiveSubs" (Inter Bold) + tagline on top
+  (`ui/header.py`, plain labels), and a `QStackedWidget` of pages, each with a large
+  `#pageTitle`; `MainWindow.show_page(i)`. Live page: "Kaynak ve model" card, Start + Ayar modu
+  pills, state, "Canlı akış" card with the feed. Görünüm split into three cards. Long pages
+  scroll (content `objectName="page"` stays transparent); window 1000x720.
+  Fonts in `src/livesubs/assets/fonts/`: **Inter** Regular/SemiBold/Bold only (Audiowide and
+  Monoton removed with the Vice theme); covers Turkish (test). Listed in the README.
+  Own SVG art in `src/livesubs/assets/`: `icon.svg` (blue rounded square, two subtitle bars;
+  the sunset/palm icon and `header.svg` are gone), `arrow_up/down.svg` (neutral gray, both
+  themes), `check.svg`. `ui/icon.py` renders the SVG itself (no SVG icon engine plugin needed)
+  and writes `icon.ico` (PNG-in-ICO) via `scripts/make_icon.py` — rerun it after editing the
+  SVG. The packaged exe keeps pythonw's own icon (changing it would break the signature), so
+  shortcuts get `IconLocation = icon.ico` (setup dialog + `create_shortcut.ps1`). No Apple
+  logos, SF Pro or SF Symbols (license); no Rockstar/GTA logos, fonts, art or names.
+  The overlay's "Vice" *style preset* is an overlay feature and stays.
 - Packaging (`scripts/build_exe.ps1`, replaces PyInstaller 2026-10-22): the official **embeddable
   Python** of the venv's exact version; its PSF-signed `pythonw.exe` (signature checked) renamed to
   `LiveSubs.exe`; `python313._pth` adds `Lib\site-packages` + `import site`; runtime deps + app via
@@ -500,7 +510,7 @@ remaining size, cancel. Minimizes to tray.
 ```
 src/livesubs/
   app.py, __main__.py, i18n/
-  assets/      icon.svg, icon.ico, header.svg, arrow_*.svg, fonts/ (+ OFL licenses) — package data
+  assets/      icon.svg, icon.ico, arrow_*.svg, check.svg, fonts/ (+ OFL licenses) — package data
   core/        config.py, profiles.py, paths.py, jsonio.py, geometry.py, messages.py, backup.py,
                translation_pack.py, child_process.py, logs.py
   device/      host.py (device host process), messages.py, preview.py
@@ -514,7 +524,7 @@ src/livesubs/
   platform/    win32.py, hotkeys.py, shortcuts.py, gpu.py, com.py, video_devices.py
   ui/          main_window.py, header.py, icon.py, qr.py, overlay.py, region_frame.py, inspector.py,
                tray.py, setup_check.py, single_instance.py, capture_card.py, frame_region.py,
-               tabs/, theme/ (base.qss, vice.json, dark.json)
+               tabs/, theme/ (base.qss, dark.json, light.json)
   web/         server.py, feed.py, static/index.html
 tests/         samples/ (+ samples.json), helpers/, test_*.py
 scripts/       build_exe.ps1, embedded/ (sitecustomize.py, smoke_test.py), create_shortcut.ps1,
@@ -547,6 +557,8 @@ Phase 2 — features
 - [x] 15. Video device source (capture card): enumerate, busy/lost/black errors, region on the
   preview or a still frame (done as 9b, 2026-10-30)
 - [x] 16. Vice theme, fonts, SVG icon/header, overlay styles — 2026-10-22
+- [x] 16b. Apple-like redesign: dark/light/system themes, sidebar, cards, pill Start —
+  2026-10-30 on branch `ui-redesign` (not merged, not pushed)
 - [x] 17. Web output + QR (+ Screen Wake Lock), phone-only mode — 2026-10-23
 
 Phase 3 — release
@@ -883,3 +895,13 @@ First **finish the app** (each step committed and pushed; no new release unless 
   instance, phone screen kept on). Before it, one full test run crashed natively (pytest exit 3,
   no traceback kept) while `build_exe.ps1` ran at the same time; two later runs alone were clean
   (469 passed). Not reproduced — rerun with `-X faulthandler` if it shows up again.
+- 2026-10-30: **UI redesign (branch `ui-redesign`, user's brief, no questions asked by request)**:
+  Apple-like (macOS Settings / Music feel), no feature removed. Vice theme, its gradients,
+  glow, header banner and the Monoton/Audiowide fonts removed as the brief asked ("no neon,
+  gradients or decoration; the logo in Inter"). Choices made without the user: a sidebar
+  instead of top tabs (the macOS Settings layout); Stop = muted red `#C4554D` / `#CF4C43`
+  rather than system red; a new plain icon (the sunset/palm one clashed); "vice" in an old
+  config -> "system"; no drop shadows at all (QSS has none; `QGraphicsDropShadowEffect` per card
+  costs redraws and the brief allowed "very little"); the overlay's Vice style preset kept (a
+  feature, not the app theme). The brief arrived truncated after "...json) kullan,
+  gerekiyorsa" — any later requirements were not seen.

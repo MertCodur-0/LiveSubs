@@ -165,8 +165,9 @@ class ModelsTab(QWidget):
         self._bridge.compare_finished.connect(self._on_compare_finished)
         self._timer = QTimer(self, interval=REFRESH_MS, timeout=self.refresh)
 
-        content = QWidget()
+        content = QWidget(objectName="page")  # transparent in the scroll area (theme)
         layout = QVBoxLayout(content)
+        layout.setContentsMargins(0, 0, 8, 0)
         layout.addWidget(self._status_box())
         layout.addWidget(self._installed_box())
         layout.addWidget(self._download_box())

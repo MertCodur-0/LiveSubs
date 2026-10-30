@@ -1,0 +1,27 @@
+{
+  "tokens": {
+    "window": "#F5F5F7",
+    "sidebar": "#EBEBED",
+    "surface": "#FFFFFF",
+    "card_border": "#E5E5EA",
+    "field": "#FFFFFF",
+    "field_border": "#D2D2D7",
+    "control": "#FFFFFF",
+    "control_hover": "#F2F2F4",
+    "control_border": "#D2D2D7",
+    "separator": "#E5E5EA",
+    "text": "#1D1D1F",
+    "text_muted": "#6E6E73",
+    "accent": "#007AFF",
+    "accent_hover": "#1A88FF",
+    "accent_pressed": "#0062CC",
+    "accent_text": "#FFFFFF",
+    "selection": "#007AFF",
+    "selection_text": "#FFFFFF",
+    "stop": "#CF4C43",
+    "stop_hover": "#D95E56",
+    "stop_pressed": "#B8423A",
+    "scrollbar": "#C7C7CC",
+    "knob": "#FFFFFF"
+  }
+}

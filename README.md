@@ -15,7 +15,9 @@ through [Ollama](https://ollama.com), and shows the translation in a click-throu
 the game, or on your phone. It uses no cloud APIs: capture, OCR and translation all run on your own
 PC.
 
-![Main window: live feed with English lines, their Turkish translations and timings](docs/images/live.png)
+| Dark | Light |
+| --- | --- |
+| ![Main window in the dark theme: live feed with English lines, their Turkish translations and timings](docs/images/live.png) | ![The same window in the light theme](docs/images/live-light.png) |
 
 <!-- Demo GIF goes here: docs/images/demo.gif (record it with recording mode on). -->
 
@@ -43,7 +45,8 @@ PC.
 - **Per-game profiles.** Source, region, colours, overlay style and position, context and
   glossary, game VRAM reserve.
 - **Real app.** Double-click the exe and a setup dialog installs what is missing. It has global
-  hotkeys, a tray icon and a calibration mode with a live Inspector.
+  hotkeys, a tray icon and a calibration mode with a live Inspector. Dark and light themes;
+  by default it follows Windows' light/dark setting and switches with it.
 
 | Settings with the phone QR code | Phone page |
 | --- | --- |
@@ -199,10 +202,9 @@ src/livesubs/
 
 ## Credits
 
-- Fonts: [Inter](https://rsms.me/inter/), [Audiowide](https://fonts.google.com/specimen/Audiowide)
-  and [Monoton](https://fonts.google.com/specimen/Monoton), all under the SIL Open Font License
-  (texts in `src/livesubs/assets/fonts`).
-- Icon and header art are original. LiveSubs is not affiliated with any game or publisher.
+- Font: [Inter](https://rsms.me/inter/), under the SIL Open Font License (text in
+  `src/livesubs/assets/fonts`).
+- The icon is original. LiveSubs is not affiliated with any game or publisher.
 
 ## License
 
