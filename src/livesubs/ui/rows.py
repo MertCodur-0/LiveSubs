@@ -3,8 +3,8 @@ on the right and a hairline between rows. Long explanations go into an (i) toolt
 
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QPoint, QSize, Qt
+from PySide6.QtGui import QColor, QEnterEvent, QMouseEvent
 from PySide6.QtWidgets import (
     QFrame,
     QGroupBox,
@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QLayout,
     QSizePolicy,
     QToolButton,
+    QToolTip,
     QVBoxLayout,
     QWidget,
 )
@@ -25,13 +26,31 @@ INFO_PX = 15
 INFO_COLOR = QColor("#8E8E93")  # neutral gray: readable on every theme's card
 
 
+class InfoIcon(QLabel):
+    """A small (i) that shows its text at once on hover and on click. Qt's own tooltips only
+    show in the active window, so hovering the (i) while another app had focus showed nothing."""
+
+    def __init__(self, text: str) -> None:
+        super().__init__(objectName="info")
+        self.setPixmap(icons.pixmap("info", INFO_COLOR, INFO_PX, 2.0))
+        self.setToolTip(text)
+        self.setCursor(Qt.CursorShape.WhatsThisCursor)
+
+    def enterEvent(self, event: QEnterEvent) -> None:  # noqa: N802 - Qt override
+        self._show_tip(event.globalPosition().toPoint())
+        super().enterEvent(event)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt override
+        self._show_tip(event.globalPosition().toPoint())
+        event.accept()
+
+    def _show_tip(self, pos: QPoint) -> None:
+        QToolTip.showText(pos, self.toolTip(), self)
+
+
 def info(text: str) -> QLabel:
     """A small (i) that shows ``text`` as its tooltip."""
-    label = QLabel(objectName="info")
-    label.setPixmap(icons.pixmap("info", INFO_COLOR, INFO_PX, 2.0))
-    label.setToolTip(text)
-    label.setCursor(Qt.CursorShape.WhatsThisCursor)
-    return label
+    return InfoIcon(text)
 
 
 def labeled(text: str, tip: str) -> QWidget:

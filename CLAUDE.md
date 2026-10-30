@@ -1001,3 +1001,8 @@ First **finish the app** (each step committed and pushed; no new release unless 
   "Siktir git lan!"). Runs swing by ~25 % between sessions: compare variants back to back.
 - 2026-10-30: **Released v0.5.1** (user's choice: merge `translation-tuning` into main, then
   release): the five translation fixes of the speed/quality review above.
+- 2026-10-30 (user report: "the (i) shows no explanation on hover"): Qt shows tooltips only
+  in the **active** window, so with focus in another app (VS Code) nothing appeared. The (i)
+  (`rows.InfoIcon`) now shows its text itself on hover and on click; the main window sets
+  `WA_AlwaysShowToolTips` for its other tooltips. Regression test hovers with another window
+  active (fails on the old code).

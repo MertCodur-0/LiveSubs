@@ -4,7 +4,8 @@ import numpy as np
 import pytest
 from PySide6.QtCore import QObject, QPoint, Qt, Signal
 from PySide6.QtGui import QGuiApplication, QKeySequence
-from PySide6.QtWidgets import QApplication, QLabel, QMessageBox
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QToolTip, QWidget
 from pytestqt.qtbot import QtBot
 
 from livesubs.core import paths
@@ -1528,3 +1529,23 @@ def test_wheel_never_changes_settings(window: MainWindow, qapp: QApplication) ->
         assert after == before, widget
     assert window._config.theme == "apple"
     window.hide()
+
+
+def test_info_tip_shows_while_another_window_has_focus(window: MainWindow, qtbot: QtBot) -> None:
+    """Regression: Qt shows tooltips only in the active window, so hovering an (i) while
+    another app had focus showed nothing."""
+    window.show()
+    window.show_page(1)
+    qtbot.waitExposed(window)
+    other = QWidget()
+    qtbot.addWidget(other)
+    other.show()
+    other.activateWindow()
+    qtbot.waitUntil(lambda: not window.isActiveWindow())
+    tip = next(label for label in window.findChildren(QLabel, "info") if label.isVisible())
+    pos = tip.mapTo(window, tip.rect().center())
+    QTest.mouseMove(window.windowHandle(), pos - QPoint(40, 0))
+    QTest.mouseMove(window.windowHandle(), pos)
+    qtbot.waitUntil(QToolTip.isVisible, timeout=2000)
+    assert QToolTip.text() == tip.toolTip()
+    QToolTip.hideText()

@@ -240,6 +240,8 @@ class MainWindow(QMainWindow):
         card_host: Host | None = None,
     ) -> None:
         super().__init__()
+        # Tooltips also while another app has focus, as Windows' own controls do.
+        self.setAttribute(Qt.WidgetAttribute.WA_AlwaysShowToolTips)
         self.setWindowTitle(f"{APP_NAME} {__version__}")
         self.setWindowIcon(app_icon())
         self.resize(1000, 680)
