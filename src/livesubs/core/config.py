@@ -11,8 +11,8 @@ from livesubs.core.jsonio import SettingsModel, StorageError, read_model, write_
 log = logging.getLogger(__name__)
 
 CONFIG_SCHEMA_VERSION = 1
-# "system" follows Windows' light/dark app mode (see ui.theme).
-THEME_CHOICES = ("system", "dark", "light")
+# "system" = Apple dark or light after Windows' app mode (see ui.theme).
+THEME_CHOICES = ("apple", "apple_light", "system", "vice", "dark")
 
 
 class OllamaSettings(SettingsModel):
@@ -61,7 +61,7 @@ class AppConfig(SettingsModel):
     schema_version: int = CONFIG_SCHEMA_VERSION
     last_profile: str | None = None
     ui_language: str = "tr"
-    theme: str = "system"
+    theme: str = "apple"
     minimize_to_tray: bool = True
     ollama: OllamaSettings = Field(default_factory=OllamaSettings)
     cpu_lane: CpuLaneSettings = Field(default_factory=CpuLaneSettings)
@@ -76,8 +76,8 @@ class AppConfig(SettingsModel):
     @field_validator("theme")
     @classmethod
     def _known_theme(cls, value: str) -> str:
-        # Removed themes ("vice" before 0.5) and typos follow Windows instead of failing.
-        return value if value in THEME_CHOICES else "system"
+        # Unknown names (a typo, a removed theme) get the default instead of failing.
+        return value if value in THEME_CHOICES else "apple"
 
 
 def load_config(path: Path | None = None) -> AppConfig:

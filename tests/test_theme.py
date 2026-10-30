@@ -4,6 +4,7 @@ import struct
 from pathlib import Path
 
 import pytest
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFontDatabase, QRawFont
 from PySide6.QtWidgets import QApplication
 from pytestqt.qtbot import QtBot
@@ -18,6 +19,8 @@ from livesubs.ui.icon import SIZES, app_icon, render, write_ico
 from livesubs.ui.overlay import STYLE_PRESETS, VICE_HALO, Overlay, apply_style
 
 TURKISH = "çğıİöşüÇĞÖŞÜ"
+# Tokens that feed the palette or painted widgets: colors in every theme (QColor parses them).
+COLOR_TOKENS = ("window", "sidebar", "surface", "text", "text_muted", "accent", "separator")
 
 
 @pytest.mark.parametrize("name", theme.THEMES)
@@ -28,43 +31,63 @@ def test_every_theme_fills_the_template(name: str) -> None:
 
 
 def test_themes_define_the_same_tokens() -> None:
-    dark, light = (theme.load_theme(name) for name in theme.THEMES)
-    assert dark.tokens.keys() == light.tokens.keys()
-
-
-def test_theme_colors_follow_the_design() -> None:
-    dark, light = (theme.load_theme(name) for name in theme.THEMES)
-    assert (dark.tokens["window"], dark.tokens["surface"]) == ("#1C1C1E", "#2C2C2E")
-    assert dark.tokens["accent"] == "#0A84FF"
-    assert (light.tokens["window"], light.tokens["surface"]) == ("#F5F5F7", "#FFFFFF")
-    assert (light.tokens["text"], light.tokens["accent"]) == ("#1D1D1F", "#007AFF")
+    first, *others = (theme.load_theme(name) for name in theme.THEMES)
+    for other in others:
+        assert other.tokens.keys() == first.tokens.keys(), other.name
 
 
 @pytest.mark.parametrize("name", theme.THEMES)
-def test_no_glow_or_gradients(name: str) -> None:
+def test_color_tokens_are_colors(name: str) -> None:
+    current = theme.load_theme(name)
+    for token in COLOR_TOKENS:
+        assert current.color(token).isValid(), token
+    theme.palette(current)  # every palette token parses
+
+
+def test_apple_colors_follow_the_design() -> None:
+    dark, light = theme.load_theme("apple"), theme.load_theme("apple_light")
+    assert (dark.tokens["window"], dark.tokens["surface"]) == ("#1C1C1E", "#2C2C2E")
+    assert dark.tokens["accent"] == dark.tokens["start_bg"] == "#0A84FF"
+    assert (light.tokens["window"], light.tokens["surface"]) == ("#F5F5F7", "#FFFFFF")
+    assert (light.tokens["text"], light.tokens["accent"]) == ("#1D1D1F", "#007AFF")
+    for apple in (dark, light):
+        assert apple.tokens["font_heading"] == apple.tokens["font_logo"] == "Inter"
+        assert apple.glow is None and not apple.header_art
+
+
+@pytest.mark.parametrize("name", ["apple", "apple_light", "dark"])
+def test_plain_themes_have_no_gradients(name: str) -> None:
     qss = theme.render_qss(theme.load_theme(name))
     assert "gradient" not in qss
     assert "border-radius: 12px" in qss  # cards
-    assert "border-radius: 22px" in qss  # the Start/Stop pill (44 px high)
+    assert "border-radius: 22px" in qss  # the Start/Stop pill
+
+
+def test_vice_keeps_its_look() -> None:
+    vice = theme.load_theme("vice")
+    assert vice.header_art and vice.glow is not None
+    assert "qlineargradient" in vice.tokens["start_bg"]
+    assert (vice.tokens["font_heading"], vice.tokens["font_logo"]) == ("Audiowide", "Monoton")
 
 
 def test_unknown_theme_falls_back() -> None:
-    assert theme.load_theme("vice").name == theme.FALLBACK_THEME
+    assert theme.load_theme("neon-pink-2000").name == theme.FALLBACK_THEME == "apple"
 
 
 def test_choices_match_the_config() -> None:
     assert theme.CHOICES == THEME_CHOICES
-    assert AppConfig().theme == theme.DEFAULT_CHOICE == "system"
-    assert AppConfig(theme="vice").theme == "system"  # removed theme of older versions
+    assert set(theme.THEMES) < set(theme.CHOICES)
+    assert AppConfig().theme == theme.DEFAULT_CHOICE == "apple"
+    assert AppConfig(theme="vice").theme == "vice"
+    assert AppConfig(theme="light").theme == "apple"  # unknown names get the default
 
 
 def test_resolve_follows_the_system(monkeypatch: pytest.MonkeyPatch) -> None:
-    assert theme.resolve("light") == "light"
-    assert theme.resolve("dark") == "dark"
-    for system in theme.THEMES:
-        monkeypatch.setattr(theme, "system_theme", lambda s=system: s)
-        assert theme.resolve("system") == system
-        assert theme.resolve("vice") == system
+    for name in theme.THEMES:
+        assert theme.resolve(name) == name
+    for scheme, expected in (("dark", "apple"), ("light", "apple_light")):
+        monkeypatch.setattr(theme, "system_scheme", lambda s=scheme: s)
+        assert theme.resolve("system") == expected
 
 
 def test_template_assets_exist() -> None:
@@ -77,13 +100,13 @@ def test_template_assets_exist() -> None:
 def test_bundled_fonts_load_and_cover_turkish(qapp: QApplication) -> None:
     theme.load_fonts()
     families = set(QFontDatabase.families())
-    assert "Inter" in families
+    assert {"Inter", "Audiowide", "Monoton"} <= families
     for path in (theme.ASSETS / "fonts").glob("*.ttf"):
         font = QRawFont(str(path), 20)
         # The int overload: PySide maps non-ASCII str arguments wrongly.
         assert all(font.supportsCharacter(ord(c)) for c in TURKISH), path.name
     licenses = {p.name for p in (theme.ASSETS / "fonts").glob("OFL-*.txt")}
-    assert licenses == {"OFL-inter.txt"}
+    assert licenses == {"OFL-inter.txt", "OFL-audiowide.txt", "OFL-monoton.txt"}
 
 
 @pytest.mark.parametrize("name", theme.THEMES)
@@ -95,7 +118,9 @@ def test_apply_theme_restyles_the_app(qapp: QApplication, name: str) -> None:
         assert applied.tokens["accent"] in qapp.styleSheet()
         assert qapp.font().family() == theme.BODY_FONT
         # A forced theme also sets Qt's scheme (the Windows title bar follows it).
-        assert qapp.styleHints().colorScheme().name.lower() == name
+        light = name in theme.LIGHT_THEMES
+        expected = Qt.ColorScheme.Light if light else Qt.ColorScheme.Dark
+        assert qapp.styleHints().colorScheme() == expected
     finally:
         theme.apply_theme(theme.DEFAULT_CHOICE)
 
@@ -129,12 +154,19 @@ def test_shipped_ico_is_valid() -> None:
     assert struct.unpack_from("<HHH", data) == (0, 1, len(SIZES))
 
 
-def test_header_is_plain_text(qtbot: QtBot) -> None:
-    header = Header()
+@pytest.mark.parametrize("name", theme.THEMES)
+def test_header_paints(qtbot: QtBot, name: str) -> None:
+    current = theme.load_theme(name)
+    header = Header(current)
     qtbot.addWidget(header)
+    header.resize(200, 48)
     assert header.logo.text() == APP_NAME
-    assert header.logo.graphicsEffect() is None  # no glow
-    assert header.tagline.text()
+    assert not header.icon.pixmap().isNull()
+    assert (header.logo.graphicsEffect() is not None) == (current.glow is not None)
+    image = header.grab().toImage()
+    art = image.pixelColor(image.width() - 20, 30)  # the banner's right part
+    if current.header_art:
+        assert art != current.color("sidebar")
 
 
 # --- overlay styles -------------------------------------------------------------------------------

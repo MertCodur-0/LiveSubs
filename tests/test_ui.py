@@ -1035,17 +1035,22 @@ def test_translation_can_go_to_another_monitor(window: MainWindow) -> None:
 def test_theme_switch_from_settings(window: MainWindow) -> None:
     app = QGuiApplication.instance()
     combo = window.settings.theme
-    assert [combo.itemData(i) for i in range(combo.count())] == ["system", "dark", "light"]
+    assert [combo.itemData(i) for i in range(combo.count())] == list(themes.CHOICES)
+    assert combo.currentData() == "apple"  # the default
     try:
-        combo.setCurrentIndex(combo.findData("light"))
-        assert window._config.theme == "light"
-        assert window._theme.name == "light"
+        combo.setCurrentIndex(combo.findData("apple_light"))
+        assert window._config.theme == "apple_light"
         assert app.palette().window().color().name() == "#f5f5f7"
-        combo.setCurrentIndex(combo.findData("dark"))
-        assert app.palette().window().color().name() == "#1c1c1e"
         assert window.start_button.graphicsEffect() is None  # no glow
+        combo.setCurrentIndex(combo.findData("vice"))
+        assert window.header._theme.name == "vice"
+        assert window.start_button.graphicsEffect() is not None  # Vice glows
+        combo.setCurrentIndex(combo.findData("dark"))
+        assert app.palette().window().color().name() == "#17181c"
     finally:
-        combo.setCurrentIndex(combo.findData("system"))
+        combo.setCurrentIndex(combo.findData("apple"))
+    assert app.palette().window().color().name() == "#1c1c1e"
+    assert window.start_button.graphicsEffect() is None
 
 
 def test_system_theme_follows_windows_live(
@@ -1053,14 +1058,14 @@ def test_system_theme_follows_windows_live(
 ) -> None:
     combo = window.settings.theme
     combo.setCurrentIndex(combo.findData("system"))
-    for system in ("light", "dark", "light"):
-        monkeypatch.setattr(themes, "system_theme", lambda s=system: s)
+    for scheme, expected in (("light", "apple_light"), ("dark", "apple"), ("light", "apple_light")):
+        monkeypatch.setattr(themes, "system_scheme", lambda s=scheme: s)
         window._on_color_scheme()  # what Qt's colorSchemeChanged calls
-        assert window._theme.name == system
-    combo.setCurrentIndex(combo.findData("dark"))
-    window._on_color_scheme()  # a forced theme ignores Windows
-    assert window._theme.name == "dark"
-    combo.setCurrentIndex(combo.findData("system"))
+        assert window._theme.name == expected
+    combo.setCurrentIndex(combo.findData("vice"))
+    window._on_color_scheme()  # a chosen theme ignores Windows
+    assert window._theme.name == "vice"
+    combo.setCurrentIndex(combo.findData("apple"))
 
 
 def test_sidebar_switches_pages(window: MainWindow) -> None:

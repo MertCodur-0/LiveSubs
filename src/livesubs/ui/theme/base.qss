@@ -1,7 +1,7 @@
 /* LiveSubs style sheet template: {{token}} is replaced from the theme's token file.
    Fonts and colors that QSS does not reach come from the palette (see theme/__init__.py).
-   Shape: cards 12 px, fields and buttons 8 px, Start/Stop a pill. No glow, no gradients:
-   cards stand apart from the window by color alone. */
+   Shape: cards 12 px, fields and buttons 8 px, Start/Stop a pill. Spacing on a 4/8/12/16/24
+   scale. Cards stand apart from the window by color; no shadows. */
 
 QMainWindow, QDialog {
     background: {{window}};
@@ -28,49 +28,62 @@ QStatusBar::item {
     border: none;
 }
 
-/* --- sidebar and page titles -------------------------------------------------------------- */
+/* --- sidebar ------------------------------------------------------------------------------ */
 
 QWidget#sidebar {
     background: {{sidebar}};
     border-right: 1px solid {{separator}};
 }
 
-QLabel#logo {
-    font-size: 17pt;
-    font-weight: 700;
+QLabel#appName {
+    font-family: "{{font_logo}}";
+    font-size: {{logo_size}};
+    font-weight: {{logo_weight}};
+    color: {{logo}};
+    background: transparent;
+}
+
+QPushButton#navButton {
+    font-family: "{{font_heading}}";
+    text-align: left;
     color: {{text}};
-    background: transparent;
-}
-
-QLabel#tagline {
-    font-size: 9pt;
-    color: {{text_muted}};
-    background: transparent;
-}
-
-QListWidget#nav {
     background: transparent;
     border: none;
-    outline: none;
-}
-
-QListWidget#nav::item {
-    color: {{text}};
-    padding: 0 10px;
     border-radius: 8px;
+    padding: 6px 8px;
+    min-height: 20px;
 }
 
-QListWidget#nav::item:hover:!selected {
-    background: {{control_hover}};
+QPushButton#navButton:hover {
+    background: {{nav_hover}};
 }
 
-QListWidget#nav::item:selected {
-    background: {{accent}};
-    color: {{accent_text}};
+QPushButton#navButton:checked {
+    background: {{nav_selected}};
+    color: {{text}};
 }
+
+QLabel#statusText {
+    color: {{text_muted}};
+}
+
+QLabel#statusDot {
+    color: {{idle}};
+}
+
+QLabel#statusDot[state="ok"] {
+    color: {{ok}};
+}
+
+QLabel#statusDot[state="warn"] {
+    color: {{warn}};
+}
+
+/* --- pages and cards ---------------------------------------------------------------------- */
 
 QLabel#pageTitle {
-    font-size: 19pt;
+    font-family: "{{font_heading}}";
+    font-size: 18pt;
     font-weight: 700;
     color: {{text}};
 }
@@ -79,23 +92,66 @@ QScrollArea, QScrollArea > QWidget > QWidget#page {
     background: transparent;
 }
 
-/* --- cards -------------------------------------------------------------------------------- */
-
 QGroupBox {
     background: {{surface}};
     border: 1px solid {{card_border}};
     border-radius: 12px;
-    margin-top: 24px;
-    padding: 8px 14px 12px 14px;
+    margin-top: 22px;
+    padding: 6px 16px 10px 16px;
 }
 
 QGroupBox::title {
+    font-family: "{{font_heading}}";
     subcontrol-origin: margin;
     subcontrol-position: top left;
     left: 6px;
     top: 2px;
     color: {{text_muted}};
     font-weight: 600;
+}
+
+QFrame#card {
+    background: {{surface}};
+    border: 1px solid {{card_border}};
+    border-radius: 12px;
+}
+
+QFrame#warnCard {
+    background: {{warn_bg}};
+    border: 1px solid {{warn}};
+    border-radius: 12px;
+}
+
+QLabel#warnIcon {
+    color: {{warn}};
+    font-size: 13pt;
+    font-weight: 700;
+}
+
+QLabel#summaryTitle {
+    font-size: 12pt;
+    font-weight: 600;
+    color: {{text}};
+}
+
+QFrame#separator {
+    background: {{separator}};
+    border: none;
+    min-height: 1px;
+    max-height: 1px;
+}
+
+QToolButton#disclosure {
+    font-family: "{{font_heading}}";
+    color: {{text_muted}};
+    font-weight: 600;
+    background: transparent;
+    border: none;
+    padding: 4px 2px;
+}
+
+QToolButton#disclosure:hover {
+    color: {{text}};
 }
 
 /* --- buttons ------------------------------------------------------------------------------ */
@@ -105,7 +161,7 @@ QPushButton {
     color: {{text}};
     border: 1px solid {{control_border}};
     border-radius: 8px;
-    padding: 6px 14px;
+    padding: 5px 14px;
 }
 
 QPushButton:hover {
@@ -129,34 +185,37 @@ QPushButton:disabled {
 }
 
 QPushButton[pill="true"] {
-    border-radius: 20px;
-    min-height: 38px;
-    max-height: 38px;
-    padding: 0 22px;
+    border-radius: 19px;
+    min-height: 36px;
+    max-height: 36px;
+    padding: 0 20px;
 }
 
 QPushButton#startButton {
+    font-family: "{{font_heading}}";
     font-size: 13pt;
     font-weight: 600;
-    color: {{accent_text}};
-    background: {{accent}};
-    border: none;
+    color: {{start_text}};
+    background: {{start_bg}};
+    border: 2px solid transparent;
     border-radius: 22px;
-    min-height: 44px;
-    max-height: 44px;
+    min-height: 40px;
+    max-height: 40px;
     padding: 0 28px;
 }
 
 QPushButton#startButton:hover {
-    background: {{accent_hover}};
+    background: {{start_hover}};
 }
 
 QPushButton#startButton:pressed {
-    background: {{accent_pressed}};
+    background: {{start_pressed}};
 }
 
 QPushButton#startButton[running="true"] {
+    color: {{stop_text}};
     background: {{stop}};
+    border-color: {{stop_border}};
 }
 
 QPushButton#startButton[running="true"]:hover {
@@ -302,6 +361,11 @@ QTableWidget, QTableView, QListView {
     selection-background-color: {{selection}};
     selection-color: {{selection_text}};
     outline: none;
+}
+
+QListView#feedList {
+    border: none;
+    background: transparent;
 }
 
 QTableView::item {

@@ -358,6 +358,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(source_card)
 
         self.start_button = QPushButton(t("start"), clicked=self.toggle, objectName="startButton")
+        themes.set_glow(self.start_button, self._theme)
         self.calibrate_button = QPushButton(
             t("calibration.button"), checkable=True, clicked=self.set_calibration
         )
@@ -450,7 +451,7 @@ class MainWindow(QMainWindow):
         self.nav.setCurrentRow(0)
         self._fill_profile_combo()
 
-        self.header = Header()
+        self.header = Header(self._theme)
         sidebar = QWidget(objectName="sidebar")
         sidebar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         sidebar.setFixedWidth(SIDEBAR_WIDTH)
@@ -487,6 +488,8 @@ class MainWindow(QMainWindow):
 
     def set_theme(self, choice: str) -> None:
         self._theme = themes.apply_theme(choice)
+        self.header.set_theme(self._theme)
+        themes.set_glow(self.start_button, self._theme)
 
     def _on_color_scheme(self) -> None:
         """Windows switched light/dark: follow it when the theme is "system"."""

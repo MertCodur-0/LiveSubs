@@ -1,4 +1,5 @@
 {
+  "header_art": false,
   "tokens": {
     "window": "#F5F5F7",
     "sidebar": "#EBEBED",
@@ -18,10 +19,28 @@
     "accent_text": "#FFFFFF",
     "selection": "#007AFF",
     "selection_text": "#FFFFFF",
+    "nav_selected": "rgba(0, 122, 255, 0.18)",
+    "nav_hover": "rgba(0, 122, 255, 0.08)",
+    "start_bg": "#007AFF",
+    "start_hover": "#1A88FF",
+    "start_pressed": "#0062CC",
+    "start_text": "#FFFFFF",
     "stop": "#CF4C43",
     "stop_hover": "#D95E56",
     "stop_pressed": "#B8423A",
+    "stop_text": "#FFFFFF",
+    "stop_border": "#CF4C43",
     "scrollbar": "#C7C7CC",
-    "knob": "#FFFFFF"
+    "knob": "#FFFFFF",
+    "ok": "#28B44A",
+    "warn": "#E08600",
+    "idle": "#8E8E93",
+    "warn_bg": "#FFF4E0",
+    "font_heading": "Inter",
+    "font_logo": "Inter",
+    "logo_size": "14pt",
+    "logo_weight": "700",
+    "logo": "#1D1D1F",
+    "glow": ""
   }
 }
