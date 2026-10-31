@@ -610,6 +610,79 @@ def test_choosing_another_source_while_running_restarts(window: MainWindow) -> N
     assert command.profile.source == window._sources[index].spec
 
 
+def test_a_new_source_updates_what_depends_on_it(window: MainWindow) -> None:
+    """Regression: the game location guess (and with it the VRAM reserve the model labels use)
+    and the last frame's screen place kept following the previous source."""
+    window._profile.source = WindowSource(exe_name="RemotePlay.exe", title="PS Remote Play")
+    window.profiles.refresh()
+    window.handle(FrameInfo(1280, 720, (100, 100, 1280, 720)))
+    assert "başka cihazda" in window.profiles.location.itemText(0)
+    assert window.profiles.reserve.value() == 0.5
+
+    index = window.source_combo.count() - 1  # a monitor
+    window.source_combo.setCurrentIndex(index)
+    window.source_combo.activated.emit(index)
+    assert "bu bilgisayarda" in window.profiles.location.itemText(0)
+    assert window.profiles.reserve.value() == 2.0
+    assert window._frame is None
+
+
+def _running(window: MainWindow) -> FakeEngine:
+    _with_monitor_source(window)
+    window.toggle()
+    engine = engine_of(window)
+    window.handle(StateChanged(EngineState.RUNNING))
+    engine.sent.clear()
+    return engine
+
+
+def test_edits_reach_a_running_pipeline(window: MainWindow, qtbot: QtBot) -> None:
+    """Regression: a model picked or a glossary edited while translating waited for the next
+    Start, while the Live page already named the new model."""
+    engine = _running(window)
+    window.model_combo.addItems(["gemma4:12b-it-qat", "qwen3:8b"])
+    window.model_combo.setCurrentIndex(1)
+    window.model_combo.activated.emit(1)
+    window.profiles.glossary.set_pairs({"Vice City": "Vice City"})
+    window.profiles._on_glossary()
+    assert engine.sent == []  # debounced
+    qtbot.waitUntil(lambda: bool(engine.sent), timeout=3000)
+    starts = [c for c in engine.sent if isinstance(c, StartPipeline)]
+    assert len(starts) == 1
+    assert starts[0].ollama.gpu_model == "qwen3:8b"
+    assert starts[0].profile.translation.glossary == {"Vice City": "Vice City"}
+
+
+def test_edits_the_pipeline_does_not_use_do_not_restart_it(window: MainWindow) -> None:
+    engine = _running(window)
+    window.profiles.reserve_auto.setChecked(False)
+    window.profiles.reserve.setValue(3.0)  # the VRAM reserve only judges models
+    window._apply_timer.timeout.emit()
+    assert engine.sent == []
+
+
+def test_a_restart_while_paused_stays_paused(window: MainWindow) -> None:
+    engine = _running(window)
+    window.handle(StateChanged(EngineState.PAUSED))
+    window.settings.fps.setValue(window._profile.capture.fps + 5)
+    window._apply_timer.timeout.emit()
+    assert isinstance(engine.sent[0], StartPipeline)
+    assert engine.sent[-1] == SetPaused(True)
+
+
+def test_renaming_the_profile_updates_the_summary(window: MainWindow) -> None:
+    window.rename_profile("Mafia II")
+    assert "Mafia II" in window.summary_detail.text()
+
+
+def test_switching_profiles_keeps_the_preview_sample(window: MainWindow) -> None:
+    window.appearance.preview.setChecked(True)
+    window.new_profile("İkinci")
+    assert window._overlay.text == t("overlay.sample")
+    window.appearance.preview.setChecked(False)
+    assert window._overlay.text == ""
+
+
 def test_pause_hotkey_and_paused_state(window: MainWindow) -> None:
     engine = engine_of(window)
     engine.queue = [StateChanged(EngineState.RUNNING)]

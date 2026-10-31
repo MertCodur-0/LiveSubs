@@ -109,6 +109,8 @@ FOLLOW_MS = 300
 FULLSCREEN_CHECK_MS = 3000
 WEB_STATUS_MS = 2000
 ENGINE_CHECK_MS = 1000
+# Edits that the running pipeline reads only at Start apply after typing pauses this long.
+APPLY_MS = 1500
 SIDEBAR_WIDTH = 200
 SHEET_WIDTH = 560
 AVERAGE_OF = 20  # translations in the state line's mean
@@ -288,6 +290,7 @@ class MainWindow(QMainWindow):
         self._bridge.models.connect(self._on_models)
         self._bridge.spill.connect(self._on_spill)
         self._discard_changes = False  # settings were imported: never write the old ones back
+        self._started_with: tuple | None = None  # what the running pipeline was started with
         self.setup = SetupDialog(self._config, self)
         self.setup.model_selected.connect(self._on_model_selected)
         self.setup.settings_imported.connect(self._on_settings_imported)
@@ -318,6 +321,9 @@ class MainWindow(QMainWindow):
         self._follow_timer = QTimer(self, interval=FOLLOW_MS, timeout=self._follow)
         self._follow_timer.start()
         self._save_timer = QTimer(self, interval=400, singleShot=True, timeout=self._save)
+        self._apply_timer = QTimer(
+            self, interval=APPLY_MS, singleShot=True, timeout=self._apply_to_pipeline
+        )
         self._ollama_timer = QTimer(self, interval=OLLAMA_CHECK_MS, timeout=self.check_ollama)
         self._ollama_timer.start()
         self._fullscreen_timer = QTimer(
@@ -449,6 +455,9 @@ class MainWindow(QMainWindow):
         self.settings = SettingsTab(self._config, self._profile)
         self.settings.config_changed.connect(self._save_later)
         self.settings.profile_changed.connect(self._save_later)
+        # Ollama options and the reading fps: the pipeline reads them at Start.
+        self.settings.config_changed.connect(self._apply_later)
+        self.settings.profile_changed.connect(self._apply_later)
         self.settings.hotkeys_changed.connect(lambda: self._register_hotkeys(changed=True))
         self.settings.recording_changed.connect(self._on_recording_changed)
         self.settings.web_changed.connect(self._apply_web)
@@ -623,6 +632,26 @@ class MainWindow(QMainWindow):
 
     def _save_later(self) -> None:
         self._save_timer.start()  # debounced: spin boxes send many changes
+
+    def _pipeline_settings(self) -> tuple:
+        """What the pipeline takes from the profile and the config only at Start (the region
+        and the vision settings are sent to it live)."""
+        p = self._profile
+        return (
+            p.capture.model_copy(deep=True),
+            p.translation.model_copy(deep=True),
+            self._config.ollama.model_copy(deep=True),
+        )
+
+    def _apply_later(self) -> None:
+        if self._state in ACTIVE_STATES:
+            self._apply_timer.start()  # debounced: a context is typed key by key
+
+    def _apply_to_pipeline(self) -> None:
+        """A running pipeline restarts with edited settings: they used to wait for the next
+        Start, while the Live page already named e.g. the new model."""
+        if self._state in ACTIVE_STATES and self._started_with != self._pipeline_settings():
+            self._send_start()
 
     def _register_hotkeys(self, *, changed: bool = False) -> None:
         if self._hotkeys is None:
@@ -873,9 +902,12 @@ class MainWindow(QMainWindow):
     def _activate(self, profile_id: str, profile: Profile) -> None:
         was_active = self._state in ACTIVE_STATES
         self._profile_id, self._profile = profile_id, profile
+        self._frame = None  # it showed where the previous profile's source was
         self._save()
         self._overlay.settings = profile.overlay
         self._overlay.clear()
+        if self._previewing:  # the Appearance preview stays on: keep its sample text
+            self._overlay.show_text(t("overlay.sample"), t("overlay.sample_original"))
         self._overlay.update()
         self._inspector.set_vision(profile.vision)
         self.appearance.set_settings(profile.overlay)
@@ -916,7 +948,9 @@ class MainWindow(QMainWindow):
         self._profile.name = name
         self._save()
         self.profiles.refresh()
+        self.models.set_profile(self._profile)  # its budget line names the profile
         self._fill_profile_combo()
+        self._update_summary()
 
     def delete_profile(self) -> None:
         others = sorted(set(self._store.ids()) - {self._profile_id})
@@ -934,6 +968,7 @@ class MainWindow(QMainWindow):
         self._place_overlay()  # the display monitor may have changed
         self.appearance.refresh()
         self.models.set_profile(self._profile)  # the game's VRAM reserve may have changed
+        self._apply_later()  # context, glossary or examples may have changed
 
     # --- source & region -------------------------------------------------------------------------
 
@@ -971,9 +1006,7 @@ class MainWindow(QMainWindow):
         spec = self._sources[index].spec
         if spec == self._profile.source:
             return
-        self._profile.source = spec
-        self._card.set_profile_card(self._profile_card_name())
-        self._update_region_label()
+        self._set_source(spec)
         self._save()
         if self._state in ACTIVE_STATES or self._card_waiting:
             if self._profile.region is not None:
@@ -983,6 +1016,16 @@ class MainWindow(QMainWindow):
         self._place_overlay()
         if self._calibrating:
             self._place_region_frame()
+
+    def _set_source(self, spec: Source) -> None:
+        """The profile's source changed: everything that depends on it follows."""
+        self._profile.source = spec
+        self._frame = None  # the last frame's screen place belongs to the previous source
+        self._card.set_profile_card(self._profile_card_name())
+        self._update_region_label()
+        # "Where the game runs" is guessed from the source, and with it the VRAM reserve.
+        self.profiles.refresh()
+        self.models.set_profile(self._profile)
 
     def _own_pids(self) -> set[int]:
         pid = self._card.host_pid
@@ -1027,8 +1070,8 @@ class MainWindow(QMainWindow):
 
     def _use_region(self, source: Source, region: NormRect) -> None:
         source_changed = source != self._profile.source
-        self._profile.source = source
-        self._card.set_profile_card(self._profile_card_name())
+        if source_changed:
+            self._set_source(source)
         self.refresh_sources()
         self.set_region(region, restart=source_changed)
 
@@ -1054,7 +1097,9 @@ class MainWindow(QMainWindow):
         self._profile.region = region
         self._update_region_label()
         self._save()
-        if self._state in ACTIVE_STATES:
+        if restart and self._card_waiting:  # waiting for a card it no longer reads
+            self._send_start()
+        elif self._state in ACTIVE_STATES:
             if restart:  # another window or monitor: the pipeline must reopen its source
                 self._send_start()
             else:
@@ -1120,6 +1165,7 @@ class MainWindow(QMainWindow):
         self._save()
         self._update_summary()
         self.models.mark_in_use()
+        self._apply_later()
 
     def _start_ollama(self) -> None:
         if not start_ollama():
@@ -1147,6 +1193,7 @@ class MainWindow(QMainWindow):
         self._update_summary()
         self.model_combo.clear()  # refilled by the check with the new model selected
         self.check_ollama()
+        self._apply_later()
 
     def _on_settings_imported(self) -> None:
         self._discard_changes = True
@@ -1172,8 +1219,8 @@ class MainWindow(QMainWindow):
         if self._profile.region is None:
             self.statusBar().showMessage(t("error.no_region"), 5000)
             return
-        self._profile.source = option.spec
-        self._update_region_label()  # it named the previous source
+        if option.spec != self._profile.source:
+            self._set_source(option.spec)
         self._send_start()
 
     def stop(self) -> None:
@@ -1201,6 +1248,8 @@ class MainWindow(QMainWindow):
         if self.model_combo.currentText():
             self._config.ollama.gpu_model = self.model_combo.currentText()
         self._save()
+        self._apply_timer.stop()
+        self._started_with = self._pipeline_settings()
         self._reads = 0
         self._translate_ms.clear()
         self._warned_spill = False
@@ -1219,6 +1268,8 @@ class MainWindow(QMainWindow):
         )
         if self._calibrating:
             self._engine.send(SetDebug(True))
+        if self._paused:  # a restart (new source, edited settings) stays paused
+            self._engine.send(SetPaused(True))
         self._show_running(True)
 
     # --- engine events ---------------------------------------------------------------------------

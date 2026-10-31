@@ -1064,3 +1064,15 @@ First **finish the app** (each step committed and pushed; no new release unless 
   once (saved; a running pipeline restarts on it; the normalized region is kept). Also: the
   region frame, once hidden for a missing source, was never shown again in calibration;
   `_place_region_frame` shows it whenever the source is on screen. Regression tests.
+- 2026-10-31 (user: "check every control and how they interact"): audit of the main window's
+  wiring. Fixed: (1) a source change (combo, region pick, Start) goes through `_set_source`,
+  which also refreshes the Profiles tab's location guess and the Models tab's budget (the VRAM
+  reserve follows the source) and drops the last `FrameInfo` (its screen place belonged to the
+  old source; a profile switch drops it too); (2) **edits reach a running pipeline**: model
+  (Live combo, Models tab, setup), context/glossary/examples/merge, reading fps and the Ollama
+  options were read only at Start — now `_apply_timer` (1.5 s debounce) restarts the pipeline
+  when `_pipeline_settings()` (capture, translation, ollama) differs from what it was started
+  with; edits it does not use (VRAM reserve, display) never restart it; (3) a restart while
+  paused re-sends `SetPaused(True)`; (4) a region pick on another source while a card start
+  waits restarts on the new source; (5) renaming the profile updates the Live summary and the
+  Models budget line; (6) a profile switch keeps the Appearance preview's sample text.
