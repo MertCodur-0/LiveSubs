@@ -379,6 +379,7 @@ class MainWindow(QMainWindow):
         )
         self.source_combo = QComboBox()
         self.source_combo.setPlaceholderText(t("source.none"))
+        self.source_combo.activated.connect(self._on_source_chosen)
         self.refresh_button = QPushButton(t("source.refresh"), clicked=self.refresh_sources)
         self.region_label = QLabel()
         self.region_button = QPushButton(t("region.select"), clicked=self.select_region)
@@ -961,6 +962,28 @@ class MainWindow(QMainWindow):
         index = self.source_combo.currentIndex()
         return self._sources[index] if 0 <= index < len(self._sources) else None
 
+    def _on_source_chosen(self, index: int) -> None:
+        """A source picked in the combo becomes the profile's at once: until Start it used to
+        stay in the combo only, so the region frame, the overlay and the label still followed
+        the previous window (and a refresh snapped the combo back to it)."""
+        if not 0 <= index < len(self._sources):
+            return
+        spec = self._sources[index].spec
+        if spec == self._profile.source:
+            return
+        self._profile.source = spec
+        self._card.set_profile_card(self._profile_card_name())
+        self._update_region_label()
+        self._save()
+        if self._state in ACTIVE_STATES or self._card_waiting:
+            if self._profile.region is not None:
+                self._send_start()  # the pipeline must reopen its source
+            else:
+                self.stop()
+        self._place_overlay()
+        if self._calibrating:
+            self._place_region_frame()
+
     def _own_pids(self) -> set[int]:
         pid = self._card.host_pid
         return {pid} if pid else set()
@@ -1303,7 +1326,6 @@ class MainWindow(QMainWindow):
             self._engine.send(SetDebug(on))
         if on:
             self._place_region_frame()
-            self._region_frame.show()
             self._place_overlay()
             self._place_inspector()
             self._inspector.show()
@@ -1336,12 +1358,14 @@ class MainWindow(QMainWindow):
             self._engine.send(SetVision(self._profile.vision.model_copy(deep=True)))
 
     def _place_region_frame(self) -> None:
+        """Calibration only: the frame over the region, shown again once its source is back."""
         area, region = self._source_area(), self._profile.region
         if area is None or region is None:
             self._region_frame.hide()
             return
         physical = region.to_pixels(area.width, area.height).translated(area.x, area.y)
         self._region_frame.place(screens.to_logical(physical, screens.current_screens()))
+        self._region_frame.show()
 
     def _on_region_edited(self, logical: Rect) -> None:
         area = self._source_area()

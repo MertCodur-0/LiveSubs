@@ -570,6 +570,46 @@ def test_calibration_shows_editable_overlay_and_region(window: MainWindow) -> No
     assert not window._overlay.isVisible()  # not running: nothing to show
 
 
+def test_choosing_another_source_moves_the_region_to_it(window: MainWindow) -> None:
+    """Regression: a source picked in the combo stayed in the combo until Start, so the region
+    frame (and the overlay) still looked for the previous window and disappeared."""
+    window._profile.source = WindowSource(exe_name="gone.exe", title="Closed game")
+    window.refresh_sources()
+    window.set_region(NormRect(x=0.1, y=0.8, width=0.8, height=0.15))
+    window.set_calibration(True)
+    assert not window._region_frame.isVisible()  # the old window is not there
+
+    primary = next(m for m in win32.list_monitors() if m.is_primary)
+    monitor = MonitorSource(device_name=primary.device_name)
+    index = next(i for i, o in enumerate(window._sources) if o.spec == monitor)
+    window.source_combo.setCurrentIndex(index)
+    window.source_combo.activated.emit(index)
+    assert window._profile.source == monitor
+    assert window._region_frame.isVisible()
+    expected = NormRect(x=0.1, y=0.8, width=0.8, height=0.15).to_pixels(
+        primary.rect.width, primary.rect.height
+    )
+    assert from_qrect(window._region_frame.geometry()) == to_logical(
+        expected.translated(primary.rect.x, primary.rect.y), current_screens()
+    )
+    window.refresh_sources()  # no longer snaps back to the old window
+    assert window.selected_source().spec == monitor
+    assert window._store.load(DEFAULT_PROFILE_ID).source == monitor
+
+
+def test_choosing_another_source_while_running_restarts(window: MainWindow) -> None:
+    _with_monitor_source(window)
+    engine = engine_of(window)
+    engine.queue = [StateChanged(EngineState.RUNNING)]
+    window._poll()
+    index = next(i for i, o in enumerate(window._sources) if o.spec != window._profile.source)
+    window.source_combo.setCurrentIndex(index)
+    window.source_combo.activated.emit(index)
+    command = engine.sent[-1]
+    assert isinstance(command, StartPipeline)
+    assert command.profile.source == window._sources[index].spec
+
+
 def test_pause_hotkey_and_paused_state(window: MainWindow) -> None:
     engine = engine_of(window)
     engine.queue = [StateChanged(EngineState.RUNNING)]

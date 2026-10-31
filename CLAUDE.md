@@ -1056,3 +1056,11 @@ First **finish the app** (each step committed and pushed; no new release unless 
   eğmeyeceğini biliyordum.") 1.5 s after the second piece appeared, i.e. **~0.3-0.6 s later**
   than the fragment (merged request 1.34-1.40 s vs fragment 0.52-0.63 s) — more than the
   0.1-0.2 s guessed beforehand. No waiting is added: the first piece is translated at once.
+- 2026-10-31 (user report: "after changing the window under Kaynak the subtitle region did not
+  show"): the source combo never had a handler — a pick stayed in the combo until Start, while
+  `profile.source` kept the old window, so `_source_area()` gave `None` (region frame hidden,
+  overlay off the subtitle), the label named the old window, a running pipeline kept reading
+  it and any `refresh_sources()` snapped the combo back. Now `activated` adopts the source at
+  once (saved; a running pipeline restarts on it; the normalized region is kept). Also: the
+  region frame, once hidden for a missing source, was never shown again in calibration;
+  `_place_region_frame` shows it whenever the source is on screen. Regression tests.
