@@ -167,7 +167,8 @@ yönetici izni gerekmez ve anti-cheat sistemlerine takılmaz.
   kapalıysa *Altyazı bölgesini seç*, kartın anlık görüntüsünü gösterir ve bölgeyi onun üzerine
   çizersin. Kartı aynı anda tek uygulama kullanabilir; OBS'i kapat (LiveSubs kart boşalır
   boşalmaz onu açar). Görüntü simsiyahsa sebep genellikle HDCP'dir: PS5'te Ayarlar → Sistem →
-  HDMI → *HDCP'yi Etkinleştir*'i kapat. Önizlemeyi kapatmak için üzerinde Esc'ye bas.
+  HDMI → *HDCP'yi Etkinleştir*'i kapat ya da kartı HDCP'yi kaldıran bir HDMI splitter üzerinden
+  bağla (o zaman HDCP açık kalabilir). Önizlemeyi kapatmak için üzerinde Esc'ye bas.
 - **Profiller:** her oyuna bir profil: bağlam ("80'lerde geçen argolu bir suç hikâyesi"),
   isim ve terim sözlüğü, oyunun nerede çalıştığı (VRAM payını belirler) ve çevirinin hangi
   ekranda gösterileceği.

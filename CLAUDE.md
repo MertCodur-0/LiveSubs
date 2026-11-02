@@ -279,6 +279,8 @@ Designed from the start for three source kinds; video device lands in phase 2.
   listed when the page is first shown: PortAudio init ~0.4 s). Errors (`AudioChanged.error`:
   no_input / no_output / failed) go to the status bar. A lost output device mid-play is not
   detected.
+- **Splitter verified (2026-11-02, user):** with HDCP **on** in the PS5, both the TV (via the
+  splitter) and the card get a picture — the splitter strips HDCP, so it can stay on.
 - Not done: the latency loopback measurement (user: later).
 
 ### Translation
@@ -652,8 +654,8 @@ First **finish the app** (each step committed and pushed; no new release unless 
 **Afterwards:**
 - **Claude API translation backend** — a second `TranslationBackend` next to Ollama (the
   protocol was built for it): API key in settings, model choice, cost/latency shown in the feed.
-- ~~Capture card (steps 9b/15)~~ done 2026-10-30. Open: test with the HDMI splitter once it
-  arrives (must hand the card 1080p, HDCP stripped or off); latency loopback measurement (later).
+- ~~Capture card (steps 9b/15)~~ done 2026-10-30; HDMI splitter verified 2026-11-02 (strips
+  HDCP). Open: latency loopback measurement (later).
 
 ## Known risks
 

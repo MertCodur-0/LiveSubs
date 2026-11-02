@@ -159,8 +159,9 @@ rights are needed and anti-cheat systems are not bothered.
   *Yakalama kartı önizlemesi* and draw the region on the full-screen preview. Without a preview,
   *Select the subtitle region* shows a still frame of the card to draw on. The card can be used by
   one app at a time, so close OBS (LiveSubs opens the card as soon as it is free). A black picture
-  usually means HDCP: on a PS5, turn off Settings → System → HDMI → *Enable HDCP*. Press Esc on the
-  preview to close it.
+  usually means HDCP: on a PS5, turn off Settings → System → HDMI → *Enable HDCP*, or feed the card
+  through an HDMI splitter that strips HDCP (then HDCP can stay on). Press Esc on the preview to
+  close it.
 - **Profiles:** one per game: context ("gritty crime story set in the 80s"), a glossary of
   names and terms, where the game runs (sets the VRAM reserve), and which screen the overlay
   goes to.

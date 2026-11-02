@@ -507,7 +507,8 @@ STRINGS: dict[str, str] = {
     "card.crashed": "Yakalama kartı süreci beklenmedik şekilde kapandı ve yeniden başlatıldı.",
     "card.black": (
         "Yakalama kartından görüntü gelmiyor (ekran siyah). Konsol açık mı? PS5'te HDCP açıksa "
-        "görüntü gelmez: Ayarlar → Sistem → HDMI → HDCP'yi Etkinleştir seçeneğini kapatın."
+        "görüntü gelmez: Ayarlar → Sistem → HDMI → HDCP'yi Etkinleştir seçeneğini kapatın ya da "
+        "kartı HDCP'yi kaldıran bir HDMI splitter üzerinden bağlayın."
     ),
     "card.picture_back": "Yakalama kartından yeniden görüntü geliyor.",
     "card.preview_closed": (
