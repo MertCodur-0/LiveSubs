@@ -269,7 +269,9 @@ Designed from the start for three source kinds; video device lands in phase 2.
   the device host only while `preview.audio` is on, the card is open **and** the preview is on
   screen (Esc on the preview silences it too). The card's WASAPI input is found by its name in
   brackets ("Dijital Ses Arabirimi (V-Z632)", 48 kHz stereo); output `preview.audio_output`
-  ("" = Windows' default, read at each start: PortAudio is re-initialised before every start).
+  ("" = Windows' default, read at each start: PortAudio is re-initialised before every start;
+  while it plays the device host checks Windows' default every 1 s through Core Audio,
+  `platform/audio_endpoints.py`, and reopens the sound on a new default).
   `sounddevice` (PortAudio DLL inside its wheel); two streams at 20 ms + `Ring` (30 ms target,
   skips back from 120 ms when the clocks drift, silence + re-prime on underrun). Measured: open
   37 ms, 0 underruns, ~80-90 ms card -> speaker on top of the card itself. Off by default (the
@@ -1064,6 +1066,12 @@ First **finish the app** (each step committed and pushed; no new release unless 
   once (saved; a running pipeline restarts on it; the normalized region is kept). Also: the
   region frame, once hidden for a missing source, was never shown again in calibration;
   `_place_region_frame` shows it whenever the source is on screen. Regression tests.
+- 2026-11-02 (user report: "with the output on Windows' default and Realtek picked in Windows
+  there was no sound; picking it in the app worked"): device.log showed the sound opened on
+  the RAMPAGE speakers (then the default) and stayed there after the user changed the default
+  in Windows — PortAudio reads the default only when initialised. `AudioControl.check_default`
+  (1 s timer in the device host) compares the default endpoint id (`IMMDeviceEnumerator`,
+  eMultimedia like PortAudio) with the one at start and reopens. A named output never follows.
 - 2026-10-31 (user: "check every control and how they interact"): audit of the main window's
   wiring. Fixed: (1) a source change (combo, region pick, Start) goes through `_set_source`,
   which also refreshes the Profiles tab's location guess and the Models tab's budget (the VRAM

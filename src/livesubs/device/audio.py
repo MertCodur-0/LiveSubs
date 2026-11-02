@@ -4,8 +4,9 @@ The card shows up in Windows as a sound input of its own ("Dijital Ses Arabirimi
 found by the card's name in brackets. Input and output are two WASAPI streams with their own
 clocks, joined by ``Ring``: it keeps ``TARGET_S`` of sound buffered (callback jitter), skips
 back down to it when the clocks drift apart, and plays silence while it refills after an
-underrun. PortAudio is initialised again before every start, so a device plugged in since (or a
-changed Windows default output) is seen.
+underrun. PortAudio is initialised again before every start, so a device plugged in since is
+seen; PortAudio still reads the default output only then, so ``AudioControl.check_default`` reopens
+the sound when the user picks another default output in Windows while it plays.
 """
 
 from __future__ import annotations
@@ -216,17 +217,25 @@ PlayerFactory = Callable[[str, str], Player]
 class AudioControl:
     """Plays the open card's sound while it is wanted and the preview is on screen.
 
-    Called from the device thread (card opened/closed) and the Qt thread (setting, preview);
-    ``emit`` gets ``(playing, error kind or None, detail)`` after every change.
+    Called from the device thread (card opened/closed) and the Qt thread (setting, preview,
+    ``check_default`` on a timer); ``emit`` gets ``(playing, error kind or None, detail)`` after
+    every change.
     """
 
     def __init__(
         self,
         emit: Callable[[bool, AudioErrorKind | None, str], None],
         open_player: PlayerFactory = Passthrough,
+        default_output: Callable[[], str] | None = None,
     ) -> None:
         self._emit = emit
         self._open = open_player
+        if default_output is None:
+            from livesubs.platform.audio_endpoints import default_output_id
+
+            default_output = default_output_id
+        self._default_output = default_output
+        self._default_id: str | None = None  # Windows' default output when the sound opened
         self._lock = threading.Lock()
         self._card: str | None = None
         self._output: str | None = None  # None: off; "" = Windows' default output
@@ -246,6 +255,17 @@ class AudioControl:
     def close(self) -> None:
         self._update(card=None)
 
+    def check_default(self) -> None:
+        """Reopens the sound on Windows' new default output, when it plays on the default."""
+        with self._lock:
+            if self._playing is None or self._playing[1] or self._default_id is None:
+                return
+            current = self._default_output()
+            if current == self._default_id:
+                return
+            log.info("Windows' default output changed, reopening the sound")
+            self._start(self._playing)
+
     def _update(self, **changes: Any) -> None:
         with self._lock:
             self._card = changes.get("card", self._card)
@@ -256,20 +276,28 @@ class AudioControl:
                 wanted = (self._card, self._output)
             if wanted == self._playing:
                 return
-            if self._player is not None:
-                self._player.close()
-                self._player = None
-            self._playing = wanted
-            if wanted is None:
-                self._emit(False, None, "")
-                return
-            try:
-                self._player = self._open(*wanted)
-            except AudioError as exc:
-                log.warning("No sound: %s", exc)
-                self._emit(False, exc.kind, str(exc))
-            except Exception as exc:
-                log.exception("No sound")
-                self._emit(False, AudioErrorKind.FAILED, str(exc))
-            else:
-                self._emit(True, None, "")
+            self._start(wanted)
+
+    def _start(self, wanted: tuple[str, str] | None) -> None:
+        """Closes what plays and opens ``wanted`` (caller holds the lock)."""
+        if self._player is not None:
+            self._player.close()
+            self._player = None
+        self._playing = wanted
+        self._default_id = None
+        if wanted is None:
+            self._emit(False, None, "")
+            return
+        if not wanted[1]:
+            # Read before opening: a failed start (no output yet) is retried on the next change.
+            self._default_id = self._default_output()
+        try:
+            self._player = self._open(*wanted)
+        except AudioError as exc:
+            log.warning("No sound: %s", exc)
+            self._emit(False, exc.kind, str(exc))
+        except Exception as exc:
+            log.exception("No sound")
+            self._emit(False, AudioErrorKind.FAILED, str(exc))
+        else:
+            self._emit(True, None, "")

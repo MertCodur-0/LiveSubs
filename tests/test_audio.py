@@ -72,7 +72,7 @@ class Players:
 def test_sound_plays_only_with_card_setting_and_preview() -> None:
     events: list = []
     players = Players()
-    audio = AudioControl(lambda *e: events.append(e), players)
+    audio = AudioControl(lambda *e: events.append(e), players, lambda: "speakers")
     audio.set_output("")
     audio.set_card("V-Z632")
     assert players.opened == []  # the preview is not on screen
@@ -94,9 +94,36 @@ def test_sound_plays_only_with_card_setting_and_preview() -> None:
 @pytest.mark.parametrize("kind", list(AudioErrorKind))
 def test_a_failed_start_is_reported_once(kind: AudioErrorKind) -> None:
     events: list = []
-    audio = AudioControl(lambda *e: events.append(e), Players(AudioError(kind, "x")))
+    audio = AudioControl(
+        lambda *e: events.append(e), Players(AudioError(kind, "x")), lambda: "speakers"
+    )
     audio.set_output("")
     audio.set_preview(True)
     audio.set_card("V-Z632")
     audio.set_preview(True)
     assert events == [(False, kind, "x")]
+
+
+def test_a_default_output_picked_in_windows_is_followed() -> None:
+    """PortAudio keeps playing on the old default; reopen on the new one."""
+    default = ["speakers"]
+    players = Players()
+    audio = AudioControl(lambda *e: None, players, lambda: default[0])
+    audio.set_card("V-Z632")
+    audio.set_preview(True)
+    audio.set_output("")
+    audio.check_default()
+    assert len(players.opened) == 1  # unchanged
+    default[0] = "headphones"
+    audio.check_default()
+    assert players.closed == 1 and players.opened == [("V-Z632", "")] * 2
+    audio.check_default()
+    assert len(players.opened) == 2
+
+    audio.set_output("Hoparlör")  # a named output never follows Windows
+    default[0] = "speakers"
+    audio.check_default()
+    assert players.opened[-1] == ("V-Z632", "Hoparlör") and len(players.opened) == 3
+    audio.set_output(None)
+    audio.check_default()
+    assert len(players.opened) == 3

@@ -51,6 +51,7 @@ def check() -> list[str]:
     from livesubs.engine.capture.video_device import VideoDeviceCapture  # noqa: F401
     from livesubs.engine.ocr.winrt_ocr import WinRtOcr
     from livesubs.engine.process import EngineProcess  # noqa: F401
+    from livesubs.platform.audio_endpoints import default_output_id
     from livesubs.platform.video_devices import list_video_devices
     from livesubs.ui.main_window import MainWindow  # noqa: F401
     from livesubs.ui.qr import qr_pixmap
@@ -71,6 +72,7 @@ def check() -> list[str]:
 
     assert sounddevice.get_portaudio_version()
     list_outputs()
+    default_output_id()
 
     WinRtOcr().recognize(np.full((40, 200), 255, np.uint8))
     assert b"EventSource" in render_page() and FONT.is_file()  # package data of the phone page

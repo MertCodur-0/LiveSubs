@@ -53,6 +53,7 @@ RETRY_S = 2.0
 BLACK_AFTER_S = 3.0  # fades to black are shorter; HDCP or a console in standby are not
 BLACK_CHECK_S = 0.5
 COMMAND_POLL_MS = 20
+DEFAULT_OUTPUT_POLL_MS = 1000
 
 DeviceOpener = Callable[[VideoDeviceSource], FrameSource]
 
@@ -262,6 +263,9 @@ def device_main(commands: Queue, events: Queue) -> None:
 
     timer = QTimer(interval=COMMAND_POLL_MS, timeout=poll)
     timer.start()
+    # Follows a default output picked in Windows while the sound plays on "Windows' default".
+    default_timer = QTimer(interval=DEFAULT_OUTPUT_POLL_MS, timeout=audio.check_default)
+    default_timer.start()
     app.exec()
     win32.keep_display_awake(False)
     log.info("Device host stopped")
