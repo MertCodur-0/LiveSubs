@@ -482,7 +482,7 @@ class MainWindow(QMainWindow):
         self.profiles.rename_requested.connect(self.rename_profile)
         self.profiles.delete_requested.connect(self.delete_profile)
 
-        # macOS Settings style: a sidebar picks the page, each page has a large title. Long
+        # A sidebar picks the page, each page has a large title. Long
         # pages scroll instead of squeezing their rows on short screens (Models scrolls itself).
         self.pages = QStackedWidget()
         self._nav_group = QButtonGroup(self)

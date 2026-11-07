@@ -1,4 +1,4 @@
-"""Settings tab, macOS Settings style: cards of rows (window and theme, phone output,
+"""Settings tab: cards of rows (window and theme, phone output,
 capture card preview, hotkeys) and a folded "Gelişmiş" card for what rarely changes (Ollama,
 context, model keep-alive, reading speed, upkeep). Long explanations sit in (i) tooltips.
 

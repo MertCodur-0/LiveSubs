@@ -430,7 +430,7 @@ font size, text color, outline/shadow, background opacity, max lines shown.
 
 ### Main window
 
-macOS-Settings layout (2026-10-30, branch `ui-redesign`), window 1000x680 (checked down to
+Sidebar layout (2026-10-30, branch `ui-redesign`), window 1000x680 (checked down to
 820x560). **Sidebar** (200 px): app icon + "LiveSubs" (`ui/header.py`), icon buttons Canlı,
 Görünüm, Profiller, Modeller (`MainWindow.nav_buttons`, `show_page(i)` in that order), Ayarlar
 apart at the bottom, then a status dot (`statusDot[state=ok|warn|idle]`: Çalışıyor /
@@ -520,19 +520,19 @@ Duraklatıldı / Ollama kapalı / Durdu, `_update_status`). Selected button: fai
   desktop + Start menu shortcuts for the packaged exe (`platform/shortcuts.py`, WScript.Shell via
   PowerShell), settings export/import (`core/backup.py`: zip of `config.json` + `profiles/*.json`;
   import takes only those names, then offers a restart and stops saving the old settings).
-- Theme (step 16 2026-10-22; **Apple theme + sidebar redesign 2026-10-30, branch
+- Theme (step 16 2026-10-22; **modern theme + sidebar redesign 2026-10-30, branch
   `ui-redesign`**): `ui/theme/` — `base.qss` template with `{{token}}` placeholders (comments
   stripped first; `{{assets}}` = the assets folder for `url(...)`), four token files with one
-  token set (test): **`apple.json` (default**: window #1C1C1E, cards #2C2C2E, accent and Start
-  #0A84FF, Stop calm red #C4554D, Inter everywhere, no glow), `apple_light.json` (#F5F5F7,
+  token set (test): **`modern.json` (default**: window #1C1C1E, cards #2C2C2E, accent and Start
+  #0A84FF, Stop calm red #C4554D, Inter everywhere, no glow), `modern_light.json` (#F5F5F7,
   white cards with a hairline, text #1D1D1F, accent #007AFF), `vice.json` (neon sunset:
   Audiowide headings, Monoton logo, gradient Start, glow, `header_art`) and `dark.json`
   ("Sade koyu"). Tokens are plain text, so a token may be a QSS expression in one theme and a
   color in another (Vice's `start_bg` gradient); tokens read by `Theme.color` (palette, painted
-  widgets) stay colors (test). Settings choices `config.theme` (= `theme.CHOICES`): apple,
-  apple_light, **system** (Apple dark or light after Windows: Qt's `colorScheme()`, else the
+  widgets) stay colors (test). Settings choices `config.theme` (= `theme.CHOICES`): modern,
+  modern_light, **system** (modern dark or light after Windows: Qt's `colorScheme()`, else the
   registry's `AppsUseLightTheme`; re-applied live on `colorSchemeChanged`), vice, dark; unknown
-  values validate to "apple". `apply_theme` also forces / unsets Qt's color scheme (the
+  values validate to "modern". `apply_theme` also forces / unsets Qt's color scheme (the
   Windows title bar follows) **with the style hints' signals blocked** — the signal fires
   synchronously and ping-ponged between windows into infinite recursion (found by the tests).
   `theme.prepare(app)` (in `app.py`, before any widget): Fusion + bundled fonts. Palette from
@@ -543,13 +543,13 @@ Duraklatıldı / Ollama kapalı / Durdu, `_update_status`). Selected button: fai
   pill; `pill=true` buttons; check boxes/radios drawn by QSS (`check.svg`). 4/8/12/16/24 scale:
   card padding 6-16, 12 between cards. **A QSS `min-height` overrides `setFixedHeight`**: it is
   set on one-line fields only (it squashed the profile's game description to one line).
-  `ui/rows.py`: `RowCard` (macOS-Settings rows: label column 190 px, control right, hairline
+  `ui/rows.py`: `RowCard` (settings rows: label column 190 px, control right, hairline
   `QFrame#separator` between rows, `set_side` for the QR code), `info(tip)` = gray (i) with a
   tooltip (long explanations live there), `labeled(text, tip)` for QFormLayout labels,
   `Disclosure` (folding title, folded at first). `ui/icons.py`: own line icons
   (`assets/icons/*.svg`, drawn black, 20 px viewBox, 1.6 px strokes: live, appearance,
   profiles, models, settings, info, warning) tinted with `SourceIn` to a theme color.
-  Fonts in `src/livesubs/assets/fonts/` (OFL texts next to them): **Inter** (body, Apple
+  Fonts in `src/livesubs/assets/fonts/` (OFL texts next to them): **Inter** (body, modern
   themes, overlay), **Audiowide** and **Monoton** (Vice). All cover Turkish (test).
   Own SVG art in `src/livesubs/assets/`: `icon.svg` (blue rounded square with subtitle bars,
   2026-10-30; replaced the sunset/palm icon), `header.svg` (Vice's banner, drawn dimmed at the
@@ -557,8 +557,8 @@ Duraklatıldı / Ollama kapalı / Durdu, `_update_status`). Selected button: fai
   (neutral gray), `check.svg`. `ui/icon.py` renders the SVG itself (no SVG icon engine plugin
   needed) and writes `icon.ico` (PNG-in-ICO) via `scripts/make_icon.py` — rerun it after
   editing the SVG. The packaged exe keeps pythonw's own icon (changing it would break the
-  signature), so shortcuts get `IconLocation = icon.ico`. No Apple logos, SF Pro or SF Symbols
-  (license); no Rockstar/GTA logos, fonts, art or names. The overlay's "Vice" *style preset*
+  signature), so shortcuts get `IconLocation = icon.ico`. No third-party brand logos or system
+  fonts (license); no Rockstar/GTA logos, fonts, art or names. The overlay's "Vice" *style preset*
   is an overlay feature, independent of the app theme.
 - Packaging (`scripts/build_exe.ps1`, replaces PyInstaller 2026-10-22): the official **embeddable
   Python** of the venv's exact version; its PSF-signed `pythonw.exe` (signature checked) renamed to
@@ -594,7 +594,7 @@ src/livesubs/
   ui/          main_window.py, header.py, icon.py, icons.py, rows.py, feed.py, qr.py, overlay.py,
                region_frame.py, inspector.py,
                tray.py, setup_check.py, single_instance.py, capture_card.py, frame_region.py,
-               tabs/, theme/ (base.qss, apple.json, apple_light.json, vice.json, dark.json)
+               tabs/, theme/ (base.qss, modern.json, modern_light.json, vice.json, dark.json)
   web/         server.py, feed.py, static/index.html
 tests/         samples/ (+ samples.json), helpers/, test_*.py
 scripts/       build_exe.ps1, embedded/ (sitecustomize.py, smoke_test.py), create_shortcut.ps1,
@@ -627,7 +627,7 @@ Phase 2 — features
 - [x] 15. Video device source (capture card): enumerate, busy/lost/black errors, region on the
   preview or a still frame (done as 9b, 2026-10-30)
 - [x] 16. Vice theme, fonts, SVG icon/header, overlay styles — 2026-10-22
-- [x] 16b. Apple theme (default) + sidebar redesign; Vice and Sade koyu kept — 2026-10-30
+- [x] 16b. Modern theme (default) + sidebar redesign; Vice and Sade koyu kept — 2026-10-30
   on branch `ui-redesign`, merged into main and released as v0.5.0
 - [x] 17. Web output + QR (+ Screen Wake Lock), phone-only mode — 2026-10-23
 
@@ -966,19 +966,19 @@ First **finish the app** (each step committed and pushed; no new release unless 
   no traceback kept) while `build_exe.ps1` ran at the same time; two later runs alone were clean
   (469 passed). Not reproduced — rerun with `-X faulthandler` if it shows up again.
 - 2026-10-30: **UI redesign (branch `ui-redesign`, user's brief, no questions asked by request)**:
-  Apple-like (macOS Settings / Music feel), no feature removed. Vice theme, its gradients,
+  clean and minimal, no feature removed. Vice theme, its gradients,
   glow, header banner and the Monoton/Audiowide fonts removed as the brief asked ("no neon,
   gradients or decoration; the logo in Inter"). Choices made without the user: a sidebar
-  instead of top tabs (the macOS Settings layout); Stop = muted red `#C4554D` / `#CF4C43`
+  instead of top tabs; Stop = muted red `#C4554D` / `#CF4C43`
   rather than system red; a new plain icon (the sunset/palm one clashed); "vice" in an old
   config -> "system"; no drop shadows at all (QSS has none; `QGraphicsDropShadowEffect` per card
   costs redraws and the brief allowed "very little"); the overlay's Vice style preset kept (a
   feature, not the app theme). The brief arrived truncated after "...json) kullan,
   gerekiyorsa" — any later requirements were not seen.
-- 2026-10-30: **The full brief arrived** (the first paste was cut off): add "Apple" as a new
-  default theme and **keep Vice and Sade koyu**, show a plan + sketch first. Plan approved by
+- 2026-10-30: **The full brief arrived** (the first paste was cut off): add a modern theme as the new
+  default and **keep Vice and Sade koyu**, show a plan + sketch first. Plan approved by
   the user with my three proposals: build on the branch and bring Vice/Sade koyu (fonts,
-  banner, glow) back; keep Apple light and "system" as choices (default Apple dark); keep the
+  banner, glow) back; keep its light variant and "system" as choices (default dark); keep the
   new plain icon. Then built without further questions, one commit per step: themes, icons,
   sidebar, Live page (summary + sheet + warning card + mean time), feed list + developer
   view, rows/Gelişmiş, screenshots + docs. The phone page is untouched (user). Decisions made
@@ -1007,7 +1007,7 @@ First **finish the app** (each step committed and pushed; no new release unless 
   `test_setup.py` 30/30, full suite 2/2 clean. **Rule: a worker thread must never hold a
   reference to a Qt object it could be the last owner of.**
 - 2026-10-30: **Released v0.5.0** (user's choice: merge `ui-redesign` into main, then release):
-  Apple theme + sidebar redesign, mouse wheel no longer changes values, the worker-thread
+  modern theme + sidebar redesign, mouse wheel no longer changes values, the worker-thread
   crash fix above.
 - 2026-10-30: **Speed/quality review** (user asked what slows the app or hurts translations;
   user OK'd the five fixes, worked through while the user was away, one commit each): cache key
@@ -1086,6 +1086,8 @@ First **finish the app** (each step committed and pushed; no new release unless 
   paused re-sends `SetPaused(True)`; (4) a region pick on another source while a card start
   waits restarts on the new source; (5) renaming the profile updates the Live summary and the
   Models budget line; (6) a profile switch keeps the Appearance preview's sample text.
-- 2026-11-07 (user): no "Apple" in visible text — theme labels are now "Koyu", "Açık",
-  "Windows'a göre açık/koyu" (Vice, Sade koyu unchanged); READMEs say dark / light. Internal
-  ids (`apple`, `apple_light`, token files) stay so saved configs keep working.
+- 2026-11-07 (user): no brand names (other OS makers) anywhere — UI, READMEs, code, docs.
+  Theme labels "Koyu", "Açık", "Windows'a göre açık/koyu" (Vice, Sade koyu unchanged); ids and
+  token files `modern` / `modern_light`. An old config's theme id falls back to the default
+  (dark). Only the phone page's standard iOS `<meta name="apple-mobile-web-app-capable">` stays
+  (needed for full screen on an iPhone/iPad).

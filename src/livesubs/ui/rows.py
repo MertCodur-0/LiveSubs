@@ -1,4 +1,4 @@
-"""macOS Settings-style cards: a title above, rows inside with the label on the left, the control
+"""Settings cards: a title above, rows inside with the label on the left, the control
 on the right and a hairline between rows. Long explanations go into an (i) tooltip."""
 
 from __future__ import annotations

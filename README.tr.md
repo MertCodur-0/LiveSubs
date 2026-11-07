@@ -46,8 +46,8 @@ tamamen kendi bilgisayarında çalışır.
 - **Oyun başına profil.** Kaynak, bölge, renkler, overlay stili ve konumu, bağlam ve sözlük,
   oyuna ayrılan VRAM.
 - **Gerçek uygulama.** Exe'ye çift tıklarsın; eksik bir şey varsa kurulum penceresi kurar.
-  Genel kısayol tuşları, sistem tepsisi simgesi ve canlı Inspector'lı ayar modu var. macOS
-  Ayarlar benzeri, kenar çubuklu pencere; temalar: Koyu (varsayılan), Açık,
+  Genel kısayol tuşları, sistem tepsisi simgesi ve canlı Inspector'lı ayar modu var. Kenar
+  çubuklu pencere; temalar: Koyu (varsayılan), Açık,
   Windows'un açık/koyu ayarını izleyen tema, Vice (neon gün batımı) ve Sade koyu.
 
 | Ayarlar ve telefon QR kodu | Telefon sayfası |

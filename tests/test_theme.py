@@ -44,18 +44,18 @@ def test_color_tokens_are_colors(name: str) -> None:
     theme.palette(current)  # every palette token parses
 
 
-def test_apple_colors_follow_the_design() -> None:
-    dark, light = theme.load_theme("apple"), theme.load_theme("apple_light")
+def test_modern_colors_follow_the_design() -> None:
+    dark, light = theme.load_theme("modern"), theme.load_theme("modern_light")
     assert (dark.tokens["window"], dark.tokens["surface"]) == ("#1C1C1E", "#2C2C2E")
     assert dark.tokens["accent"] == dark.tokens["start_bg"] == "#0A84FF"
     assert (light.tokens["window"], light.tokens["surface"]) == ("#F5F5F7", "#FFFFFF")
     assert (light.tokens["text"], light.tokens["accent"]) == ("#1D1D1F", "#007AFF")
-    for apple in (dark, light):
-        assert apple.tokens["font_heading"] == apple.tokens["font_logo"] == "Inter"
-        assert apple.glow is None and not apple.header_art
+    for modern in (dark, light):
+        assert modern.tokens["font_heading"] == modern.tokens["font_logo"] == "Inter"
+        assert modern.glow is None and not modern.header_art
 
 
-@pytest.mark.parametrize("name", ["apple", "apple_light", "dark"])
+@pytest.mark.parametrize("name", ["modern", "modern_light", "dark"])
 def test_plain_themes_have_no_gradients(name: str) -> None:
     qss = theme.render_qss(theme.load_theme(name))
     assert "gradient" not in qss
@@ -71,21 +71,21 @@ def test_vice_keeps_its_look() -> None:
 
 
 def test_unknown_theme_falls_back() -> None:
-    assert theme.load_theme("neon-pink-2000").name == theme.FALLBACK_THEME == "apple"
+    assert theme.load_theme("neon-pink-2000").name == theme.FALLBACK_THEME == "modern"
 
 
 def test_choices_match_the_config() -> None:
     assert theme.CHOICES == THEME_CHOICES
     assert set(theme.THEMES) < set(theme.CHOICES)
-    assert AppConfig().theme == theme.DEFAULT_CHOICE == "apple"
+    assert AppConfig().theme == theme.DEFAULT_CHOICE == "modern"
     assert AppConfig(theme="vice").theme == "vice"
-    assert AppConfig(theme="light").theme == "apple"  # unknown names get the default
+    assert AppConfig(theme="light").theme == "modern"  # unknown names get the default
 
 
 def test_resolve_follows_the_system(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in theme.THEMES:
         assert theme.resolve(name) == name
-    for scheme, expected in (("dark", "apple"), ("light", "apple_light")):
+    for scheme, expected in (("dark", "modern"), ("light", "modern_light")):
         monkeypatch.setattr(theme, "system_scheme", lambda s=scheme: s)
         assert theme.resolve("system") == expected
 

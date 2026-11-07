@@ -1153,10 +1153,10 @@ def test_theme_switch_from_settings(window: MainWindow) -> None:
     app = QGuiApplication.instance()
     combo = window.settings.theme
     assert [combo.itemData(i) for i in range(combo.count())] == list(themes.CHOICES)
-    assert combo.currentData() == "apple"  # the default
+    assert combo.currentData() == "modern"  # the default
     try:
-        combo.setCurrentIndex(combo.findData("apple_light"))
-        assert window._config.theme == "apple_light"
+        combo.setCurrentIndex(combo.findData("modern_light"))
+        assert window._config.theme == "modern_light"
         assert app.palette().window().color().name() == "#f5f5f7"
         assert window.start_button.graphicsEffect() is None  # no glow
         combo.setCurrentIndex(combo.findData("vice"))
@@ -1165,7 +1165,7 @@ def test_theme_switch_from_settings(window: MainWindow) -> None:
         combo.setCurrentIndex(combo.findData("dark"))
         assert app.palette().window().color().name() == "#17181c"
     finally:
-        combo.setCurrentIndex(combo.findData("apple"))
+        combo.setCurrentIndex(combo.findData("modern"))
     assert app.palette().window().color().name() == "#1c1c1e"
     assert window.start_button.graphicsEffect() is None
 
@@ -1175,14 +1175,18 @@ def test_system_theme_follows_windows_live(
 ) -> None:
     combo = window.settings.theme
     combo.setCurrentIndex(combo.findData("system"))
-    for scheme, expected in (("light", "apple_light"), ("dark", "apple"), ("light", "apple_light")):
+    for scheme, expected in (
+        ("light", "modern_light"),
+        ("dark", "modern"),
+        ("light", "modern_light"),
+    ):
         monkeypatch.setattr(themes, "system_scheme", lambda s=scheme: s)
         window._on_color_scheme()  # what Qt's colorSchemeChanged calls
         assert window._theme.name == expected
     combo.setCurrentIndex(combo.findData("vice"))
     window._on_color_scheme()  # a chosen theme ignores Windows
     assert window._theme.name == "vice"
-    combo.setCurrentIndex(combo.findData("apple"))
+    combo.setCurrentIndex(combo.findData("modern"))
 
 
 def test_sidebar_switches_pages(window: MainWindow) -> None:
@@ -1664,7 +1668,7 @@ def test_wheel_never_changes_settings(window: MainWindow, qapp: QApplication) ->
         _wheel(widget, steps=1)
         after = widget.currentIndex() if hasattr(widget, "currentIndex") else widget.value()
         assert after == before, widget
-    assert window._config.theme == "apple"
+    assert window._config.theme == "modern"
     window.hide()
 
 

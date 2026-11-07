@@ -1,8 +1,8 @@
-"""Themes: ``base.qss`` filled from a token file (``apple.json``, ``apple_light.json``,
+"""Themes: ``base.qss`` filled from a token file (``modern.json``, ``modern_light.json``,
 ``vice.json``, ``dark.json``) over Fusion.
 
 ``prepare`` runs once before any widget; ``apply_theme`` restyles at any time. The user picks a
-theme or "system", which shows Apple dark or Apple light after Windows' app mode (``resolve``);
+theme or "system", which shows the modern dark or light theme after Windows' app mode (``resolve``);
 the main window re-applies it when Windows switches (``QStyleHints.colorSchemeChanged``). Fusion
 gets a palette built from the same tokens, so every corner the style sheet does not reach
 (popups, check boxes, dialogs) matches the theme too. Fonts are bundled (OFL, see
@@ -30,13 +30,13 @@ log = logging.getLogger(__name__)
 
 THEME_DIR = Path(__file__).resolve().parent
 ASSETS = THEME_DIR.parents[1] / "assets"
-THEMES = ("apple", "apple_light", "vice", "dark")
-SYSTEM = "system"  # Apple dark or light, after Windows' app mode
-CHOICES = ("apple", "apple_light", SYSTEM, "vice", "dark")  # the Settings list, in order
-DEFAULT_CHOICE = "apple"
-FALLBACK_THEME = "apple"
-SYSTEM_THEMES = {"dark": "apple", "light": "apple_light"}
-LIGHT_THEMES = frozenset({"apple_light"})
+THEMES = ("modern", "modern_light", "vice", "dark")
+SYSTEM = "system"  # modern dark or light, after Windows' app mode
+CHOICES = ("modern", "modern_light", SYSTEM, "vice", "dark")  # the Settings list, in order
+DEFAULT_CHOICE = "modern"
+FALLBACK_THEME = "modern"
+SYSTEM_THEMES = {"dark": "modern", "light": "modern_light"}
+LIGHT_THEMES = frozenset({"modern_light"})
 BODY_FONT = "Inter"
 BODY_POINT_SIZE = 10
 GLOW_BLUR = 28

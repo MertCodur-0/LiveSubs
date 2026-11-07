@@ -45,9 +45,8 @@ PC.
 - **Per-game profiles.** Source, region, colours, overlay style and position, context and
   glossary, game VRAM reserve.
 - **Real app.** Double-click the exe and a setup dialog installs what is missing. It has global
-  hotkeys, a tray icon and a calibration mode with a live Inspector. A macOS-Settings-like
-  window with a sidebar; themes dark (default), light, light or dark
-  following Windows' setting, Vice (neon sunset) and plain dark.
+  hotkeys, a tray icon and a calibration mode with a live Inspector. A window with a
+  sidebar; themes dark (default), light, light or dark following Windows' setting, Vice (neon sunset) and plain dark.
 
 | Settings with the phone QR code | Phone page |
 | --- | --- |
