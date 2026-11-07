@@ -15,9 +15,9 @@ altyazı bölgesini Windows'un yerleşik OCR'ı ile okur. Her satırı [Ollama](
 katmanda (overlay) ya da telefonunda gösterir. Bulut servisi kullanmaz: yakalama, OCR ve çeviri
 tamamen kendi bilgisayarında çalışır.
 
-| Apple koyu (varsayılan) | Apple açık |
+| Koyu (varsayılan) | Açık |
 | --- | --- |
-| ![Apple koyu temada ana pencere: kenar çubuğu, kaynak ve model özeti, İngilizce satırlar, Türkçe çevirileri ve süreleriyle canlı akış](docs/images/live.png) | ![Aynı pencere Apple açık temada](docs/images/live-light.png) |
+| ![Koyu temada ana pencere: kenar çubuğu, kaynak ve model özeti, İngilizce satırlar, Türkçe çevirileri ve süreleriyle canlı akış](docs/images/live.png) | ![Aynı pencere açık temada](docs/images/live-light.png) |
 
 <!-- Demo GIF buraya: docs/images/demo.gif (kayıt modu açıkken kaydedin). -->
 
@@ -47,8 +47,8 @@ tamamen kendi bilgisayarında çalışır.
   oyuna ayrılan VRAM.
 - **Gerçek uygulama.** Exe'ye çift tıklarsın; eksik bir şey varsa kurulum penceresi kurar.
   Genel kısayol tuşları, sistem tepsisi simgesi ve canlı Inspector'lı ayar modu var. macOS
-  Ayarlar benzeri, kenar çubuklu pencere; temalar: Apple koyu (varsayılan), Apple açık,
-  Windows'un açık/koyu ayarını izleyen Apple, Vice (neon gün batımı) ve Sade koyu.
+  Ayarlar benzeri, kenar çubuklu pencere; temalar: Koyu (varsayılan), Açık,
+  Windows'un açık/koyu ayarını izleyen tema, Vice (neon gün batımı) ve Sade koyu.
 
 | Ayarlar ve telefon QR kodu | Telefon sayfası |
 | --- | --- |

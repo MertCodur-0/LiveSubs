@@ -15,9 +15,9 @@ through [Ollama](https://ollama.com), and shows the translation in a click-throu
 the game, or on your phone. It uses no cloud APIs: capture, OCR and translation all run on your own
 PC.
 
-| Apple dark (default) | Apple light |
+| Dark (default) | Light |
 | --- | --- |
-| ![Main window in the Apple dark theme: sidebar, summary of source and model, live feed with English lines, their Turkish translations and timings](docs/images/live.png) | ![The same window in the light theme](docs/images/live-light.png) |
+| ![Main window in the dark theme: sidebar, summary of source and model, live feed with English lines, their Turkish translations and timings](docs/images/live.png) | ![The same window in the light theme](docs/images/live-light.png) |
 
 <!-- Demo GIF goes here: docs/images/demo.gif (record it with recording mode on). -->
 
@@ -46,8 +46,8 @@ PC.
   glossary, game VRAM reserve.
 - **Real app.** Double-click the exe and a setup dialog installs what is missing. It has global
   hotkeys, a tray icon and a calibration mode with a live Inspector. A macOS-Settings-like
-  window with a sidebar; themes Apple dark (default), Apple light, Apple following
-  Windows' light/dark setting, Vice (neon sunset) and plain dark.
+  window with a sidebar; themes dark (default), light, light or dark
+  following Windows' setting, Vice (neon sunset) and plain dark.
 
 | Settings with the phone QR code | Phone page |
 | --- | --- |

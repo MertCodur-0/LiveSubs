@@ -1086,3 +1086,6 @@ First **finish the app** (each step committed and pushed; no new release unless 
   paused re-sends `SetPaused(True)`; (4) a region pick on another source while a card start
   waits restarts on the new source; (5) renaming the profile updates the Live summary and the
   Models budget line; (6) a profile switch keeps the Appearance preview's sample text.
+- 2026-11-07 (user): no "Apple" in visible text — theme labels are now "Koyu", "Açık",
+  "Windows'a göre açık/koyu" (Vice, Sade koyu unchanged); READMEs say dark / light. Internal
+  ids (`apple`, `apple_light`, token files) stay so saved configs keep working.
