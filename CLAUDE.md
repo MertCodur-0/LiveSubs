@@ -111,7 +111,8 @@ UI process (PySide6)                                  Engine process (multiproce
   Commands: `StartPipeline(profile, ollama, profile_id)`, `StopPipeline`, `SetRegion`, `Shutdown`.
   Events: `StateChanged(IDLE/STARTING/WARMING_UP/RUNNING/STOPPED)`, `EngineError(kind, message,
   fatal)` (UI maps `kind` to Turkish text), `FrameInfo`, `SubtitleRead(line_id, text, ocr_ms,
-  repeat, upgrade)` (English first), `SubtitleTranslated(...)`, `SubtitleCleared`.
+  repeat, upgrade)` (English first), `SubtitleTranslated(...)`, `SubtitleLines(line_ids)` (the
+  lines on screen, top to bottom; empty right before `SubtitleCleared`), `SubtitleCleared`.
 - Engine (`engine/process.py`): `EngineProcess` (UI side, spawn context, `send`/`poll`/
   `wait_event`/`shutdown`) and `engine_main` (logs to `log_dir()/engine.log`). `engine/pipeline.py`:
   one thread runs capture -> region -> preprocess -> change -> stabilizer -> **OCR inline** (10-20 ms,
@@ -156,27 +157,35 @@ UI process (PySide6)                                  Engine process (multiproce
   `filters.check` -> `Verdict(reason)`: empty, < 2 letters, repeated junk runs, letter ratio
   < 0.5, a vowel-less letter run of 5+ ("Hmm"/"Shh" pass); reasons are shown in the Inspector.
 - Stabilizer (`engine/text/stabilizer.py`, pure logic, caller passes `time.monotonic()`):
-  `update(change, text_pixels, now) -> Decision(read, event)` and `on_read(text, now) -> event`.
-  A new line needs 2 agreeing reads (rapidfuzz ratio of keys >= 90; latest read wins) ->
-  `LineConfirmed(text, repeat)`; `repeat` = same as the previous line (reappeared after a flash),
-  so its translation is reused. `CHANGED` keeps the old line on screen until the new one is
-  confirmed; it does **not** drop a waiting candidate (the next read's text decides).
-  `CLEARED` -> `LineCleared` (only if a line existed). Fast re-read 50 ms only while a
-  candidate awaits its confirming read; otherwise reads every 500 ms, or at once when text pixels
-  grow >= 15 % (fade-ins, glyphs uncovered by the moving background).
+  `update(change, text_pixels, now) -> Decision(read, events)` and `on_read(rows, now) ->
+  [events]`. **The region holds a list of lines** (2026-11-14): games stack the lines of people
+  talking at once, the newest at the bottom, and scroll old ones up and out. The pipeline passes
+  the OCR rows (sorted by box top); `group_rows` joins rows of one sentence (the row above has
+  no sentence end, **or** this row starts in lower case — a lost word; a new sentence in
+  capitals = a new line, usually another speaker; unpunctuated games stay one line). Each line
+  is tracked with its own `line_id` (assigned by the stabilizer): a read row matches a tracked
+  line at rapidfuzz ratio >= 80 of the keys, as an upgrade, or as a *part* of it (>= 3 words,
+  `partial_ratio`; a wrapped line whose top row scrolled out keeps its id). A new line needs 2
+  agreeing reads (ratio >= 90, latest read wins) -> `LineConfirmed(line_id, text, repeat)`; a
+  line missing from 2 reads in a row has left; `ScreenChanged(line_ids)` whenever the list on
+  screen changes (`CLEARED` -> empty at once). `repeat` = the line matches one that left within
+  `RECENT_S` (10 s; a flash): its id comes back, the translation is reused. A replaced line
+  stays on screen until the new one is confirmed; `CHANGED` never drops a waiting candidate.
+  Fast re-read 50 ms while a candidate, an upgrade or a possibly-gone line waits; otherwise
+  every 500 ms, or at once when text pixels grow >= 15 %.
 - **Read upgrades** (user's point: the background keeps moving, so words lost on a bright frame
-  show up in later frames): while a line is confirmed, a read that keeps >= 85 % of its words in
-  order and adds words (`is_upgrade`), confirmed by a second read, replaces it ->
-  `LineUpgraded(text, previous)` (re-translate). Mere variations never replace it (no flicker).
-  Static bright scenes stay a limit. Verified end to end on the samples played as a stream: each
-  line confirmed exactly once, cleared once. A confirmed read that matches the line still on
-  screen (pending after a mask change) emits nothing.
-- **Split sentences** (`engine/text/sentences.py`, 2026-10-30): a confirmed line continues the
-  previous one when the previous has no sentence end (`.!?`, not interrupted `-`) **and** the new
-  one starts in lower case, it comes within `MERGE_GAP_S` (1.5 s) of the last frame showing the
-  previous line, and the sentence has < `MAX_PIECES` (3). The pipeline then sends the joined
-  text as an **upgrade of the previous line_id** (orchestrator cancels / replaces its job, the
-  feed row and the phone line update in place). Per profile
+  show up in later frames): a read that keeps >= 85 % of a line's words in order and adds words
+  (`is_upgrade`), confirmed by a second read, replaces it -> `LineUpgraded(line_id, text,
+  previous)` (re-translate). Lines under 3 words are never upgraded ("Yeah." -> "Yeah, I know."
+  is the next line). Mere variations never replace it (no flicker). Static bright scenes stay
+  a limit. Verified on the samples played as a stream: each line (two-row captions included)
+  confirmed exactly once, cleared once.
+- **Split sentences** (`engine/text/sentences.py`, 2026-10-30; in the stabilizer since
+  2026-11-14): a confirmed new line continues the newest line when that one is no longer on
+  screen, has no sentence end (`.!?`, not interrupted `-`) **and** the new one starts in lower
+  case, within `MERGE_GAP_S` (1.5 s) of the last read showing it, and the sentence has <
+  `MAX_PIECES` (3) -> `LineUpgraded` of that line_id with the joined text (orchestrator cancels /
+  replaces its job, the feed row and the phone line update in place). Per profile
   `TranslationSettings.merge_split_sentences` (default on, checkbox in the Profiles tab; a pack
   import keeps it). All-caps or unpunctuated games never merge.
 - Cache: in-memory LRU + SQLite, key = (model, profile + settings digest, normalized text);
@@ -420,6 +429,14 @@ Text drawn with `QPainterPath` (outline/shadow). Styles incl. "Vice" (pink/cyan 
 readability first. Optional small English original underneath. Adjustable: position, size, font,
 font size, text color, outline/shadow, background opacity, max lines shown.
 
+- **Stacked lines like the game's** (2026-11-14): `ui/shown_lines.py` `ShownLines` (pure logic)
+  decides what shows: every line on screen (`SubtitleLines`) that has a translation, in the
+  game's order; a line that left stays `clear_delay_ms` longer, or until a newer line's
+  translation arrives (it takes the old one's place); while a line on screen still waits for its
+  translation the lines that left stay whatever the delay (a single-line game keeps the old
+  translation until the new one's comes, as before); a late translation shows for the delay.
+  `Overlay.show_lines` stacks them, each with its own original; when they exceed `max_lines`
+  (default 2) or the height, the oldest leave first; a single line still shrinks to fit.
 - Styles (step 16): `OverlayStyle` CLASSIC / VICE / BOX are presets of the look fields
   (`overlay.STYLE_PRESETS`, `apply_style`; the "Hazır stil" combo on the Görünüm tab), each field
   still editable afterwards. CLASSIC = the defaults (white, black 3 px outline, shadow, box 55 %).
@@ -593,6 +610,7 @@ src/livesubs/
   ollama/      client.py, catalog.py, install.py, vram.py, compare.py
   platform/    win32.py, hotkeys.py, shortcuts.py, gpu.py, com.py, video_devices.py
   ui/          main_window.py, header.py, icon.py, icons.py, rows.py, feed.py, qr.py, overlay.py,
+               shown_lines.py,
                region_frame.py, inspector.py,
                tray.py, setup_check.py, single_instance.py, capture_card.py, frame_region.py,
                tabs/, theme/ (base.qss, modern.json, modern_light.json, vice.json, dark.json)
@@ -1102,3 +1120,16 @@ First **finish the app** (each step committed and pushed; no new release unless 
   user's two saved profiles were switched from Inter too.
   Same day: the phone page too (static SemiBold cut, served as `/manrope.ttf` - a new URL,
   since `/font.ttf` was cached for a day on the tablet).
+- 2026-11-14 (user): **stacked subtitle lines, translated line by line** (branch
+  `multi-line`, built in a worktree while another session edited the vision code). The user's
+  GTA VI clips (20 videos, OCR'd at 2 fps) show every speaker's line as its own row, same white,
+  no names, up to 3 rows, newest at the bottom, old rows scroll up. The pipeline read the block
+  as one line: replaying "Hypercar pt2" 0:40-0:53 (police: "Police! Stop right there!" / "Step
+  out of the vehicle!" / "Don't play dumb!") through the real pipeline with `gemma4-text:26b`
+  sent 4 requests (rows re-translated as the block scrolled, ~1 s each); the last translation
+  came 3.3 s after the subtitle left. Now each line is tracked and translated alone (see
+  Stabilizer) and the overlay stacks them (see Overlay): same clip, 3 requests, 0.6 s each, the
+  last one 0.8 s after the subtitle left (2.4 s earlier). Those clips are darker than the game
+  (text peaks at 179, not 255): the replay used text color #A0A0A0 (the profile was not
+  changed); their bad OCR ("Policel") comes from the footage. "In Spanish: Hey." over a white
+  shirt is still missed there.

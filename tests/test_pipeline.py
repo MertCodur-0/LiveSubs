@@ -22,6 +22,7 @@ from livesubs.core.messages import (
     StartPipeline,
     StateChanged,
     SubtitleCleared,
+    SubtitleLines,
     SubtitleRead,
     SubtitleTranslated,
 )
@@ -479,3 +480,49 @@ def test_a_sentence_split_over_two_subtitles_is_translated_whole(merge: bool) ->
     else:
         assert [r[1] for r in reads] == ["I knew Fisk", "would not go quietly.", "Next line here."]
         assert [t[1] for t in translated] == [r[1] for r in reads]
+
+
+STACK_REGION = NormRect(x=0.15, y=0.62, width=0.7, height=0.36)
+
+
+def _stack(*rows: str) -> np.ndarray:
+    """A dark 720p frame with subtitle rows stacked at the bottom, the last one lowest."""
+    frame = np.full((720, 1280, 3), 30, np.uint8)
+    for i, text in enumerate(reversed(rows)):
+        y = 690 - i * 60
+        cv2.putText(frame, text, (300, y), cv2.FONT_HERSHEY_SIMPLEX, 1.1, (255, 255, 255), 2)
+    return frame
+
+
+def test_lines_stacked_by_several_speakers_are_translated_one_by_one() -> None:
+    """Two or three people talking at once: the game stacks their lines and scrolls the old ones
+    up. Every line is read and translated once, on its own, however long it stays up, and the UI
+    learns which lines are on screen. (Measured on a recording: the whole block used to be one
+    line, re-translated every time a row came or went.)"""
+    a, b, c = "Police! Stop right there!", "Step out of the vehicle!", "Don't play dumb!"
+    source = ScriptedSource(
+        [
+            (_stack(a), 0.6),
+            (_stack(a, b), 0.6),
+            (_stack(a, b, c), 0.6),
+            (_stack(b, c), 0.6),
+            (_stack(c), 0.6),
+            (_stack(), 1.0),
+        ]
+    )
+    recorder = Recorder()
+    pipeline = Pipeline(
+        start_command_for(STACK_REGION),
+        recorder,
+        open_source=lambda spec: (source.open(), source)[1],
+        backend_factory=lambda start: UpperCaseBackend(),
+    )
+    run(pipeline, source)
+
+    reads = [(e.line_id, e.text) for e in recorder.of(SubtitleRead)]
+    assert reads == [(1, a), (2, b), (3, c)]
+    translated = [(e.line_id, e.translation) for e in recorder.of(SubtitleTranslated)]
+    assert translated == [(1, a.upper()), (2, b.upper()), (3, c.upper())]
+    screens = [e.line_ids for e in recorder.of(SubtitleLines)]
+    assert screens == [(1,), (1, 2), (1, 2, 3), (2, 3), (3,), ()]
+    assert len(recorder.of(SubtitleCleared)) == 1

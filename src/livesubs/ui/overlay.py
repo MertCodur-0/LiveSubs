@@ -1,7 +1,9 @@
 """The translation overlay: frameless, always on top, click-through, hidden from capture.
 
 Hidden from screen capture (``WDA_EXCLUDEFROMCAPTURE``), so OCR never reads our own text even
-when the overlay covers the subtitle region. Text is drawn as a ``QPainterPath``: outline first,
+when the overlay covers the subtitle region. Several subtitle lines (people talking at once) are
+stacked like the game's, each with its own original; when they do not fit, the oldest leave first.
+Text is drawn as a ``QPainterPath``: outline first,
 fill on top, so it stays readable on any background. Styles are presets of the look fields;
 "vice" also draws a thin cyan halo around the translation's pink outline (the small original
 keeps a plain black outline: neon edges on small text hurt readability).
@@ -34,6 +36,7 @@ from livesubs.i18n import t
 from livesubs.platform import win32
 from livesubs.ui.movable import MoveResize
 from livesubs.ui.screens import qrect
+from livesubs.ui.shown_lines import ShownLine
 
 log = logging.getLogger(__name__)
 
@@ -96,6 +99,16 @@ def wrap(text: str, width_of: Callable[[str], float], max_width: float) -> list[
     return lines
 
 
+def _block_height(
+    metrics: QFontMetricsF, small: QFontMetricsF, lines: list[str], original: list[str]
+) -> float:
+    """One subtitle line's height: its translation, then its original 4 px below."""
+    height = metrics.lineSpacing() * len(lines)
+    if original:
+        height += 4 + small.lineSpacing() * len(original)
+    return height
+
+
 class Overlay(QWidget):
     edited = Signal(object)  # Rect, logical: moved or resized by the user in edit mode
 
@@ -106,8 +119,7 @@ class Overlay(QWidget):
         self.setMouseTracking(True)
         self.settings = settings or OverlaySettings()
         self.align = Qt.AlignmentFlag.AlignBottom  # vertical alignment of the text block
-        self._text = ""
-        self._original = ""
+        self._lines: list[ShownLine] = []
         self._editable = False
         self.suppressed = False  # hidden by the user (hotkey): keep the text, stay invisible
         self.disabled = False  # the profile shows translations on the phone only
@@ -131,7 +143,11 @@ class Overlay(QWidget):
 
     @property
     def text(self) -> str:
-        return self._text
+        return "\n".join(line.translation for line in self._lines)
+
+    @property
+    def lines(self) -> list[ShownLine]:
+        return list(self._lines)
 
     @property
     def editable(self) -> bool:
@@ -142,13 +158,18 @@ class Overlay(QWidget):
             self.setGeometry(qrect(logical))
 
     def show_text(self, translation: str, original: str = "") -> None:
-        self._text, self._original = translation, original
-        if not self.isVisible() and not (self.suppressed or self.disabled):
+        self.show_lines([ShownLine(translation, original)])
+
+    def show_lines(self, lines: list[ShownLine]) -> None:
+        """Several subtitle lines, top to bottom, each with its own original (people talking
+        at once). When they do not all fit, the oldest (top) ones are left out, as games do."""
+        self._lines = [line for line in lines if line.translation]
+        if self._lines and not self.isVisible() and not (self.suppressed or self.disabled):
             self.show()
         self.update()
 
     def clear(self) -> None:
-        self._text = self._original = ""
+        self._lines = []
         self.update()
 
     def set_editable(self, editable: bool) -> None:
@@ -225,26 +246,22 @@ class Overlay(QWidget):
             pen = QPen(QColor("#00E5FF"), 2, Qt.PenStyle.DashLine)
             painter.setPen(pen)
             painter.drawRect(self.rect().adjusted(1, 1, -2, -2))
-        text = self._text or (t("overlay.sample") if self._editable else "")
-        if text:
-            original = self._original if self.settings.show_original else ""
-            if self._editable and not self._text and self.settings.show_original:
-                original = t("overlay.sample_original")
-            self._paint_text(painter, text, original)
+        items = self._lines
+        if not items and self._editable:
+            original = t("overlay.sample_original") if self.settings.show_original else ""
+            items = [ShownLine(t("overlay.sample"), original)]
+        if items:
+            self._paint_lines(painter, items)
         painter.end()
 
-    def _paint_text(self, painter: QPainter, text: str, original: str) -> None:
+    def _paint_lines(self, painter: QPainter, items: list[ShownLine]) -> None:
         s = self.settings
         area = QRectF(self.rect()).adjusted(_PADDING, _PADDING, -_PADDING, -_PADDING)
-
         small_font = self._original_font(s.font_size_pt)
         small = QFontMetricsF(small_font)
-        small_lines = wrap(original, small.horizontalAdvance, area.width())[:ORIGINAL_MAX_LINES]
-        small_height = small.lineSpacing() * len(small_lines) + (4 if small_lines else 0)
-
-        font, lines = self._layout(text, area.width(), area.height() - small_height)
+        font, blocks = self._layout(items, area.width(), area.height())
         metrics = QFontMetricsF(font)
-        block_height = metrics.lineSpacing() * len(lines) + small_height
+        block_height = sum(_block_height(metrics, small, lines, orig) for lines, orig in blocks)
         if self.align == Qt.AlignmentFlag.AlignTop:
             top = area.top()
         elif self.align == Qt.AlignmentFlag.AlignVCenter:
@@ -253,23 +270,26 @@ class Overlay(QWidget):
             top = area.bottom() - block_height
 
         if s.background and s.background_opacity > 0:
-            widths = [metrics.horizontalAdvance(line) for line in lines]
-            widths += [small.horizontalAdvance(line) for line in small_lines]
+            widths = [metrics.horizontalAdvance(line) for lines, _ in blocks for line in lines]
+            widths += [small.horizontalAdvance(line) for _, orig in blocks for line in orig]
             box = QRectF(0, 0, max(widths) + 2 * _PADDING, block_height + _PADDING)
             box.moveCenter(QPointF(self.width() / 2, top + block_height / 2))
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QColor(0, 0, 0, round(255 * s.background_opacity)))
             painter.drawRoundedRect(box, 8, 8)
 
-        path, y = QPainterPath(), top + metrics.ascent()
-        for line in lines:
-            path.addText(QPointF(self._x(area, metrics, line), y), font, line)
-            y += metrics.lineSpacing()
-        # The original starts 4 px below the last translated line.
-        small_path, y = QPainterPath(), y - metrics.ascent() + 4 + small.ascent()
-        for line in small_lines:
-            small_path.addText(QPointF(self._x(area, small, line), y), small_font, line)
-            y += small.lineSpacing()
+        path, small_path, y = QPainterPath(), QPainterPath(), top
+        for lines, original in blocks:
+            for line in lines:
+                point = QPointF(self._x(area, metrics, line), y + metrics.ascent())
+                path.addText(point, font, line)
+                y += metrics.lineSpacing()
+            if original:
+                y += 4  # the original starts 4 px below its translation
+            for line in original:
+                point = QPointF(self._x(area, small, line), y + small.ascent())
+                small_path.addText(point, small_font, line)
+                y += small.lineSpacing()
 
         vice = s.style == OverlayStyle.VICE
         for p, scale in ((path, 1.0), (small_path, ORIGINAL_SCALE)):
@@ -298,21 +318,46 @@ class Overlay(QWidget):
     def _x(area: QRectF, metrics: QFontMetricsF, line: str) -> float:
         return area.left() + (area.width() - metrics.horizontalAdvance(line)) / 2
 
-    def _layout(self, text: str, width: float, height: float) -> tuple[QFont, list[str]]:
-        """The largest font size (from the configured one down) whose wrapped text fits."""
-        size = float(self.settings.font_size_pt)
+    def _layout(
+        self, items: list[ShownLine], width: float, height: float
+    ) -> tuple[QFont, list[tuple[list[str], list[str]]]]:
+        """Wrapped (translation, original) lines per item. Several items that do not fit at the
+        configured size lose the oldest first; the last one left shrinks from the configured
+        size down until it fits."""
+        s = self.settings
+        small = QFontMetricsF(self._original_font(s.font_size_pt))
+
+        def wrapped(font: QFont, items: list[ShownLine]) -> list[tuple[list[str], list[str]]]:
+            metrics = QFontMetricsF(font)
+            blocks = []
+            for item in items:
+                original = item.original if s.show_original else ""
+                blocks.append(
+                    (
+                        wrap(item.translation, metrics.horizontalAdvance, width),
+                        wrap(original, small.horizontalAdvance, width)[:ORIGINAL_MAX_LINES],
+                    )
+                )
+            return blocks
+
+        def fits(font: QFont, blocks: list[tuple[list[str], list[str]]]) -> bool:
+            metrics = QFontMetricsF(font)
+            count = sum(len(lines) for lines, _ in blocks)
+            total = sum(_block_height(metrics, small, lines, orig) for lines, orig in blocks)
+            return count <= s.max_lines and total <= height
+
+        size = float(s.font_size_pt)
+        font = self._font(size)
+        while len(items) > 1 and not fits(font, wrapped(font, items)):
+            items = items[1:]  # the oldest scrolls out, as in the game
         while True:
             font = self._font(size)
-            metrics = QFontMetricsF(font)
-            lines = wrap(text, metrics.horizontalAdvance, width)
-            fits = (
-                len(lines) <= self.settings.max_lines
-                and metrics.lineSpacing() * len(lines) <= height
-            )
-            if fits:
-                return font, lines
-            if size <= MIN_FONT_PT:
-                return font, lines[: self.settings.max_lines]  # too long even at the minimum
+            blocks = wrapped(font, items)
+            if fits(font, blocks):
+                return font, blocks
+            if size <= MIN_FONT_PT:  # too long even at the minimum
+                lines, original = blocks[-1]
+                return font, [(lines[: s.max_lines], original)]
             size -= 2
 
     # --- edit mode: move and resize --------------------------------------------------------------

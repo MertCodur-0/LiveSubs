@@ -6,9 +6,11 @@ a new line waits for its confirming read. Frames are only processed when they ar
 the stabilizer wants another read. OCR runs inline (10-20 ms); translation runs on the
 orchestrator's thread, so a slow model never delays reading the next subtitle. The model warms up on
 a side thread while reading already runs; the newest line read meanwhile is translated once the
-model is ready. A subtitle that continues the previous one's sentence (``text.sentences``) is sent
-as an upgrade of that line: the whole sentence is translated and replaces the first piece's
-translation.
+model is ready. The region may hold several subtitle lines at once (people talking over each
+other); the stabilizer tracks each one, so every line is translated once, on its own, and
+``SubtitleLines`` tells the UI which lines are on screen. A subtitle that continues the previous
+one's sentence (``text.sentences``) comes as an upgrade of that line: the whole sentence is
+translated and replaces the first piece's translation.
 
 Without Ollama (or without the model) the pipeline keeps running and shows the English lines.
 """
@@ -37,6 +39,7 @@ from livesubs.core.messages import (
     StartPipeline,
     StateChanged,
     SubtitleCleared,
+    SubtitleLines,
     SubtitleRead,
     SubtitleTranslated,
 )
@@ -45,15 +48,15 @@ from livesubs.engine.capture import FrameSource, SourceLostError, SourceUnavaila
 from livesubs.engine.capture import open_source as default_open_source
 from livesubs.engine.ocr.language import english_ocr_language
 from livesubs.engine.ocr.winrt_ocr import WinRtOcr
-from livesubs.engine.text import filters, sentences
+from livesubs.engine.text import filters
 from livesubs.engine.text.normalize import clean
 from livesubs.engine.text.stabilizer import (
     Event as LineEvent,
 )
 from livesubs.engine.text.stabilizer import (
-    LineCleared,
     LineConfirmed,
     LineUpgraded,
+    ScreenChanged,
     Stabilizer,
 )
 from livesubs.engine.translate.base import (
@@ -80,9 +83,6 @@ CAPTURE_MAX_FPS = 30.0
 # Room a translation needs after the prompt; a prompt closer to num_ctx than this gets a warning
 # (a cut prompt reports num_ctx - 1 tokens).
 CONTEXT_MARGIN_TOKENS = 128
-# Longest gap between two pieces of one sentence: from the last frame that showed the previous
-# piece to the next piece's confirmation.
-MERGE_GAP_S = 1.5
 
 SourceOpener = Callable[[Source], FrameSource]
 BackendFactory = Callable[[StartPipeline], TranslationBackend]
@@ -140,11 +140,7 @@ class Pipeline:
         self._last_rejected = ""
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name="pipeline", daemon=True)
-        self._line_id = 0
         self._ocr_ms: dict[int, float] = {}
-        # Pieces of the sentence the current line_id stands for, and when a line was last seen.
-        self._pieces: list[str] = []
-        self._line_seen = 0.0
         # Set by the warm-up thread once the model answers; lines read before that wait.
         self._lock = threading.Lock()
         self._orchestrator: TranslationOrchestrator | None = None
@@ -279,7 +275,8 @@ class Pipeline:
     def _loop(self, source: FrameSource, ocr: WinRtOcr) -> None:
         profile = self._start.profile
         tick = 1.0 / profile.capture.fps
-        detector, stabilizer = ChangeDetector(), Stabilizer()
+        detector = ChangeDetector()
+        stabilizer = Stabilizer(merge_split_sentences=profile.translation.merge_split_sentences)
         last_timestamp = -1.0
         paused = False
         while not self._stop.wait(
@@ -293,8 +290,7 @@ class Pipeline:
                 self._region_changed = False
                 last_timestamp = -1.0  # process the current frame again, with the new settings
                 detector.reset()  # a new region: whatever was read before is gone
-                event = stabilizer.update(Change.CLEARED, 0, time.monotonic()).event
-                if event is not None:
+                for event in stabilizer.update(Change.CLEARED, 0, time.monotonic()).events:
                     self._on_line(event, 0.0)
             if paused:
                 continue
@@ -314,18 +310,16 @@ class Pipeline:
                 self._last_debug = now
                 self._emit(self._debug_frame(region, processed, change))
             decision = stabilizer.update(change, cv2.countNonZero(processed.mask), now)
-            if stabilizer.current is not None:
-                self._line_seen = now
-            if decision.event is not None:
-                self._on_line(decision.event, 0.0)
+            for event in decision.events:
+                self._on_line(event, 0.0)
             if not decision.read:
                 continue
             read = ocr.recognize(processed.ocr_image)
             self._last_read = clean(read.text)
             reason = filters.check(self._last_read).reason
             self._last_rejected = str(reason) if reason else ""
-            event = stabilizer.on_read(read.text, time.monotonic())
-            if event is not None:
+            rows = [line.text for line in sorted(read.lines, key=lambda line: line.box.y)]
+            for event in stabilizer.on_read(rows, time.monotonic()):
                 self._on_line(event, read.elapsed_ms)
 
     def _debug_frame(
@@ -344,29 +338,16 @@ class Pipeline:
 
     def _on_line(self, event: LineEvent, ocr_ms: float) -> None:
         match event:
-            case LineCleared():
-                self._emit(SubtitleCleared())
-            case LineConfirmed(text=text, repeat=True):
-                self._emit(SubtitleRead(self._line_id, text, ocr_ms, repeat=True))
-            case LineConfirmed(text=text) if self._continues(text):
-                self._pieces.append(text)
-                self._submit(self._line_id, " ".join(self._pieces), ocr_ms, upgrade=True)
-            case LineConfirmed(text=text):
-                self._line_id += 1
-                self._pieces = [text]
-                self._submit(self._line_id, text, ocr_ms, upgrade=False)
-            case LineUpgraded(text=text):
-                self._pieces[-1:] = [text]
-                self._submit(self._line_id, " ".join(self._pieces), ocr_ms, upgrade=True)
-
-    def _continues(self, text: str) -> bool:
-        """``text`` is the next piece of the sentence on screen just before it."""
-        return (
-            self._start.profile.translation.merge_split_sentences
-            and 0 < len(self._pieces) < sentences.MAX_PIECES
-            and time.monotonic() - self._line_seen <= MERGE_GAP_S
-            and sentences.continues(self._pieces[-1], text)
-        )
+            case ScreenChanged(line_ids=line_ids):
+                self._emit(SubtitleLines(line_ids))
+                if not line_ids:
+                    self._emit(SubtitleCleared())
+            case LineConfirmed(line_id=line_id, text=text, repeat=True):
+                self._emit(SubtitleRead(line_id, text, ocr_ms, repeat=True))
+            case LineConfirmed(line_id=line_id, text=text):
+                self._submit(line_id, text, ocr_ms, upgrade=False)
+            case LineUpgraded(line_id=line_id, text=text):
+                self._submit(line_id, text, ocr_ms, upgrade=True)
 
     def _submit(self, line_id: int, text: str, ocr_ms: float, *, upgrade: bool) -> None:
         self._ocr_ms[line_id] = ocr_ms

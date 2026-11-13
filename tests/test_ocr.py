@@ -9,7 +9,7 @@ from winrt.runtime import ApartmentType, init_apartment, uninit_apartment
 from livesubs.engine.ocr import language
 from livesubs.engine.ocr.winrt_ocr import OcrUnavailableError, WinRtOcr
 from livesubs.engine.text.normalize import clean
-from livesubs.engine.text.stabilizer import LineCleared, LineConfirmed, Stabilizer
+from livesubs.engine.text.stabilizer import LineConfirmed, ScreenChanged, Stabilizer
 from livesubs.engine.vision.change import ChangeDetector
 from livesubs.engine.vision.preprocess import preprocess
 from sample_data import Sample, load_samples, sample_params
@@ -179,15 +179,15 @@ def test_sample_stream_confirms_each_line_once(ocr: WinRtOcr) -> None:
         for _ in range(4):  # the same frame for ~0.25 s
             now += 0.065
             decision = stab.update(detector.update(processed.mask), pixels, now)
-            if decision.event is not None:
-                events.append(decision.event)
+            events += decision.events
             if decision.read:
-                event = stab.on_read(ocr.recognize(processed.ocr_image).text, now)
-                if event is not None:
-                    events.append(event)
+                result = ocr.recognize(processed.ocr_image)
+                rows = [line.text for line in sorted(result.lines, key=lambda x: x.box.y)]
+                events += stab.on_read(rows, now)
 
     confirmed = [e for e in events if isinstance(e, LineConfirmed)]
-    assert len(confirmed) == len(lines)
-    assert sum(isinstance(e, LineCleared) for e in events) == len(lines)
+    assert len(confirmed) == len(lines)  # two-row captions are one line each
+    assert [e.line_id for e in confirmed] == list(range(1, len(lines) + 1))
+    assert sum(e == ScreenChanged(()) for e in events) == len(lines)
     for event, sample in zip(confirmed, lines, strict=True):
         assert fuzz.ratio(event.text, clean(sample.expected)) >= 95, event.text

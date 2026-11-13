@@ -123,8 +123,16 @@ class SubtitleTranslated:
 
 
 @dataclass(frozen=True, slots=True)
+class SubtitleLines:
+    """The lines on screen changed: their ids, top to bottom (several when people talk at once).
+    Also sent, empty, right before ``SubtitleCleared``."""
+
+    line_ids: tuple[int, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class SubtitleCleared:
-    pass
+    """No subtitle on screen any more."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,6 +165,7 @@ Event = (
     | EngineError
     | SubtitleRead
     | SubtitleTranslated
+    | SubtitleLines
     | SubtitleCleared
     | FrameInfo
     | DebugFrame

@@ -27,6 +27,7 @@ from livesubs.core.messages import (
     StateChanged,
     StopPipeline,
     SubtitleCleared,
+    SubtitleLines,
     SubtitleRead,
     SubtitleTranslated,
 )
@@ -68,6 +69,7 @@ from livesubs.ui.pick import resolve, resolve_card
 from livesubs.ui.placement import GAP_PX, custom_geometry, monitor_at, overlay_geometry
 from livesubs.ui.region_select import RegionPicker
 from livesubs.ui.screens import ScreenMap, current_screens, from_qrect, to_logical, to_physical
+from livesubs.ui.shown_lines import ShownLine
 from livesubs.ui.tabs.profiles import ProfilesTab
 from livesubs.ui.tabs.settings import SettingsTab, hotkey_text
 
@@ -157,9 +159,28 @@ def test_long_text_shrinks_to_fit(qtbot: QtBot) -> None:
     qtbot.addWidget(overlay)
     overlay.place(Rect(0, 0, 400, 100))
     overlay.show_text("çok " * 60)
-    font, lines = overlay._layout(overlay.text, 380, 80)
-    assert len(lines) <= overlay.settings.max_lines
+    font, blocks = overlay._layout(overlay.lines, 380, 80)
+    assert len(blocks) == 1 and len(blocks[0][0]) <= overlay.settings.max_lines
     assert font.pointSizeF() < overlay.settings.font_size_pt
+
+
+def test_overlay_stacks_lines_and_drops_the_oldest_that_do_not_fit(qtbot: QtBot) -> None:
+    """People talking at once: their translations stack like the game's lines. What does not
+    fit leaves from the top (the oldest), the way the game scrolls lines out."""
+    overlay = Overlay()
+    qtbot.addWidget(overlay)
+    overlay.settings.max_lines = 2
+    overlay.place(Rect(0, 0, 900, 200))
+    lines = [ShownLine("Polis! Dur!", ""), ShownLine("Araçtan in!", ""), ShownLine("Aptal!", "")]
+    overlay.show_lines(lines[:2])
+    font, blocks = overlay._layout(overlay.lines, 880, 180)
+    assert [b[0] for b in blocks] == [["Polis! Dur!"], ["Araçtan in!"]]
+    assert font.pointSizeF() == overlay.settings.font_size_pt  # stacked, not shrunk
+    overlay.show_lines(lines)
+    font, blocks = overlay._layout(overlay.lines, 880, 180)
+    assert [b[0] for b in blocks] == [["Araçtan in!"], ["Aptal!"]]
+    assert overlay.text == "Polis! Dur!\nAraçtan in!\nAptal!"
+    assert not overlay.grab().isNull()  # paints without errors
 
 
 # --- main window --------------------------------------------------------------------------------
@@ -308,6 +329,7 @@ def test_events_drive_the_feed_and_overlay(window: MainWindow, qtbot: QtBot) -> 
         StateChanged(EngineState.WARMING_UP, "gemma4:12b-it-qat"),
         StateChanged(EngineState.RUNNING),
         SubtitleRead(1, "Get in the car.", 12.0),
+        SubtitleLines((1,)),
     ]
     window._poll()
     assert window.start_button.text() == "Durdur"
@@ -322,8 +344,8 @@ def test_events_drive_the_feed_and_overlay(window: MainWindow, qtbot: QtBot) -> 
     assert window.feed.item(0, 5).text() == "640"
     assert window._overlay.text == "Arabaya bin."
 
-    # A new line keeps the old translation up until its own is ready.
-    engine.queue = [SubtitleRead(2, "Who are you?", 10.0)]
+    # A new line replaces it on screen; the old translation stays until the new one is ready.
+    engine.queue = [SubtitleRead(2, "Who are you?", 10.0), SubtitleLines((2,))]
     window._poll()
     assert window.feed.rowCount() == 2
     assert window._overlay.text == "Arabaya bin."
@@ -366,19 +388,61 @@ def test_translation_outlives_its_subtitle_by_the_clear_delay(
     engine = engine_of(window)
     assert window._profile.overlay.clear_delay_ms == 2000  # default: time to finish reading
     window._profile.overlay.clear_delay_ms = 300  # keep the test fast
-    window._overlay.show_text("Sen kimsin?")
+    engine.queue = [
+        StateChanged(EngineState.RUNNING),
+        SubtitleRead(2, "Who are you?", 9.0),
+        SubtitleLines((2,)),
+        SubtitleTranslated(2, "Who are you?", "Sen kimsin?", "m", "gpu", 9, 500, False),
+    ]
+    window._poll()
+    assert window._overlay.text == "Sen kimsin?"
 
-    # The subtitle disappears, but a new one comes before the delay is over: nothing is cleared.
-    engine.queue = [SubtitleCleared(), SubtitleRead(3, "Get out.", 9.0)]
+    # The subtitle disappears, but a new one comes before the delay is over: the old translation
+    # stays until the new line's own is ready.
+    engine.queue = [SubtitleLines(()), SubtitleCleared(), SubtitleRead(3, "Get out.", 9.0)]
+    engine.queue.append(SubtitleLines((3,)))
     window._poll()
     qtbot.wait(500)
     assert window._overlay.text == "Sen kimsin?"
 
     # It disappears and nothing follows: cleared once the delay has passed.
-    engine.queue = [SubtitleCleared()]
+    engine.queue = [SubtitleLines(()), SubtitleCleared()]
     window._poll()
     assert window._overlay.text == "Sen kimsin?"
     qtbot.waitUntil(lambda: window._overlay.text == "", timeout=2000)
+
+
+def test_overlay_mirrors_the_lines_stacked_on_screen(window: MainWindow, qtbot: QtBot) -> None:
+    """Several speakers at once: the overlay shows each line's own translation, stacked in the
+    game's order; a line that scrolled out makes room once the next translation arrives."""
+    engine = engine_of(window)
+    window._overlay.settings.max_lines = 3
+
+    def tr(line_id: int, text: str) -> SubtitleTranslated:
+        return SubtitleTranslated(line_id, "en", text, "m", "gpu", 9, 500, False)
+
+    engine.queue = [
+        StateChanged(EngineState.RUNNING),
+        SubtitleRead(1, "Police! Stop right there!", 9.0),
+        SubtitleLines((1,)),
+        tr(1, "Polis! Dur!"),
+        SubtitleRead(2, "Step out of the vehicle!", 9.0),
+        SubtitleLines((1, 2)),
+    ]
+    window._poll()
+    assert window._overlay.text == "Polis! Dur!"  # line 2 has no translation yet
+    engine.queue = [tr(2, "Araçtan in!")]
+    window._poll()
+    assert window._overlay.text == "Polis! Dur!\nAraçtan in!"
+    assert window.feed.rowCount() == 2  # one row per line, never the block
+
+    # Line 1 scrolls out, line 3 comes in under line 2.
+    engine.queue = [SubtitleRead(3, "Don't play dumb!", 9.0), SubtitleLines((2, 3))]
+    window._poll()
+    assert window._overlay.text == "Polis! Dur!\nAraçtan in!"  # until 3's translation comes
+    engine.queue = [tr(3, "Aptallık etme!")]
+    window._poll()
+    assert window._overlay.text == "Araçtan in!\nAptallık etme!"
 
 
 def test_errors_and_stop(window: MainWindow) -> None:

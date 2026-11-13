@@ -4,10 +4,12 @@ from livesubs.engine.text import filters, sentences
 from livesubs.engine.text.filters import Reject
 from livesubs.engine.text.normalize import clean, key
 from livesubs.engine.text.stabilizer import (
-    LineCleared,
+    MERGE_GAP_S,
     LineConfirmed,
     LineUpgraded,
+    ScreenChanged,
     Stabilizer,
+    group_rows,
     is_upgrade,
 )
 from livesubs.engine.vision.change import Change
@@ -111,45 +113,58 @@ def clock() -> Clock:
     return Clock()
 
 
+def read(
+    stab: Stabilizer,
+    clock: Clock,
+    *rows: str,
+    change: Change = Change.SAME,
+    pixels: int = 1000,
+    after: float = 0.06,
+) -> list:
+    """One frame: the change verdict, then (when the stabilizer asks) the OCR rows."""
+    decision = stab.update(change, pixels, clock(after))
+    events = list(decision.events)
+    if decision.read or change in (Change.APPEARED, Change.CHANGED):
+        events += stab.on_read(list(rows), clock())
+    return events
+
+
 def appear_and_confirm(stab: Stabilizer, clock: Clock, text: str, pixels: int = 1000) -> None:
     assert stab.update(Change.APPEARED, pixels, clock()).read
-    assert stab.on_read(text, clock()) is None
+    assert stab.on_read([text], clock()) == []
     assert stab.update(Change.SAME, pixels, clock(0.06)).read
-    assert stab.on_read(text, clock()) == LineConfirmed(text)
+    events = stab.on_read([text], clock())
+    assert events[0] == LineConfirmed(events[0].line_id, text)
+    assert isinstance(events[-1], ScreenChanged)
 
 
 def test_line_needs_two_agreeing_reads(clock: Clock) -> None:
     stab = Stabilizer()
-    appear_and_confirm(stab, clock, LINE)
-    assert stab.current == LINE
+    assert read(stab, clock, LINE, change=Change.APPEARED) == []
+    assert read(stab, clock, LINE) == [LineConfirmed(1, LINE), ScreenChanged((1,))]
+    assert stab.current == [LINE]
 
 
 def test_agreement_is_fuzzy_and_the_latest_read_wins(clock: Clock) -> None:
     stab = Stabilizer()
-    stab.update(Change.APPEARED, 1000, clock())
-    stab.on_read("Look what the law chased in", clock())
-    stab.update(Change.SAME, 1000, clock(0.06))
-    assert stab.on_read("Look what the law chased in.", clock()) == LineConfirmed(
-        "Look what the law chased in."
-    )
+    read(stab, clock, "Look what the law chased in", change=Change.APPEARED)
+    events = read(stab, clock, "Look what the law chased in.")
+    assert events[0] == LineConfirmed(1, "Look what the law chased in.")
 
 
 def test_disagreeing_reads_restart_the_count(clock: Clock) -> None:
     stab = Stabilizer()
-    stab.update(Change.APPEARED, 1000, clock())
-    assert stab.on_read("Look what", clock()) is None  # still fading in
-    stab.update(Change.SAME, 1000, clock(0.06))
-    assert stab.on_read("Look what the law chased in.", clock()) is None
-    stab.update(Change.SAME, 1000, clock(0.06))
-    assert stab.on_read("Look what the law chased in.", clock()) == LineConfirmed(
-        "Look what the law chased in."
-    )
+    assert read(stab, clock, "Look what", change=Change.APPEARED) == []  # still fading in
+    assert read(stab, clock, "Look what the law chased in.") == []
+    events = read(stab, clock, "Look what the law chased in.")
+    assert events[0] == LineConfirmed(1, "Look what the law chased in.")
 
 
 def test_fast_reread_after_a_candidate(clock: Clock) -> None:
     stab = Stabilizer()
     stab.update(Change.APPEARED, 1000, clock())
-    stab.on_read(LINE, clock())
+    stab.on_read([LINE], clock())
+    assert stab.awaiting_confirmation
     assert not stab.update(Change.SAME, 1000, clock(0.02)).read
     assert stab.update(Change.SAME, 1000, clock(0.04)).read
 
@@ -157,20 +172,20 @@ def test_fast_reread_after_a_candidate(clock: Clock) -> None:
 def test_rejected_reads_poll_slowly_unless_glyphs_appear(clock: Clock) -> None:
     stab = Stabilizer()
     stab.update(Change.APPEARED, 200, clock())
-    assert stab.on_read("||||", clock()) is None
+    assert stab.on_read(["||||"], clock()) == []
     assert not stab.update(Change.SAME, 200, clock(0.1)).read  # no hurry for junk
     assert stab.update(Change.SAME, 400, clock(0.01)).read  # the line is fading in
     assert stab.update(Change.SAME, 200, clock(0.5)).read  # or the slow poll is due
 
 
-def test_clear_reports_only_a_line_that_existed(clock: Clock) -> None:
+def test_clear_reports_only_a_screen_that_had_lines(clock: Clock) -> None:
     stab = Stabilizer()
-    assert stab.update(Change.NONE, 0, clock()).event is None
-    assert stab.update(Change.CLEARED, 0, clock()).event is None
+    assert stab.update(Change.NONE, 0, clock()).events == ()
+    assert stab.update(Change.CLEARED, 0, clock()).events == ()
     appear_and_confirm(stab, clock, LINE)
     decision = stab.update(Change.CLEARED, 0, clock(1.0))
-    assert decision == type(decision)(read=False, event=LineCleared())
-    assert stab.current is None
+    assert decision == type(decision)(read=False, events=(ScreenChanged(()),))
+    assert stab.current == []
 
 
 def test_confirmed_line_is_reread_slowly_or_when_it_grows(clock: Clock) -> None:
@@ -178,7 +193,7 @@ def test_confirmed_line_is_reread_slowly_or_when_it_grows(clock: Clock) -> None:
     appear_and_confirm(stab, clock, PARTIAL, pixels=1000)
     assert not stab.update(Change.SAME, 1000, clock(0.2)).read
     assert stab.update(Change.SAME, 1200, clock(0.01)).read  # 20 % more text pixels
-    stab.on_read(PARTIAL, clock())
+    stab.on_read([PARTIAL], clock())
     assert not stab.update(Change.SAME, 1200, clock(0.2)).read
     assert stab.update(Change.SAME, 1200, clock(0.31)).read
 
@@ -187,31 +202,29 @@ def test_better_read_upgrades_the_line_once_confirmed(clock: Clock) -> None:
     stab = Stabilizer()
     appear_and_confirm(stab, clock, PARTIAL)
     stab.update(Change.SAME, 1300, clock(0.1))
-    assert stab.on_read(LINE, clock()) is None  # one read is not enough
+    assert stab.on_read([LINE], clock()) == []  # one read is not enough
     assert stab.update(Change.SAME, 1300, clock(0.06)).read  # confirm it quickly
-    assert stab.on_read(LINE, clock()) == LineUpgraded(LINE, previous=PARTIAL)
-    assert stab.current == LINE
+    assert stab.on_read([LINE], clock()) == [LineUpgraded(1, LINE, previous=PARTIAL)]
+    assert stab.current == [LINE]
 
 
 def test_variants_never_replace_the_confirmed_line(clock: Clock) -> None:
     stab = Stabilizer()
     appear_and_confirm(stab, clock, LINE)
     for variant in (PARTIAL, "Who is this guy? You knew, besides Brain's old cellmate.", LINE):
-        stab.update(Change.SAME, 1000, clock(0.6))
-        assert stab.on_read(variant, clock()) is None
-    assert stab.current == LINE
+        assert read(stab, clock, variant, after=0.6) == []
+    assert stab.current == [LINE]
 
 
-def test_changed_line_keeps_the_old_one_until_confirmed(clock: Clock) -> None:
+def test_replaced_line_stays_until_the_new_one_is_confirmed(clock: Clock) -> None:
     stab = Stabilizer()
     appear_and_confirm(stab, clock, LINE)
-    stab.update(Change.CHANGED, 900, clock(2.0))
-    assert stab.on_read("Look what the law chased in.", clock()) is None
-    assert stab.current == LINE
-    stab.update(Change.SAME, 900, clock(0.06))
-    assert stab.on_read("Look what the law chased in.", clock()) == LineConfirmed(
-        "Look what the law chased in."
-    )
+    assert read(stab, clock, "Look what the law chased in.", change=Change.CHANGED, after=2) == []
+    assert stab.current == [LINE]
+    assert read(stab, clock, "Look what the law chased in.") == [
+        LineConfirmed(2, "Look what the law chased in."),
+        ScreenChanged((2,)),
+    ]
 
 
 def test_short_line_is_confirmed_while_its_mask_keeps_changing(clock: Clock) -> None:
@@ -219,28 +232,129 @@ def test_short_line_is_confirmed_while_its_mask_keeps_changing(clock: Clock) -> 
     replaced it, and only the second part was ever translated. A short line's mask is small,
     so a few pixels of moving background push the thumbnail IoU under the threshold: every
     frame came as CHANGED, which used to throw the candidate away before its confirming read."""
-    stab = Stabilizer()
+    stab = Stabilizer(merge_split_sentences=False)
     appear_and_confirm(stab, clock, LINE)
     events = []
     for _ in range(6):
-        assert stab.update(Change.CHANGED, 300, clock(0.1)).read
-        events.append(stab.on_read("I knew Fisk", clock()))
+        events += read(stab, clock, "I knew Fisk", change=Change.CHANGED, pixels=300, after=0.1)
     # Confirmed once: later reads of the same text are the same line, whatever the mask says.
-    assert [e for e in events if e is not None] == [LineConfirmed("I knew Fisk")]
-    stab.update(Change.CHANGED, 600, clock(0.1))
-    stab.on_read("wouldn't go quietly.", clock())
-    stab.update(Change.SAME, 600, clock(0.06))
-    assert stab.on_read("wouldn't go quietly.", clock()) == LineConfirmed("wouldn't go quietly.")
+    assert [e for e in events if isinstance(e, LineConfirmed)] == [LineConfirmed(2, "I knew Fisk")]
+    read(stab, clock, "wouldn't go quietly.", change=Change.CHANGED, pixels=600, after=0.1)
+    assert read(stab, clock, "wouldn't go quietly.", pixels=600)[0] == LineConfirmed(
+        3, "wouldn't go quietly."
+    )
 
 
 def test_line_reappearing_after_a_flicker_is_a_repeat(clock: Clock) -> None:
     stab = Stabilizer()
     appear_and_confirm(stab, clock, LINE)
     stab.update(Change.CLEARED, 0, clock(0.1))  # a white flash hid the subtitle
-    stab.update(Change.APPEARED, 1000, clock(0.1))
-    stab.on_read(LINE, clock())
-    stab.update(Change.SAME, 1000, clock(0.06))
-    assert stab.on_read(LINE, clock()) == LineConfirmed(LINE, repeat=True)
+    read(stab, clock, LINE, change=Change.APPEARED, after=0.1)
+    assert read(stab, clock, LINE) == [LineConfirmed(1, LINE, repeat=True), ScreenChanged((1,))]
+
+
+# --- several lines at once (people talking over each other) -------------------------------------
+
+
+def test_stacked_lines_are_confirmed_one_by_one_and_scroll_up(clock: Clock) -> None:
+    """A game stacks the speakers' lines, the newest at the bottom; old ones scroll up and out.
+    Each line is confirmed (and so translated) once, alone, and keeps its id while it moves."""
+    a, b, c = "Police! Stop right there!", "Step out of the vehicle!", "Don't play dumb!"
+    stab = Stabilizer()
+    events = read(stab, clock, a, change=Change.APPEARED) + read(stab, clock, a)
+    events += read(stab, clock, a, b, change=Change.CHANGED, after=0.5) + read(stab, clock, a, b)
+    events += read(stab, clock, a, b, c, change=Change.CHANGED, after=0.5)
+    events += read(stab, clock, a, b, c)
+    events += read(stab, clock, b, c, change=Change.CHANGED, after=0.5) + read(stab, clock, b, c)
+    events += read(stab, clock, c, change=Change.CHANGED, after=0.5) + read(stab, clock, c)
+    events += read(stab, clock, change=Change.CHANGED, after=0.5)  # region empty, but the mask
+    events += read(stab, clock)  # still shows something (junk): two empty reads end it
+    assert events == [
+        LineConfirmed(1, a),
+        ScreenChanged((1,)),
+        LineConfirmed(2, b),
+        ScreenChanged((1, 2)),
+        LineConfirmed(3, c),
+        ScreenChanged((1, 2, 3)),
+        ScreenChanged((2, 3)),
+        ScreenChanged((3,)),
+        ScreenChanged(()),
+    ]
+
+
+def test_a_new_line_under_a_known_one_is_not_mistaken_for_it(clock: Clock) -> None:
+    stab = Stabilizer()
+    long = "No way, I'm not doing that again."
+    appear_and_confirm(stab, clock, long)
+    read(stab, clock, long, "No.", change=Change.CHANGED)
+    assert read(stab, clock, long, "No.") == [LineConfirmed(2, "No."), ScreenChanged((1, 2))]
+
+
+def test_a_short_line_is_never_upgraded_into_the_next_line(clock: Clock) -> None:
+    stab = Stabilizer()
+    appear_and_confirm(stab, clock, "Yeah.")
+    read(stab, clock, "Yeah, I know what you mean.", change=Change.CHANGED)
+    events = read(stab, clock, "Yeah, I know what you mean.")
+    assert events[0] == LineConfirmed(2, "Yeah, I know what you mean.")
+
+
+def test_a_wrapped_sentence_is_one_line(clock: Clock) -> None:
+    top, bottom = "Excuse me, sir. Sir. Owner of the pickup,", "gas needs to go in the tank."
+    stab = Stabilizer()
+    read(stab, clock, top, bottom, change=Change.APPEARED)
+    assert read(stab, clock, top, bottom) == [
+        LineConfirmed(1, f"{top} {bottom}"),
+        ScreenChanged((1,)),
+    ]
+    # Its top row scrolled out (or was lost): what is left is still that line.
+    assert read(stab, clock, bottom, change=Change.CHANGED) == []
+    assert read(stab, clock, bottom) == []
+    assert stab.current == [f"{top} {bottom}"]
+
+
+@pytest.mark.parametrize(
+    ("rows", "lines"),
+    [
+        (["Police! Stop right there!", "Step out of the vehicle!"], 2),  # two speakers
+        (["Hey. Got this Raul guy's car and", "heading to the address he gave."], 1),  # wrapped
+        (["Who is this guy?", "know, besides Brian's old cellmate."], 1),  # "You" lost
+        (["We have to find", "Lucia before they do."], 1),  # open end, a name below
+        (["I'm a hugger.", "Come in here!"], 2),
+        (["NO PUNCTUATION HERE", "AND NONE HERE"], 1),  # such games keep one subtitle
+        ([], 0),
+    ],
+)
+def test_group_rows(rows: list[str], lines: int) -> None:
+    assert len(group_rows(rows)) == lines
+
+
+def test_a_sentence_split_over_two_subtitles_is_merged(clock: Clock) -> None:
+    stab = Stabilizer()
+    appear_and_confirm(stab, clock, "I knew Fisk")
+    read(stab, clock, "wouldn't go quietly.", change=Change.CHANGED, after=0.8)
+    assert read(stab, clock, "wouldn't go quietly.") == [
+        LineUpgraded(1, "I knew Fisk wouldn't go quietly.", previous="I knew Fisk"),
+    ]  # the same line on screen (id 1): no ScreenChanged
+    assert stab.current == ["wouldn't go quietly."]
+
+
+def test_pieces_too_far_apart_are_not_merged(clock: Clock) -> None:
+    stab = Stabilizer()
+    appear_and_confirm(stab, clock, "I knew Fisk")
+    stab.update(Change.CLEARED, 0, clock(0.1))
+    read(stab, clock, "wouldn't go quietly.", change=Change.APPEARED, after=MERGE_GAP_S + 0.1)
+    events = read(stab, clock, "wouldn't go quietly.")
+    assert events[0] == LineConfirmed(2, "wouldn't go quietly.")
+
+
+def test_a_continuation_under_its_line_upgrades_it(clock: Clock) -> None:
+    """The next piece shows under the first one, both on screen: one sentence, one line."""
+    stab = Stabilizer()
+    appear_and_confirm(stab, clock, "I knew Fisk")
+    read(stab, clock, "I knew Fisk", "wouldn't go quietly.", change=Change.CHANGED)
+    assert read(stab, clock, "I knew Fisk", "wouldn't go quietly.") == [
+        LineUpgraded(1, "I knew Fisk wouldn't go quietly.", previous="I knew Fisk"),
+    ]
 
 
 @pytest.mark.parametrize(

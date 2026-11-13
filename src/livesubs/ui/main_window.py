@@ -59,6 +59,7 @@ from livesubs.core.messages import (
     StateChanged,
     StopPipeline,
     SubtitleCleared,
+    SubtitleLines,
     SubtitleRead,
     SubtitleTranslated,
 )
@@ -93,6 +94,7 @@ from livesubs.ui.placement import custom_geometry, monitor_at, overlay_geometry
 from livesubs.ui.region_frame import RegionFrame
 from livesubs.ui.region_select import RegionPicker
 from livesubs.ui.setup_check import SetupDialog
+from livesubs.ui.shown_lines import ShownLines
 from livesubs.ui.tabs.appearance import AppearanceTab
 from livesubs.ui.tabs.models import ModelsTab, cpu_share
 from livesubs.ui.tabs.profiles import ProfilesTab
@@ -257,8 +259,10 @@ class MainWindow(QMainWindow):
         self._state = EngineState.IDLE
         self._frame: FrameInfo | None = None
         self._rows: dict[int, int] = {}
-        self._translations: dict[int, str] = {}
-        self._clear_generation = 0
+        # The overlay mirrors the game's lines on screen; a timer drops lines that left.
+        self._shown = ShownLines()
+        self._shown_timer = QTimer(self, singleShot=True, timeout=self._refresh_overlay)
+        self._clear_generation = 0  # the phone's clear after the subtitle went
         self._ollama_ok: bool | None = None  # None until the first check
         self._translate_ms: deque[float] = deque(maxlen=AVERAGE_OF)  # not cached ones
         self._state_text = t("state.idle")
@@ -1255,7 +1259,7 @@ class MainWindow(QMainWindow):
         self._warned_spill = False
         # Line ids start again: old rows stay in the feed but no new line may land in them.
         self._rows.clear()
-        self._translations.clear()
+        self._shown.reset()
         if self._web is not None:
             self._web.new_session()
         self._engine.send(
@@ -1311,6 +1315,9 @@ class MainWindow(QMainWindow):
                 self._on_read(event)
             case SubtitleTranslated():
                 self._on_translated(event)
+            case SubtitleLines(line_ids=line_ids):
+                self._shown.screen(line_ids, time.monotonic())
+                self._refresh_overlay()
             case SubtitleCleared():
                 self._schedule_clear()
             case DebugFrame():
@@ -1340,6 +1347,8 @@ class MainWindow(QMainWindow):
         self.models.set_busy(state in ACTIVE_STATES)
         self._update_status()
         if state in (EngineState.PAUSED, EngineState.STOPPED) and not self._calibrating:
+            self._shown.hide_all()
+            self._shown_timer.stop()
             self._overlay.clear()
             if self._web is not None:
                 self._web.clear()
@@ -1536,17 +1545,15 @@ class MainWindow(QMainWindow):
         )
 
     def _on_read(self, event: SubtitleRead) -> None:
-        """A line was read. The overlay keeps the previous translation until this line's own
-        arrives: a blank overlay while the model works looked like subtitles vanishing early."""
+        """A line was read; its translation follows (the overlay follows ``SubtitleLines``)."""
         self._clear_generation += 1  # a subtitle is up: cancel a pending clear
         if self._reads == 0 and self._state == EngineState.RUNNING:
             self._show_state(t("state.running"))
         self._reads += 1
         if event.repeat:
-            if (text := self._translations.get(event.line_id)) is not None:
-                self._overlay.show_text(text)
-                if self._web is not None:
-                    self._web.show(event.line_id, text)
+            shown = self._shown.translation(event.line_id)
+            if shown is not None and self._web is not None:
+                self._web.show(event.line_id, shown.translation)
             return
         row = self._row_for(event.line_id)
         self._set_cells(
@@ -1560,7 +1567,7 @@ class MainWindow(QMainWindow):
         )
 
     def _on_translated(self, event: SubtitleTranslated) -> None:
-        self._translations[event.line_id] = event.translation
+        self._shown.translated(event.line_id, event.translation, event.source, time.monotonic())
         if not event.cached:
             self._translate_ms.append(event.translate_ms)
             self._show_state(self._state_text)
@@ -1568,19 +1575,33 @@ class MainWindow(QMainWindow):
         timing = t("feed.cached") if event.cached else f"{event.translate_ms:.0f}"
         self._set_cells(row, {2: event.translation, 3: event.model, 5: timing})
         self.feed.resizeRowToContents(row)
-        self._overlay.show_text(event.translation, event.source)
+        self._refresh_overlay()
         if self._web is not None:
             self._web.show(event.line_id, event.translation)
 
+    def _refresh_overlay(self) -> None:
+        """Show the translations of the lines on screen, stacked as in the game."""
+        self._shown.clear_delay_s = self._profile.overlay.clear_delay_ms / 1000
+        now = time.monotonic()
+        lines = self._shown.lines(now)
+        if lines:
+            self._overlay.show_lines(lines)
+        elif self._previewing:  # the Appearance preview keeps its sample text
+            self._overlay.show_text(t("overlay.sample"), t("overlay.sample_original"))
+        else:
+            self._overlay.clear()
+        self._shown_timer.stop()
+        if (until := self._shown.next_change()) is not None:
+            self._shown_timer.start(max(0, round((until - now) * 1000)) + 1)
+
     def _schedule_clear(self) -> None:
+        """The subtitle is gone: the phone moves its line up after the clear delay too."""
         self._clear_generation += 1
         generation = self._clear_generation
 
         def clear() -> None:
-            if generation == self._clear_generation:
-                self._overlay.clear()
-                if self._web is not None:
-                    self._web.clear()
+            if generation == self._clear_generation and self._web is not None:
+                self._web.clear()
 
         QTimer.singleShot(self._profile.overlay.clear_delay_ms, clear)
 

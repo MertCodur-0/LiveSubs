@@ -174,7 +174,6 @@ def main() -> None:
     ocr_ms: list[float] = []
     changes: dict[Change, int] = dict.fromkeys(Change, 0)
     black_frames = 0
-    line_id = 0
     appeared_at = 0.0
     started = time.monotonic()
     try:
@@ -215,17 +214,17 @@ def main() -> None:
                 continue
             read = ocr.recognize(result.ocr_image)
             ocr_ms.append(read.elapsed_ms)
-            event = stabilizer.on_read(read.text, time.monotonic())
-            if isinstance(event, LineConfirmed) and not event.repeat:
-                line_id += 1
-                lines.confirmed(line_id, event.text, appeared_at)
-                print(f"  confirmed: {event.text!r}")
-            elif isinstance(event, LineUpgraded):
-                print(f"  upgraded:  {event.text!r}")  # same line: timings stay the first ones
-            else:
-                continue
-            if orchestrator is not None:
-                orchestrator.submit(line_id, event.text)
+            rows = [line.text for line in sorted(read.lines, key=lambda line: line.box.y)]
+            for event in stabilizer.on_read(rows, time.monotonic()):
+                if isinstance(event, LineConfirmed) and not event.repeat:
+                    lines.confirmed(event.line_id, event.text, appeared_at)
+                    print(f"  confirmed: {event.text!r}")
+                elif isinstance(event, LineUpgraded):
+                    print(f"  upgraded:  {event.text!r}")  # timings stay the first ones
+                else:
+                    continue
+                if orchestrator is not None:
+                    orchestrator.submit(event.line_id, event.text)
     except CaptureError as exc:
         sys.exit(f"Capture failed: {type(exc).__name__}: {exc}")
     finally:
