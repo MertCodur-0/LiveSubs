@@ -60,6 +60,12 @@ class ChangeDetector:
             return Change.NONE if previous is None else Change.CLEARED
         if previous is None:
             return Change.APPEARED
-        if previous.shape != current.shape or iou(previous, current) < self.min_iou:
+        if previous.shape != current.shape:
+            # The OCR scale follows the glyph height, so the same region's thumbnail can come out
+            # a row taller or shorter.
+            size = (current.shape[1], current.shape[0])
+            previous = cv2.resize(previous.view(np.uint8), size, interpolation=cv2.INTER_NEAREST)
+            previous = previous > 0
+        if iou(previous, current) < self.min_iou:
             return Change.CHANGED
         return Change.SAME

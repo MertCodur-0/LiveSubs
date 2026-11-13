@@ -110,12 +110,13 @@ STRINGS: dict[str, str] = {
     "inspector.white": "Beyaz",
     "inspector.yellow": "Sarı",
     "inspector.custom": "Özel",
-    "inspector.tolerance": "Renk toleransı",
+    "inspector.tolerance": "Renk tonu toleransı",
     "inspector.contrast": "Yerel kontrast",
     "inspector.local_contrast": "Açık",
     "inspector.hint": (
-        "Alt görüntüde yazı siyah ve net, geri kalan beyaz olmalı. Harfler eksikse toleransı "
-        "artırın; arka plandan lekeler geliyorsa toleransı azaltın ya da kontrastı yükseltin."
+        "Alt görüntü bulunan yazıyı gösterir: harfler siyah ve tam, geri kalan beyaz olmalı. "
+        "Harfler eksikse kontrastı düşürün ya da ton toleransını artırın; arka plandan lekeler "
+        "geliyorsa kontrastı yükseltin ya da ton toleransını azaltın."
     ),
     "change.none": "yazı yok",
     "change.same": "aynı satır",

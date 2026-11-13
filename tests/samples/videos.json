@@ -1,0 +1,1623 @@
+{
+ "_note": "Subtitle lines of game footage (GTA VI clips) for scripts/bench_video_ocr.py. The videos are not in the repo: put them in tests/samples/videos/ under 'file'. Each line: [first seen s, last seen s, text]; times come from a 4 fps scan, so they are approximate. Rows of a stacked subtitle are separate lines; watermark-covered lines are left out.",
+ "region": [
+  0.215,
+  0.7,
+  0.57,
+  0.285
+ ],
+ "text_colors": [
+  "#FFFFFF",
+  "#FFFF00"
+ ],
+ "videos": [
+  {
+   "name": "v01",
+   "file": "v01.mp4",
+   "original": "club (safe).mp4",
+   "lines": [
+    [
+     1.6,
+     2.93,
+     "Here Kitty Kitty!"
+    ],
+    [
+     21.07,
+     22.4,
+     "Uh-oh! Tittie alert!"
+    ],
+    [
+     35.2,
+     37.07,
+     "Well hello there, baby cakes..."
+    ],
+    [
+     40.27,
+     42.4,
+     "I've been waiting for you, daddy..."
+    ],
+    [
+     43.47,
+     49.6,
+     "Make sure you make it out to our next Big Booty Takeover! Bring a fork and a forklift, you're gonna need 'em."
+    ],
+    [
+     56.8,
+     57.07,
+     "Nevaeh is everything you want and then some."
+    ],
+    [
+     57.33,
+     58.13,
+     "Nevaeh is everything you want and then some. They're testing me..."
+    ],
+    [
+     58.4,
+     59.73,
+     "Nevaeh is everything you want and then some."
+    ],
+    [
+     135.47,
+     137.87,
+     "Ooh... I like you."
+    ],
+    [
+     142.93,
+     143.2,
+     "I gotta take a leak"
+    ],
+    [
+     145.33,
+     146.67,
+     "I had me a girl once..."
+    ],
+    [
+     148.0,
+     148.53,
+     "What?"
+    ],
+    [
+     149.33,
+     150.93,
+     "Then the sea called..."
+    ],
+    [
+     151.73,
+     152.0,
+     "Cool."
+    ],
+    [
+     152.53,
+     154.67,
+     "Come on, you fuck!"
+    ]
+   ]
+  },
+  {
+   "name": "v02",
+   "file": "v02.mp4",
+   "original": "gas.mp4",
+   "lines": [
+    [
+     29.17,
+     29.4,
+     "Excuse me, sir. Sir. Owner of the pickup, gas needs to go in the tank."
+    ],
+    [
+     31.73,
+     38.27,
+     "Excuse me, sir. Sir. Owner of the pickup, gas needs to go in the tank."
+    ],
+    [
+     44.57,
+     46.9,
+     "ain't it funny... I-I-I think you'll find"
+    ],
+    [
+     47.13,
+     50.4,
+     "that I can pump gasoline, wherever I want,"
+    ],
+    [
+     50.87,
+     55.53,
+     "and none of your \"regulations\" or your mind-control is gonna stop me."
+    ],
+    [
+     56.0,
+     57.63,
+     "You know, next you'll be telling me"
+    ],
+    [
+     58.1,
+     59.5,
+     "that these cigarettes cause ED, won't ya?"
+    ],
+    [
+     63.0,
+     63.47,
+     "Well maybe, maybe you can just go right ahead and"
+    ],
+    [
+     65.1,
+     66.97,
+     "suck my free-thinking balls!"
+    ],
+    [
+     67.67,
+     70.23,
+     "Who the fuck are you, trying to regulate me?"
+    ],
+    [
+     70.93,
+     73.73,
+     "Got a problem? Lame-brain robots..."
+    ],
+    [
+     75.37,
+     76.53,
+     "Hey! Get out! Now!"
+    ],
+    [
+     79.1,
+     80.03,
+     "Not gonna happen!"
+    ],
+    [
+     85.4,
+     88.67,
+     "Hey! Stop! The government's stealing my gas!"
+    ],
+    [
+     90.07,
+     94.5,
+     "Shit, my truck! M-my gas!"
+    ],
+    [
+     114.8,
+     116.9,
+     "Return to Lucia"
+    ],
+    [
+     117.13,
+     118.07,
+     "Come on! Return to Lucia"
+    ],
+    [
+     118.77,
+     122.27,
+     "Return to Lucia"
+    ],
+    [
+     126.7,
+     128.8,
+     "This is why she fuckin' left me..."
+    ],
+    [
+     130.2,
+     130.43,
+     "fuck..."
+    ]
+   ]
+  },
+  {
+   "name": "v03",
+   "file": "v03.mkv",
+   "original": "Hypercar pt2.mkv",
+   "lines": [
+    [
+     44.75,
+     45.25,
+     "Police! Stop right there!"
+    ],
+    [
+     46.75,
+     47.0,
+     "Don't play dumb!"
+    ],
+    [
+     74.0,
+     75.75,
+     "Okay... what?"
+    ],
+    [
+     78.0,
+     78.25,
+     "Put the weapon away... I won't say it again."
+    ],
+    [
+     79.75,
+     82.0,
+     "No! Bad! No!"
+    ],
+    [
+     79.75,
+     80.5,
+     "That's them right there."
+    ]
+   ]
+  },
+  {
+   "name": "v04",
+   "file": "v04.mp4",
+   "original": "rapidsave.com_motorstorm_in_gta_6-kaooankqymxh1.mp4",
+   "lines": [
+    [
+     9.33,
+     10.13,
+     "Whoa! You know their butthole's puckered!"
+    ],
+    [
+     21.07,
+     22.67,
+     "Coming through!"
+    ],
+    [
+     35.73,
+     36.53,
+     "Get up there, baby!"
+    ]
+   ]
+  },
+  {
+   "name": "v05",
+   "file": "v05.mp4",
+   "original": "rapidsave.com_new_-y3btbj1geckh1.mp4",
+   "lines": [
+    [
+     33.33,
+     35.47,
+     "Ay! Can't be here! This ain't public!"
+    ],
+    [
+     34.67,
+     37.07,
+     "I'ma fuck your ass up! Ain't playing no more!"
+    ],
+    [
+     50.4,
+     51.47,
+     "Stay right where you are."
+    ],
+    [
+     55.47,
+     56.53,
+     "Don't move! Don't move!"
+    ],
+    [
+     72.27,
+     73.33,
+     "Hey! Stop!"
+    ],
+    [
+     96.8,
+     99.73,
+     "Stop! That's a gift from one of my boyfriends!"
+    ],
+    [
+     96.8,
+     97.6,
+     "Yeah. I'm goin' in!"
+    ],
+    [
+     110.4,
+     110.67,
+     "Fuckin' maniac!"
+    ],
+    [
+     110.4,
+     111.2,
+     "If you're gonna drive drunk, do it better!"
+    ],
+    [
+     110.93,
+     111.2,
+     "Jesus Christ, you're gonna kill somebody!"
+    ],
+    [
+     115.2,
+     115.47,
+     "Good living. Here's to you, buddy."
+    ],
+    [
+     121.07,
+     123.73,
+     "They don't know nothin' about me, man. I use a VPN!"
+    ]
+   ]
+  },
+  {
+   "name": "v06",
+   "file": "v06.mp4",
+   "original": "ssstwitter.com_1787418844354.mp4",
+   "lines": [
+    [
+     44.0,
+     44.53,
+     "Police! Stop right there!"
+    ],
+    [
+     45.87,
+     46.13,
+     "Don't play dumb!"
+    ],
+    [
+     73.6,
+     75.2,
+     "Okay... what?"
+    ],
+    [
+     76.27,
+     78.13,
+     "Put the weapon away... I won't say it again."
+    ],
+    [
+     77.87,
+     78.13,
+     "In Spanish: Hey."
+    ],
+    [
+     78.93,
+     81.33,
+     "No! Bad! No!"
+    ],
+    [
+     78.93,
+     79.73,
+     "That's them right there."
+    ]
+   ]
+  },
+  {
+   "name": "v07",
+   "file": "v07.mp4",
+   "original": "ssstwitter.com_1787419071496.mp4",
+   "lines": []
+  },
+  {
+   "name": "v08",
+   "file": "v08.mp4",
+   "original": "ssstwitter.com_1787419156737.mp4",
+   "lines": [
+    [
+     4.25,
+     5.5,
+     "Okay... what?"
+    ],
+    [
+     9.25,
+     11.75,
+     "No! Bad! No!"
+    ],
+    [
+     9.25,
+     10.0,
+     "That's them right there."
+    ]
+   ]
+  },
+  {
+   "name": "v09",
+   "file": "v09.mp4",
+   "original": "ssstwitter.com_1787419176048.mp4",
+   "lines": [
+    [
+     21.75,
+     22.75,
+     "Police! Stop right there!"
+    ],
+    [
+     22.25,
+     22.75,
+     "Step out of the vehicle!"
+    ],
+    [
+     23.5,
+     24.0,
+     "Don't play dumb!"
+    ]
+   ]
+  },
+  {
+   "name": "v10",
+   "file": "v10.mp4",
+   "original": "ssstwitter.com_1787434733599.mp4",
+   "lines": [
+    [
+     1.6,
+     2.93,
+     "Here Kitty Kitty!"
+    ],
+    [
+     21.07,
+     22.4,
+     "Uh-oh! Tittie alert!"
+    ],
+    [
+     35.2,
+     37.07,
+     "Well hello there, baby cakes..."
+    ],
+    [
+     40.27,
+     42.4,
+     "I've been waiting for you, daddy..."
+    ],
+    [
+     43.47,
+     49.6,
+     "Make sure you make it out to our next Big Booty Takeover! Bring a fork and a forklift, you're gonna need 'em."
+    ],
+    [
+     56.8,
+     57.07,
+     "Nevaeh is everything you want and then some."
+    ],
+    [
+     57.33,
+     58.13,
+     "Nevaeh is everything you want and then some. They're testing me..."
+    ],
+    [
+     58.4,
+     59.73,
+     "Nevaeh is everything you want and then some."
+    ],
+    [
+     135.47,
+     137.87,
+     "Ooh... I like you."
+    ],
+    [
+     142.93,
+     143.2,
+     "I gotta take a leak"
+    ],
+    [
+     145.33,
+     146.67,
+     "I had me a girl once..."
+    ],
+    [
+     148.0,
+     148.53,
+     "What?"
+    ],
+    [
+     149.07,
+     150.93,
+     "Then the sea called..."
+    ],
+    [
+     153.87,
+     154.67,
+     "Come on, you fuck!"
+    ]
+   ]
+  },
+  {
+   "name": "v11",
+   "file": "v11.mp4",
+   "original": "ssstwitter.com_1787500228731.mp4",
+   "lines": [
+    [
+     29.4,
+     29.87,
+     "Excuse me, sir. Sir. Owner of the pickup, gas needs to go in the tank."
+    ],
+    [
+     31.73,
+     38.27,
+     "Excuse me, sir. Sir. Owner of the pickup, gas needs to go in the tank."
+    ],
+    [
+     44.33,
+     46.9,
+     "ain't it funny... I-I-I think you'll find"
+    ],
+    [
+     47.13,
+     50.4,
+     "that I can pump gasoline, wherever I want,"
+    ],
+    [
+     50.87,
+     55.53,
+     "and none of your \"regulations\" or your mind-control is gonna stop me."
+    ],
+    [
+     56.0,
+     57.63,
+     "You know, next you'll be telling me"
+    ],
+    [
+     58.1,
+     59.27,
+     "that these cigarettes cause ED, won't ya?"
+    ],
+    [
+     63.0,
+     63.7,
+     "Well maybe, maybe you can just go right ahead and"
+    ],
+    [
+     65.1,
+     66.97,
+     "suck my free-thinking balls!"
+    ],
+    [
+     67.67,
+     70.23,
+     "Who the fuck are you, trying to regulate me?"
+    ],
+    [
+     70.93,
+     73.73,
+     "Got a problem? Lame-brain robots..."
+    ],
+    [
+     75.37,
+     76.07,
+     "Hey! Get out! Now!"
+    ],
+    [
+     78.87,
+     80.03,
+     "Not gonna happen!"
+    ],
+    [
+     85.4,
+     88.67,
+     "Hey! Stop! The government's stealing my gas!"
+    ],
+    [
+     90.07,
+     94.5,
+     "Shit, my truck! M-my gas!"
+    ],
+    [
+     114.8,
+     116.9,
+     "Return to Lucia"
+    ],
+    [
+     117.13,
+     118.07,
+     "Come on! Return to Lucia"
+    ],
+    [
+     119.0,
+     122.27,
+     "Return to Lucia"
+    ],
+    [
+     126.7,
+     128.8,
+     "This is why she fuckin' left me..."
+    ],
+    [
+     130.2,
+     130.43,
+     "fuck..."
+    ]
+   ]
+  },
+  {
+   "name": "v12",
+   "file": "v12.mp4",
+   "original": "ssstwitter.com_1787523196683.mp4",
+   "lines": [
+    [
+     44.1,
+     45.27,
+     "Police! Stop right there!"
+    ],
+    [
+     45.03,
+     45.73,
+     "Step out of the vehicle!"
+    ],
+    [
+     45.5,
+     46.2,
+     "Don't play dumb!"
+    ],
+    [
+     73.27,
+     75.13,
+     "Okay... what?"
+    ],
+    [
+     76.3,
+     76.53,
+     "Put the weapon away... I won't say it again."
+    ],
+    [
+     79.1,
+     81.43,
+     "No! Bad! No!"
+    ],
+    [
+     79.1,
+     79.8,
+     "That's them right there."
+    ]
+   ]
+  },
+  {
+   "name": "v13",
+   "file": "v13.mp4",
+   "original": "ssstwitter.com_1787595874796.mp4",
+   "lines": [
+    [
+     8.53,
+     10.93,
+     "Quit skulking already and tell us what's on your mind."
+    ],
+    [
+     11.47,
+     12.27,
+     "Fucking troll."
+    ],
+    [
+     14.13,
+     15.2,
+     "Why you acting homeless?"
+    ],
+    [
+     18.93,
+     23.2,
+     "Oh, we are moving on from this sitch. You're about to be a speck in our rearview mirror."
+    ],
+    [
+     54.67,
+     56.53,
+     "You motherfucker! I'm talkin' to you!"
+    ],
+    [
+     60.0,
+     64.0,
+     "Hey, brother, I'm here expanding my horizons! You should try it sometime!"
+    ],
+    [
+     78.4,
+     79.73,
+     "Umm, your mama ain't teach you no manners?"
+    ],
+    [
+     82.67,
+     84.8,
+     "I don't understand people these days."
+    ],
+    [
+     89.6,
+     90.93,
+     "We're officially done with this."
+    ],
+    [
+     92.8,
+     94.93,
+     "C'mon, buddy! Don't mess with my buddy!"
+    ],
+    [
+     97.33,
+     100.8,
+     "Hey, I'd love to keep chatting, but I think the cops'll have enough on their plate."
+    ],
+    [
+     116.0,
+     117.33,
+     "You got a friggin' problem or what?"
+    ],
+    [
+     118.67,
+     120.27,
+     "What, you wanna closer look?"
+    ],
+    [
+     123.2,
+     124.27,
+     "What the fuck're you doin'?"
+    ],
+    [
+     125.07,
+     126.4,
+     "Get a grip, will you?"
+    ],
+    [
+     130.4,
+     131.2,
+     "Pull yourself together!"
+    ],
+    [
+     131.73,
+     133.6,
+     "Ay, please just not the face!"
+    ],
+    [
+     136.0,
+     137.87,
+     "If you kill me, you'll never know the truth!"
+    ],
+    [
+     141.33,
+     141.87,
+     "Yeah, you were a talker..."
+    ],
+    [
+     142.4,
+     144.0,
+     "Cut the shit, asshole!"
+    ],
+    [
+     142.4,
+     144.0,
+     "What? What's a matter? You scared to-to take me with your bare hands? Not like that though!"
+    ],
+    [
+     144.27,
+     148.27,
+     "Um, you know I, uh, I completely forgot I've gotta get to... court. Yeah, a custody case for my dog... um, so... I'm gonna leave..."
+    ]
+   ]
+  },
+  {
+   "name": "v14",
+   "file": "v14.mp4",
+   "original": "ssstwitter.com_1787675406096.mp4",
+   "lines": [
+    [
+     0.8,
+     1.87,
+     "Huh? For real?"
+    ],
+    [
+     36.53,
+     37.87,
+     "Hey, baby..."
+    ],
+    [
+     42.4,
+     43.73,
+     "What's up, baby?"
+    ],
+    [
+     70.67,
+     72.0,
+     "Hey, baby..."
+    ],
+    [
+     164.27,
+     165.6,
+     "Ooh, you're cute."
+    ],
+    [
+     165.87,
+     166.13,
+     "Hey..."
+    ],
+    [
+     170.13,
+     173.87,
+     "Okay, sexy! Where've you been my whole life?"
+    ],
+    [
+     180.53,
+     184.0,
+     "And what're you doing here, bebé... looking for me?"
+    ],
+    [
+     183.2,
+     184.0,
+     "Well, hey to you too."
+    ],
+    [
+     184.27,
+     187.2,
+     "I better see you soon, okay? Like, super soon..."
+    ]
+   ]
+  },
+  {
+   "name": "v15",
+   "file": "v15.mp4",
+   "original": "ssstwitter.com_1787675519252.mp4",
+   "lines": [
+    [
+     49.0,
+     49.23,
+     "Suck a dick!"
+    ],
+    [
+     49.47,
+     50.4,
+     "What the shit, bro?"
+    ]
+   ]
+  },
+  {
+   "name": "v16",
+   "file": "v16.mp4",
+   "original": "ssstwitter.com_1787758179400.mp4",
+   "lines": [
+    [
+     10.13,
+     10.67,
+     "In Spanish: Bro, I'm telling you, this place is the shit."
+    ],
+    [
+     10.93,
+     12.0,
+     "I don't know why we fuck with any place else."
+    ],
+    [
+     12.27,
+     14.13,
+     "Yo, I'm here for it, bro, ready. Show it to me, let me see."
+    ],
+    [
+     19.73,
+     20.53,
+     "Shit..."
+    ],
+    [
+     24.27,
+     25.07,
+     "In Spanish: One coffee, please."
+    ],
+    [
+     25.33,
+     25.86,
+     "In Spanish: Make it two and the menu."
+    ],
+    [
+     26.13,
+     27.46,
+     "Could I have another ice water, please?"
+    ],
+    [
+     28.0,
+     30.13,
+     "Another one? You don't want a leche caliente, or something?"
+    ],
+    [
+     31.2,
+     32.26,
+     "Just water."
+    ],
+    [
+     44.8,
+     48.53,
+     "I don't like to do this, but my boss told me... to ask you to settle up."
+    ],
+    [
+     49.33,
+     51.73,
+     "He doesn't mind you taking the table, but you know..."
+    ],
+    [
+     53.06,
+     54.4,
+     "I get it. It's no problem."
+    ],
+    [
+     66.39,
+     68.53,
+     "Lu, you staring at that window again?"
+    ],
+    [
+     69.59,
+     70.13,
+     "Mm-hmm."
+    ],
+    [
+     70.66,
+     72.26,
+     "You can look out there all day, girl."
+    ],
+    [
+     72.8,
+     74.13,
+     "Ain't nothin' gonna change."
+    ],
+    [
+     81.06,
+     83.46,
+     "Sorry about that."
+    ],
+    [
+     83.73,
+     84.26,
+     "Really?"
+    ],
+    [
+     85.06,
+     85.86,
+     "They're late."
+    ],
+    [
+     86.13,
+     95.19,
+     "Yeah? Damn."
+    ],
+    [
+     90.93,
+     93.06,
+     "What else is new?"
+    ],
+    [
+     104.53,
+     106.93,
+     "Oh, you still doin' that? Lay one on me."
+    ],
+    [
+     107.73,
+     109.86,
+     "Clue is \"planet of love.\""
+    ],
+    [
+     110.39,
+     112.26,
+     "Ain't this planet, that's for damn sure."
+    ],
+    [
+     113.59,
+     114.39,
+     "How 'bout Venus?"
+    ],
+    [
+     114.92,
+     118.92,
+     "Yo, that- that looks right. Nice."
+    ],
+    [
+     119.46,
+     123.46,
+     "Oh, yeah, I knew a Venus, she was one freaky hoe."
+    ],
+    [
+     127.46,
+     128.79,
+     "Caminos, door!"
+    ],
+    [
+     138.12,
+     139.99,
+     "Where you been at? I've been waiting."
+    ],
+    [
+     140.52,
+     141.06,
+     "Alright, come on."
+    ],
+    [
+     142.66,
+     144.26,
+     "Go with the prison guard"
+    ],
+    [
+     145.06,
+     147.19,
+     "Finally, about fuckin' time!"
+    ],
+    [
+     147.99,
+     149.86,
+     "Yo, why's everything running so late?"
+    ],
+    [
+     150.12,
+     153.06,
+     "Shit, you haven't heard? Counselor Reigns got canned."
+    ],
+    [
+     152.52,
+     154.39,
+     "Hey, big man! Big man!"
+    ],
+    [
+     153.32,
+     154.39,
+     "Oh, shit. So who they got me with now?"
+    ],
+    [
+     155.46,
+     156.79,
+     "I'm not supposed to be in here, big man!"
+    ],
+    [
+     155.46,
+     157.85,
+     "Somebody named \"Gates.\" I don't know anything about her..."
+    ],
+    [
+     158.66,
+     159.72,
+     "Yo, he didn't get caught for bringing-"
+    ],
+    [
+     160.25,
+     161.06,
+     "Nah, nah, we're good."
+    ],
+    [
+     161.85,
+     165.06,
+     "Word is he got caught \"counseling\" with his hands down an inmate's pants."
+    ],
+    [
+     165.32,
+     166.66,
+     "Ugh. Dirty fuck."
+    ],
+    [
+     167.45,
+     168.52,
+     "You called too many."
+    ],
+    [
+     167.99,
+     168.52,
+     "Eh, Wilson!"
+    ],
+    [
+     169.85,
+     170.39,
+     "Hold up a minute."
+    ],
+    [
+     170.65,
+     172.52,
+     "Yo, Shayna!"
+    ],
+    [
+     171.19,
+     171.72,
+     "Seriously?"
+    ],
+    [
+     171.99,
+     173.05,
+     "They want you over on C block."
+    ],
+    [
+     173.59,
+     174.12,
+     "Yeah, okay."
+    ],
+    [
+     174.39,
+     175.19,
+     "Let me see that phone for a minute?"
+    ],
+    [
+     174.92,
+     176.25,
+     "Yo, Christina's back in."
+    ],
+    [
+     176.79,
+     177.05,
+     "What?"
+    ],
+    [
+     177.59,
+     181.59,
+     "Picked her up on a traffic violation, carrying two joints and half a G of blow."
+    ],
+    [
+     182.39,
+     182.65,
+     "Uh-uh, bitch."
+    ],
+    [
+     182.39,
+     183.72,
+     "Oh shit."
+    ],
+    [
+     183.45,
+     184.52,
+     "You gotta drive careful out there, bro."
+    ],
+    [
+     185.32,
+     186.65,
+     "B38 enroute. Heading to the yard."
+    ],
+    [
+     185.32,
+     188.52,
+     "They will pick you up for fuckin' anything. Anything."
+    ],
+    [
+     187.72,
+     189.05,
+     "'Kay, we're moving... March."
+    ],
+    [
+     188.79,
+     189.85,
+     "Mm-hmm, that's right."
+    ],
+    [
+     190.39,
+     190.65,
+     "Facts."
+    ],
+    [
+     193.05,
+     193.32,
+     "What?"
+    ],
+    [
+     195.19,
+     196.52,
+     "Yo, get your feet up off there."
+    ],
+    [
+     196.79,
+     197.05,
+     "What?"
+    ],
+    [
+     197.59,
+     198.65,
+     "That's my magazine, ho!"
+    ],
+    [
+     198.12,
+     198.65,
+     "Yo! Chill, okay?"
+    ],
+    [
+     199.19,
+     200.25,
+     "No, look what- look what you did!"
+    ],
+    [
+     199.19,
+     200.25,
+     "Yo, she bring anything in with her?"
+    ],
+    [
+     200.78,
+     201.32,
+     "You wanna go?"
+    ],
+    [
+     200.78,
+     203.19,
+     "You wanna go? Oh, yeah, that's right."
+    ],
+    [
+     201.85,
+     203.19,
+     "I ain't no dry snitch."
+    ],
+    [
+     204.25,
+     205.59,
+     "Swallowed a gram, but it ain't passed yet."
+    ],
+    [
+     206.38,
+     207.99,
+     "Don't even. And she might have stuck a little up her coochie, too,"
+    ],
+    [
+     208.52,
+     209.85,
+     "'cause girl was walkin' funny."
+    ],
+    [
+     211.45,
+     213.85,
+     "Ay! Yo, we playin'?"
+    ],
+    [
+     212.52,
+     215.98,
+     "Yeah, yeah. Keep your pants on, bitch."
+    ],
+    [
+     218.12,
+     218.92,
+     "Talk to you later."
+    ],
+    [
+     221.05,
+     221.32,
+     "Alright."
+    ],
+    [
+     222.12,
+     222.65,
+     "Alright, let's have a look."
+    ],
+    [
+     223.18,
+     226.38,
+     "Come on, get off me! It was that bitch!"
+    ],
+    [
+     226.12,
+     227.18,
+     "Right there."
+    ],
+    [
+     228.52,
+     234.65,
+     "Go with the prison guard"
+    ],
+    [
+     229.05,
+     230.12,
+     "God..."
+    ],
+    [
+     230.38,
+     231.45,
+     "Booyah!"
+    ],
+    [
+     236.25,
+     238.38,
+     "I said it was that other bitch, okay?"
+    ],
+    [
+     240.78,
+     242.12,
+     "Goddamnit. This is ridiculous."
+    ],
+    [
+     240.78,
+     242.92,
+     "Yo, no lie, those some small fuckin' numbers, bruh."
+    ],
+    [
+     243.18,
+     243.98,
+     "Fucking pig."
+    ],
+    [
+     243.72,
+     244.78,
+     "Let's see you hit yours."
+    ],
+    [
+     245.32,
+     247.72,
+     "Been in the job ten years. Real by the book."
+    ],
+    [
+     248.78,
+     249.31,
+     "That's all I got."
+    ],
+    [
+     250.12,
+     250.65,
+     "Great."
+    ],
+    [
+     251.45,
+     251.98,
+     "Caminos."
+    ],
+    [
+     253.85,
+     254.12,
+     "Yup."
+    ],
+    [
+     257.85,
+     260.51,
+     "Just tell her what she needs to know, keep it straight, don't fuck around."
+    ],
+    [
+     263.45,
+     264.25,
+     "Yeah..."
+    ],
+    [
+     265.31,
+     266.91,
+     "And uh, heard they don't got too much"
+    ],
+    [
+     267.18,
+     268.78,
+     "of a sense of humor over there at County, so..."
+    ],
+    [
+     269.05,
+     269.58,
+     "Don't get cute?"
+    ],
+    [
+     270.11,
+     270.91,
+     "Yep, don't get cute."
+    ],
+    [
+     273.31,
+     273.58,
+     "Okay."
+    ]
+   ]
+  },
+  {
+   "name": "v17",
+   "file": "v17.mp4",
+   "original": "ssstwitter.com_1787758228918.mp4",
+   "lines": [
+    [
+     14.93,
+     16.0,
+     "It's just a fucking car, go!"
+    ],
+    [
+     19.47,
+     21.87,
+     "Bro, why are you being like this?"
+    ],
+    [
+     21.07,
+     22.4,
+     "You ain't shit!"
+    ],
+    [
+     31.2,
+     31.73,
+     "Come on nah!"
+    ],
+    [
+     38.93,
+     40.53,
+     "You need to be more careful!"
+    ],
+    [
+     38.93,
+     40.53,
+     "You really want a problem today?"
+    ]
+   ]
+  },
+  {
+   "name": "v18",
+   "file": "v18.mp4",
+   "original": "ssstwitter.com_1787758283461.mp4",
+   "lines": []
+  },
+  {
+   "name": "v19",
+   "file": "v19.mp4",
+   "original": "stunt.mp4",
+   "lines": [
+    [
+     1.33,
+     3.47,
+     "Are you that shitty of a person?"
+    ],
+    [
+     27.2,
+     28.8,
+     "You got some spice to you now, little baby."
+    ],
+    [
+     29.33,
+     31.2,
+     "Huh? Speak up! What you talkin' 'bout?"
+    ],
+    [
+     35.2,
+     37.6,
+     "Ah, the fuck? You see me, bitch!"
+    ],
+    [
+     38.4,
+     38.67,
+     "Bitch!"
+    ],
+    [
+     46.93,
+     48.27,
+     "Oh shit, I'm in the wrong place..."
+    ],
+    [
+     65.33,
+     69.33,
+     "Whoa, uh, hey. What are you doing here? You working with that other guy on the roof?"
+    ],
+    [
+     65.33,
+     72.0,
+     "Get to the rooftop"
+    ],
+    [
+     70.4,
+     72.0,
+     "Uh, yeah, I work with that guy."
+    ],
+    [
+     72.8,
+     78.4,
+     "My boss doesn't tell me shit about what's going on around here. You guys are on your own up there. I don't do roof shit. Heights freak me out."
+    ],
+    [
+     98.93,
+     99.47,
+     "Hllo, are you there?"
+    ],
+    [
+     100.0,
+     101.87,
+     "Yeah, going to the jump point now."
+    ],
+    [
+     102.93,
+     110.4,
+     "Nice, great, great, nice. Look... we are at a crucial point in the lifecycle of the Auda City hype, right? The hype is in its adolescence."
+    ],
+    [
+     110.67,
+     116.8,
+     "It's energetic and horny, but also unstable and horny. What it needs now is true believers."
+    ],
+    [
+     117.33,
+     123.73,
+     "Fenestra Plaza is full of tech bros with the salaries of surgeons, the egos of geniuses, and the brains of teenagers, okay?"
+    ],
+    [
+     132.0,
+     132.27,
+     "Ooh, and there are also some influencers doing a promotion for swimsuits or weight loss drugs or some shit in the building between you and the plaza."
+    ],
+    [
+     135.2,
+     136.8,
+     "Ooh, and there are also some influencers doing a promotion for swimsuits or weight loss drugs or some shit in the building between you and the plaza."
+    ],
+    [
+     137.87,
+     139.47,
+     "Fly through there on your way to the tech bros, you got it?"
+    ],
+    [
+     142.13,
+     143.47,
+     "Hold on, what do you mean when you say \"give them a show\"?"
+    ],
+    [
+     148.8,
+     149.07,
+     "You know, say the slogan, shake a little ass?"
+    ],
+    [
+     150.0,
+     152.3,
+     "Do I really have to dance?"
+    ],
+    [
+     153.07,
+     153.33,
+     "Hey, we're all making sacrifices!"
+    ],
+    [
+     153.07,
+     153.33,
+     "At least no one is going to see your cock and balls! Alright? Good luck!"
+    ],
+    [
+     154.4,
+     154.93,
+     "Hey, we're all making sacrifices!"
+    ],
+    [
+     154.4,
+     154.93,
+     "At least no one is going to see your cock and balls! Alright? Good luck!"
+    ],
+    [
+     162.13,
+     167.73,
+     "Go to the AudaCity engineer"
+    ],
+    [
+     166.13,
+     166.93,
+     "Oh, hey! Lucia!"
+    ],
+    [
+     168.0,
+     169.07,
+     "I hope you're ready for another jump!"
+    ],
+    [
+     173.07,
+     174.13,
+     "Yup. Let's do it."
+    ],
+    [
+     174.67,
+     180.53,
+     "Awesome! The thirty under thirty tech wine and cheese is over there, and the influencer pool party's there."
+    ],
+    [
+     181.07,
+     183.73,
+     "You just got to jump off here and thread the needle."
+    ],
+    [
+     185.07,
+     189.6,
+     "I'll film from here! Pull the chute early so I can get it on camera, and so you don't die!"
+    ],
+    [
+     185.07,
+     194.67,
+     "Equip the parachute"
+    ],
+    [
+     201.07,
+     207.73,
+     "Jump off the ramp"
+    ],
+    [
+     209.6,
+     211.47,
+     "It hurts my eyes to see a poor man trying to get attention."
+    ],
+    [
+     260.27,
+     266.93,
+     "Jump off the ramp"
+    ],
+    [
+     268.0,
+     269.87,
+     "It hurts my eyes to see a poor man trying to get attention."
+    ],
+    [
+     288.0,
+     290.4,
+     "Hey! It's the Auda-City dude! Quick! Film in case he hurts himself!"
+    ]
+   ]
+  },
+  {
+   "name": "v20",
+   "file": "v20.mp4",
+   "original": "video.mp4",
+   "lines": [
+    [
+     78.93,
+     79.47,
+     "Get those damn sinner hands off me!"
+    ],
+    [
+     80.0,
+     80.53,
+     "Dude, stop! Shut up."
+    ],
+    [
+     80.8,
+     81.33,
+     "Dude, stop!"
+    ],
+    [
+     82.4,
+     83.47,
+     "Alright, I'm here!"
+    ],
+    [
+     87.47,
+     88.53,
+     "Still think I'm playin around?"
+    ]
+   ]
+  }
+ ]
+}

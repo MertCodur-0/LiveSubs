@@ -3,8 +3,8 @@
 LiveSubs.exe is a windowless pythonw.exe, so the result goes to the report file: "ok" plus the
 loaded Qt plugins, or the traceback. Exercises the native parts that a trimmed or incomplete
 package would break: Qt widgets, every theme with the bundled fonts and SVG art, the SVG/image
-plugins, OpenCV, WinRT OCR, windows-capture, the capture card parts (Media Foundation listing,
-shared frames, the preview) and the UI and engine modules.
+plugins, OpenCV, WinRT OCR, Windows' spell checker (COM), windows-capture, the capture card
+parts (Media Foundation listing, shared frames, the preview) and the UI and engine modules.
 """
 
 import sys
@@ -52,6 +52,7 @@ def check() -> list[str]:
     from livesubs.engine.ocr.winrt_ocr import WinRtOcr
     from livesubs.engine.process import EngineProcess  # noqa: F401
     from livesubs.platform.audio_endpoints import default_output_id
+    from livesubs.platform.spellcheck import open_spell_checker
     from livesubs.platform.video_devices import list_video_devices
     from livesubs.ui.main_window import MainWindow  # noqa: F401
     from livesubs.ui.qr import qr_pixmap
@@ -75,6 +76,8 @@ def check() -> list[str]:
     default_output_id()
 
     WinRtOcr().recognize(np.full((40, 200), 255, np.uint8))
+    checker = open_spell_checker()  # judges OCR reads; None where Windows has no en-US one
+    assert checker is None or checker.misspelled("Heyl there") == ["Heyl"]
     assert b"EventSource" in render_page() and FONT.is_file()  # package data of the phone page
     assert not qr_pixmap("http://192.168.1.2:8765/").isNull()
     return [f"plugin path: {p}" for p in QCoreApplication.libraryPaths()]

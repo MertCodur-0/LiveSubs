@@ -127,29 +127,47 @@ UI process (PySide6)                                  Engine process (multiproce
 - Region stored **normalized (0–1) to the source's frame space** (window client area / monitor /
   video frame), converted to physical pixels with DPI awareness.
 - Capture FPS configurable, default 10. WGC yellow border disabled where Windows 11 allows it.
-- Preprocessing (`engine/vision/preprocess.py`), all at native resolution until the upscale:
-  per subtitle color a *closeness* map (255 - max per-channel distance) -> text = closeness within
-  `color_tolerance` AND **local contrast** (white top-hat of the closeness map >=
-  `min_local_contrast`, kernel `local_contrast_kernel_px`; Otsu on gray when color mask is off)
-  -> connected-component filter (area between `min_component_px` and `max_component_fraction`)
-  -> 2x upscale of the mask (linear + threshold) -> 2x2 opening -> OCR image = inverted mask.
-  Local contrast replaced the first "outline support" (a dark pixel nearby): it failed on faint
-  caption boxes over bright ground, while top-hat needs no dark edge at all — only that strokes
-  are thinner than the kernel and stand out from their surroundings. Every step can be toggled,
-  every threshold is tunable. Cost: 1.1–2.2 ms for a 1066x106 sample region; live 1536x216 at
-  1080p p50 5.0 ms / p95 5.8 ms.
-- Change detection (`engine/vision/change.py`) compares only the **text mask**: shrunk to a
+- Preprocessing (`engine/vision/preprocess.py`, rewritten 2026-11-14, see decision log): **no
+  absolute color threshold** — games draw "white" subtitles light grey and video/capture/dark
+  scenes dim them (glyph cores 145-190 measured). Per subtitle color a **tone** map: brightness
+  along the color + distance from the color scaled to that brightness (white: min channel and
+  channel spread; uint8 fast path for 0/255 colors) -> text = in tone (`tone_tolerance` 60) AND
+  >= `min_brightness` 80 AND white top-hat of the brightness >= `min_contrast` 45 (kernel 15) AND
+  not `brightness_drop` 90 below the region's 98th-percentile text brightness -> component filter
+  -> **letters** (components >= half the glyph height; the glyph height = 75th percentile of
+  component heights) -> **scale** so glyphs are ~`text_height_px` 40 tall (1-4x, quarter steps;
+  720p clips get ~3x). Outputs: `mask` = letters at the **region's own resolution** (change
+  detection: no specks, no scale dependence), `ocr_image` = the brightness, cubic-upscaled, only in
+  the text rows (rest = median), `sharp_image` = the full mask black on white (`second_read`).
+  Without the color mask any color counts by its grey level. Cost ~9.5 ms for a 1095x307 region.
+- **Reading** (`pipeline.read_subtitle`): both OCR images are read, `text/quality.ReadScorer`
+  keeps the read that looks most like English: +0.2 per plausible word, -1 per word Windows' spell
+  checker does not know (`platform/spellcheck.py`, `ISpellChecker` via COM ctypes, created on the
+  pipeline thread; -0.3 for apostrophe slang like "I'ma"), letters mixed with digits, stray single
+  letters, odd symbols; -0.5 for a trailing "'" (misread "!"). No spell checker -> shape rules only.
+- Change detection (`engine/vision/change.py`) compares only the **letters mask**: shrunk to a
   96-px-wide thumbnail, IoU >= 0.75 = same line; coverage < 0.02 % = empty. Background motion never
   triggers. Empty mask = subtitle gone (`CLEARED`); the overlay clears after a configurable delay.
+  Thumbnails of different heights (never expected now that the mask is at region size) are
+  resized before the IoU.
 - OCR (`engine/ocr/winrt_ocr.py`): `WinRtOcr.recognize(image) -> OcrResult` (lines with boxes,
   `text` = lines joined by spaces, `elapsed_ms`). Gray8 `SoftwareBitmap` filled through a WinRT
   `Buffer` memoryview; `recognize_async(...).get()` blocks the OCR thread (no asyncio); works
   from worker threads; images over `max_image_dimension` (10000) are downscaled, boxes mapped
   back. 5-13 ms per sample region, live p50 17 / p95 24 ms. `engine/ocr/language.py`: installed
   languages, `best_english` (en-US, else any en-*), elevated install via `ShellExecuteW runas`.
-- OCR accuracy on the 18 samples (fuzz ratio vs expected, typographic quotes folded):
-  preprocessed mean 99.5, 15/18 exact, min 96.3; raw gray 96.2 / 12 / 64.3; raw 2x 97.0 / 13 /
-  72.5. Remaining misses: 200236 "What-should", "youir" (road junk); 200302 "You" missing.
+- OCR accuracy on the 18 samples (fuzz ratio vs expected, typographic quotes folded), read as the
+  pipeline reads: mean 98.6, 14/17 exact (old preprocessing: 99.5, 15/17); raw gray 96.0. Misses:
+  200236 loses "What should" (road texture merges with it; was "What-should"), 194314 "cabr6n",
+  200302 "YOI know".
+- **Video benchmark** (`scripts/bench_video_ocr.py`, `tests/samples/videos.json`: 294 subtitle
+  lines of 20 GTA VI clips the user supplied, 720p/1080p, some re-encodes of the same scene;
+  videos git-ignored under `tests/samples/videos/`, GT made by eye from frames): replays the
+  reading loop on a virtual clock and counts lines read exactly. Old preprocessing **18.7 %
+  exact, 148 never read**; new **84.0 % exact, 22 never read** (with punctuation 232/294).
+  Remaining misses: grey text on bright grey/skin (v19), pink objective words ("prison guard":
+  add the color), one-word lines next to the clips' watermarks. Region used: x 0.215-0.785,
+  y 0.70-0.985 — GTA stacks up to 4 rows when two people talk, so the region must reach ~70 %.
 - Text (`engine/text/`): `normalize.clean` = what is shown and translated (NFC, typographic
   quotes/dashes/ellipsis to ASCII, lone "|"/"l" before a word -> "I", edge junk stripped, single
   spaces); `normalize.key` = comparisons and cache key (casefold, accents and punctuation dropped).
@@ -161,7 +179,10 @@ UI process (PySide6)                                  Engine process (multiproce
   `LineConfirmed(text, repeat)`; `repeat` = same as the previous line (reappeared after a flash),
   so its translation is reused. `CHANGED` keeps the old line on screen until the new one is
   confirmed; it does **not** drop a waiting candidate (the next read's text decides).
-  `CLEARED` -> `LineCleared` (only if a line existed). Fast re-read 50 ms only while a
+  `CLEARED` -> `LineCleared` (only if a line existed). With a `scorer` (the pipeline passes
+  `ReadScorer.score`) the best-scoring agreeing read is confirmed, and a later read of the same
+  line scoring >= `correct_margin` 0.5 higher corrects it (`LineUpgraded`): +5.5 points exact on
+  the video benchmark, ~8 % more outputs (re-translations). Fast re-read 50 ms only while a
   candidate awaits its confirming read; otherwise reads every 500 ms, or at once when text pixels
   grow >= 15 % (fade-ins, glyphs uncovered by the moving background).
 - **Read upgrades** (user's point: the background keeps moving, so words lost on a bright frame
@@ -588,18 +609,18 @@ src/livesubs/
     capture/   base.py, wgc.py, mss_fallback.py, factory.py, video_device.py, shared_frames.py
     vision/    preprocess.py, change.py
     ocr/       winrt_ocr.py, language.py
-    text/      normalize.py, filters.py, stabilizer.py
+    text/      normalize.py, filters.py, stabilizer.py, quality.py, sentences.py
     translate/ base.py, ollama.py, orchestrator.py, prompt.py, cache.py
   ollama/      client.py, catalog.py, install.py, vram.py, compare.py
-  platform/    win32.py, hotkeys.py, shortcuts.py, gpu.py, com.py, video_devices.py
+  platform/    win32.py, hotkeys.py, shortcuts.py, gpu.py, com.py, video_devices.py, spellcheck.py
   ui/          main_window.py, header.py, icon.py, icons.py, rows.py, feed.py, qr.py, overlay.py,
                region_frame.py, inspector.py,
                tray.py, setup_check.py, single_instance.py, capture_card.py, frame_region.py,
                tabs/, theme/ (base.qss, modern.json, modern_light.json, vice.json, dark.json)
   web/         server.py, feed.py, static/index.html
-tests/         samples/ (+ samples.json), helpers/, test_*.py
+tests/         samples/ (+ samples.json, videos.json), helpers/, test_*.py
 scripts/       build_exe.ps1, embedded/ (sitecustomize.py, smoke_test.py), create_shortcut.ps1,
-               make_icon.py, bench_pipeline.py, compare_models.py
+               make_icon.py, bench_pipeline.py, bench_video_ocr.py, compare_models.py
 ```
 
 ## Plan and progress
@@ -1087,6 +1108,22 @@ First **finish the app** (each step committed and pushed; no new release unless 
   paused re-sends `SetPaused(True)`; (4) a region pick on another source while a card start
   waits restarts on the new source; (5) renaming the profile updates the Live summary and the
   Models budget line; (6) a profile switch keeps the Appearance preview's sample text.
+- 2026-11-14 (user report: "LiveSubs does not read some lines at all"; the user supplied 20 GTA VI
+  clips, low quality on purpose: "read them without errors even at this quality"): the cause was
+  the absolute color threshold — glyph cores measured 145-190, the old mask wanted >= 180, so whole
+  lines were never seen. Built a ground truth by eye (4 fps scans by two readers, disagreements
+  and doubtful states checked on frames; 294 lines; stacked rows as separate lines; watermark-
+  covered lines dropped; "I"/"l" identical in the font — the game itself writes "Hllo") and a
+  read-loop simulator. Measured steps, all on the same 294 lines: old 18.7 % exact / 148 never
+  read; tone + top-hat binary mask 57.8 %; grey OCR image in text rows + glyph-height scaling
+  78.9 %; + two OCR images with the spell-checker scorer + best-read stabilizer **84.0 %, 22
+  never read** (production code). Rejected on the way: plain gray (64 % per frame, junk from
+  HUD/watermarks), min channel as the OCR source (kills yellow), a third OCR image with the old
+  preprocessing (the scorer then preferred partial reads), stabilizer similarity 85 (worse).
+  Old profiles: `color_tolerance` / `min_local_contrast` renamed to `tone_tolerance` /
+  `min_contrast` on purpose, so saved absolute thresholds (the user's gta-6: 76 / 70) fall back
+  to the new defaults; colors are kept. Inspector: the bottom image is now the found-text mask.
+  Cost: two OCR reads per read (~2x OCR time) and ~2x preprocessing time.
 - 2026-11-07 (user): no brand names (other OS makers) anywhere — UI, READMEs, code, docs.
   Theme labels "Koyu", "Açık", "Windows'a göre açık/koyu" (Vice, Sade koyu unchanged); ids and
   token files `modern` / `modern_light`. An old config's theme id falls back to the default

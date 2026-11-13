@@ -743,7 +743,7 @@ def test_inspector_edits_vision_settings(qtbot: QtBot) -> None:
     qtbot.addWidget(inspector)
     with qtbot.waitSignal(inspector.vision_changed):
         inspector.tolerance.slider.setValue(90)
-    assert vision.color_tolerance == 90
+    assert vision.tone_tolerance == 90
     inspector.yellow.setChecked(True)
     assert vision.text_colors == ["#FFFFFF", "#FFFF00"]
     inspector.white.setChecked(False)
@@ -768,7 +768,7 @@ def test_calibration_drives_debug_frames_and_vision(window: MainWindow) -> None:
 
     window._inspector.tolerance.slider.setValue(100)
     assert isinstance(engine.sent[-1], SetVision)
-    assert engine.sent[-1].vision.color_tolerance == 100
+    assert engine.sent[-1].vision.tone_tolerance == 100
     window.set_calibration(False)
     assert SetDebug(False) in engine.sent
     assert not window._inspector.isVisible()

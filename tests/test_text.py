@@ -3,6 +3,7 @@ import pytest
 from livesubs.engine.text import filters, sentences
 from livesubs.engine.text.filters import Reject
 from livesubs.engine.text.normalize import clean, key
+from livesubs.engine.text.quality import ReadScorer
 from livesubs.engine.text.stabilizer import (
     LineCleared,
     LineConfirmed,
@@ -200,6 +201,47 @@ def test_variants_never_replace_the_confirmed_line(clock: Clock) -> None:
         stab.update(Change.SAME, 1000, clock(0.6))
         assert stab.on_read(variant, clock()) is None
     assert stab.current == LINE
+
+
+GARBLED = "Shitl my truck0 M-my gas!"  # letters mixed with digits: a misread
+CLEAN = "Shit, my truck! M-my gas!"
+
+
+def test_with_a_scorer_the_cleanest_agreeing_read_is_confirmed(clock: Clock) -> None:
+    stab = Stabilizer(scorer=ReadScorer().score)
+    stab.update(Change.APPEARED, 1000, clock())
+    assert stab.on_read(CLEAN, clock()) is None
+    stab.update(Change.SAME, 1000, clock(0.06))
+    assert stab.on_read(GARBLED, clock()) == LineConfirmed(CLEAN)  # not the latest read
+
+
+def test_a_clearly_cleaner_read_corrects_the_confirmed_line(clock: Clock) -> None:
+    """OCR garbles a line differently frame to frame; the line converges on its best read."""
+    stab = Stabilizer(scorer=ReadScorer().score)
+    appear_and_confirm(stab, clock, GARBLED)
+    stab.update(Change.SAME, 1000, clock(0.6))
+    assert stab.on_read(CLEAN, clock()) == LineUpgraded(CLEAN, previous=GARBLED)
+    stab.update(Change.SAME, 1000, clock(0.6))
+    assert stab.on_read(GARBLED, clock()) is None  # never back to a worse read
+    assert stab.current == CLEAN
+
+
+def test_reads_scoring_alike_never_flicker(clock: Clock) -> None:
+    stab = Stabilizer(scorer=ReadScorer().score)
+    appear_and_confirm(stab, clock, LINE)
+    for variant in ("Who is this guy? You knew, besides Brain's old cellmate.", LINE):
+        stab.update(Change.SAME, 1000, clock(0.6))
+        assert stab.on_read(variant, clock()) is None
+    assert stab.current == LINE
+
+
+def test_a_cleaner_read_after_a_mask_change_corrects_the_line(clock: Clock) -> None:
+    stab = Stabilizer(scorer=ReadScorer().score)
+    appear_and_confirm(stab, clock, GARBLED)
+    stab.update(Change.CHANGED, 900, clock(0.3))
+    stab.on_read(CLEAN, clock())
+    stab.update(Change.SAME, 900, clock(0.06))
+    assert stab.on_read(CLEAN, clock()) == LineUpgraded(CLEAN, previous=GARBLED)
 
 
 def test_changed_line_keeps_the_old_one_until_confirmed(clock: Clock) -> None:

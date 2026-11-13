@@ -4,7 +4,9 @@ Runs on its own thread inside the engine process and reports everything through 
 (``core.messages`` events). The loop runs at the profile's fps, and every ``fast_reread_s`` while
 a new line waits for its confirming read. Frames are only processed when they are new, or when
 the stabilizer wants another read. OCR runs inline (10-20 ms); translation runs on the
-orchestrator's thread, so a slow model never delays reading the next subtitle. The model warms up on
+orchestrator's thread, so a slow model never delays reading the next subtitle. Each read OCRs both
+of the preprocessor's images and keeps the one that looks more like English (``text.quality``, with
+Windows' spell checker). The model warms up on
 a side thread while reading already runs; the newest line read meanwhile is translated once the
 model is ready. A subtitle that continues the previous one's sentence (``text.sentences``) is sent
 as an upgrade of that line: the whole sentence is translated and replaces the first piece's
@@ -47,6 +49,7 @@ from livesubs.engine.ocr.language import english_ocr_language
 from livesubs.engine.ocr.winrt_ocr import WinRtOcr
 from livesubs.engine.text import filters, sentences
 from livesubs.engine.text.normalize import clean
+from livesubs.engine.text.quality import ReadScorer
 from livesubs.engine.text.stabilizer import (
     Event as LineEvent,
 )
@@ -72,6 +75,7 @@ from livesubs.engine.translate.orchestrator import (
 )
 from livesubs.engine.vision.change import Change, ChangeDetector
 from livesubs.engine.vision.preprocess import Preprocessed, preprocess
+from livesubs.platform.spellcheck import open_spell_checker
 
 log = logging.getLogger(__name__)
 
@@ -185,6 +189,7 @@ class Pipeline:
     def _run(self) -> None:
         source: FrameSource | None = None
         cache: TranslationCache | None = None
+        spell = None
         try:
             self._emit(StateChanged(EngineState.STARTING))
             source = self._open(self._start.profile.source)
@@ -208,7 +213,8 @@ class Pipeline:
                 threading.Thread(
                     target=self._prepare_translation, args=(cache,), name="warm-up", daemon=True
                 ).start()
-            self._loop(source, ocr)
+            spell = open_spell_checker()  # COM object: created and used on this thread only
+            self._loop(source, ocr, ReadScorer(spell.misspelled if spell else None))
         except SourceLostError as exc:
             self._fatal(ErrorKind.SOURCE_LOST, str(exc))
         except Exception as exc:
@@ -224,6 +230,8 @@ class Pipeline:
                 source.close()
             if cache is not None:
                 cache.close()
+            if spell is not None:
+                spell.close()
             self._emit(StateChanged(EngineState.STOPPED))
 
     def _open(self, spec: Source) -> FrameSource | None:
@@ -276,10 +284,10 @@ class Pipeline:
         if waiting is not None:
             orchestrator.submit(*waiting)
 
-    def _loop(self, source: FrameSource, ocr: WinRtOcr) -> None:
+    def _loop(self, source: FrameSource, ocr: WinRtOcr, scorer: ReadScorer) -> None:
         profile = self._start.profile
         tick = 1.0 / profile.capture.fps
-        detector, stabilizer = ChangeDetector(), Stabilizer()
+        detector, stabilizer = ChangeDetector(), Stabilizer(scorer=scorer.score)
         last_timestamp = -1.0
         paused = False
         while not self._stop.wait(
@@ -320,13 +328,13 @@ class Pipeline:
                 self._on_line(decision.event, 0.0)
             if not decision.read:
                 continue
-            read = ocr.recognize(processed.ocr_image)
-            self._last_read = clean(read.text)
+            text, ocr_ms = read_subtitle(ocr, processed, scorer)
+            self._last_read = clean(text)
             reason = filters.check(self._last_read).reason
             self._last_rejected = str(reason) if reason else ""
-            event = stabilizer.on_read(read.text, time.monotonic())
+            event = stabilizer.on_read(text, time.monotonic())
             if event is not None:
-                self._on_line(event, read.elapsed_ms)
+                self._on_line(event, ocr_ms)
 
     def _debug_frame(
         self, region: np.ndarray, processed: Preprocessed, change: Change
@@ -335,7 +343,7 @@ class Pipeline:
             region = cv2.cvtColor(region, cv2.COLOR_BGRA2BGR)
         return DebugFrame(
             region=_shrink(region),
-            ocr_input=_shrink(processed.ocr_image),
+            ocr_input=_shrink(cv2.bitwise_not(processed.mask)),  # what was found as text
             text_fraction=processed.text_fraction,
             change=str(change),
             last_read=self._last_read,
@@ -409,6 +417,12 @@ class Pipeline:
 
     def _fatal(self, kind: ErrorKind, message: str) -> None:
         self._emit(EngineError(kind, message, fatal=True))
+
+
+def read_subtitle(ocr: WinRtOcr, processed: Preprocessed, scorer: ReadScorer) -> tuple[str, float]:
+    """OCR every input of ``processed``; ``(the cleanest read, total OCR ms)``."""
+    reads = [ocr.recognize(image) for image in processed.ocr_inputs]
+    return scorer.best([read.text for read in reads]), sum(read.elapsed_ms for read in reads)
 
 
 def _shrink(image: np.ndarray) -> np.ndarray:

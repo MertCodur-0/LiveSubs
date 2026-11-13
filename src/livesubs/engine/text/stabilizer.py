@@ -8,8 +8,12 @@ now) and every OCR result to ``on_read`` (which may emit an event):
   re-read is due ``fast_reread_s`` later instead of at the next tick.
 - While the same line stays up it is re-read: at once when its text mask grows (glyphs that a
   bright background hid become visible), otherwise every ``upgrade_interval_s``. A read that adds
-  words to the confirmed text, confirmed the same way, replaces it (``LineUpgraded``). Other
-  variations are ignored, so the overlay never flickers between readings.
+  words to the confirmed text, confirmed the same way, replaces it (``LineUpgraded``).
+- With a ``scorer`` (``text.quality``), the best-scoring of the agreeing reads is confirmed, not
+  the latest, and a later read of the same line that scores ``correct_margin`` higher corrects the
+  confirmed text (also ``LineUpgraded``): OCR garbles a line differently from frame to frame
+  ("Heyl Get outl" / "Hey! Get out!"), so the line converges on its cleanest read. Without a
+  scorer, or within the margin, other variations are ignored, so the overlay never flickers.
 - ``LineConfirmed.repeat`` marks a line that matches the previous one (it reappeared after a
   brief gap), so the consumer can reuse the shown translation.
 
@@ -18,6 +22,7 @@ All times are ``time.monotonic()`` seconds passed in by the caller.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 
@@ -67,6 +72,7 @@ def is_upgrade(new: str, current: str, min_kept: float = 0.85) -> bool:
 @dataclass
 class _Candidate:
     text: str
+    score: float = 0.0
     reads: int = 1
 
 
@@ -77,8 +83,11 @@ class Stabilizer:
     fast_reread_s: float = 0.05
     upgrade_interval_s: float = 0.5
     mask_growth: float = 0.15  # relative growth of text pixels that triggers a re-read
+    scorer: Callable[[str], float] | None = None  # read quality, higher = better
+    correct_margin: float = 0.5  # how much better a read must score to correct the line
 
     _current: str | None = field(default=None, init=False)  # confirmed line on screen
+    _current_score: float = field(default=0.0, init=False)
     _previous: str | None = field(default=None, init=False)  # last confirmed line, kept on clear
     _pending: bool = field(default=False, init=False)  # a new line awaits confirmation
     _candidate: _Candidate | None = field(default=None, init=False)
@@ -129,27 +138,42 @@ class Stabilizer:
         if not filters.check(text).ok:
             self._candidate = None
             return None
+        score = self.scorer(text) if self.scorer else 0.0
         if not self._pending and self._current is not None and not is_upgrade(text, self._current):
-            self._candidate = None  # just another reading of the confirmed line
-            return None
-        if self._candidate is not None and self._similar(text, self._candidate.text):
-            self._candidate = _Candidate(text, self._candidate.reads + 1)
+            self._candidate = None  # another reading of the confirmed line: maybe a cleaner one
+            return self._correct(text, score) if self._similar(text, self._current) else None
+        candidate = self._candidate
+        if candidate is not None and self._similar(text, candidate.text):
+            # Agreeing reads: keep the best one (the latest when nothing scores reads).
+            best = (text, score) if score >= candidate.score else (candidate.text, candidate.score)
+            self._candidate = _Candidate(*best, reads=candidate.reads + 1)
         else:
-            self._candidate = _Candidate(text)
+            self._candidate = _Candidate(text, score)
         if self._candidate.reads < self.required_reads:
             return None
 
-        confirmed, self._candidate = self._candidate.text, None
+        confirmed, score, self._candidate = self._candidate.text, self._candidate.score, None
         if self._pending:
             self._pending = False
             if self._current is not None and self._similar(confirmed, self._current):
-                return None  # the mask changed, the text did not: the line never left
+                # The mask changed, the text did not: the line never left.
+                return self._correct(confirmed, score)
             repeat = self._previous is not None and self._similar(confirmed, self._previous)
             self._current = self._previous = confirmed
+            self._current_score = score
             return LineConfirmed(confirmed, repeat=repeat)
-        previous, self._current = self._current, confirmed
-        self._previous = confirmed
-        return LineUpgraded(confirmed, previous=previous or "")
+        return self._replace(confirmed, score)
+
+    def _correct(self, text: str, score: float) -> Event | None:
+        """A read of the line on screen replaces it when it scores clearly better."""
+        if self.scorer is None or score < self._current_score + self.correct_margin:
+            return None
+        return self._replace(text, score)
+
+    def _replace(self, text: str, score: float) -> LineUpgraded:
+        previous, self._current, self._current_score = self._current, text, score
+        self._previous = text
+        return LineUpgraded(text, previous=previous or "")
 
     def _similar(self, a: str, b: str) -> bool:
         return fuzz.ratio(key(a), key(b)) >= self.similarity
