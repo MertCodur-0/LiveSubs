@@ -203,7 +203,8 @@ src/livesubs/
 
 ## Credits
 
-- Fonts: [Inter](https://rsms.me/inter/), [Audiowide](https://fonts.google.com/specimen/Audiowide)
+- Fonts: [Inter](https://rsms.me/inter/), [Manrope](https://fonts.google.com/specimen/Manrope) (the
+  translation overlay), [Audiowide](https://fonts.google.com/specimen/Audiowide)
   and [Monoton](https://fonts.google.com/specimen/Monoton) (the last two in the Vice theme), all
   under the SIL Open Font License (texts in `src/livesubs/assets/fonts`).
 - Icons and header art are original. LiveSubs is not affiliated with any game or publisher.

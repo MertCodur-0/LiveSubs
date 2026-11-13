@@ -116,7 +116,9 @@ class OverlaySettings(SettingsModel):
     # CUSTOM placement (and video devices): normalized to ``monitor_device`` (else the primary).
     rect: NormRect = NormRect(x=0.1, y=0.62, width=0.8, height=0.14)
     style: OverlayStyle = OverlayStyle.CLASSIC
-    font_family: str = "Inter"  # bundled (assets/fonts); any installed font works
+    # Bundled (assets/fonts); any installed font works. Manrope: the closest open font to the
+    # in-game subtitles the user compared it with (2026-11-14).
+    font_family: str = "Manrope"
     font_size_pt: int = Field(26, ge=8, le=96)
     text_color: HexColor = "#FFFFFF"
     outline_color: HexColor = "#000000"

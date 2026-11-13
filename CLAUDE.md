@@ -426,7 +426,8 @@ font size, text color, outline/shadow, background opacity, max lines shown.
   VICE: white text, pink 2 px outline + a 1.5 px cyan halo (`VICE_HALO`), box 45 %; the small
   English original keeps a black outline (neon edges on small text were hard to read — a 3 px
   pink outline was too, both rendered and judged). BOX: no outline, no shadow, box 80 %.
-  Default overlay font **Inter** (bundled); old profiles keep their saved font.
+  Default overlay font **Manrope** (bundled, static Regular + Bold cut from the variable font;
+  was Inter until 2026-11-14); old profiles keep their saved font.
 
 ### Main window
 
@@ -550,7 +551,7 @@ Duraklatıldı / Ollama kapalı / Durdu, `_update_status`). Selected button: fai
   (`assets/icons/*.svg`, drawn black, 20 px viewBox, 1.6 px strokes: live, appearance,
   profiles, models, settings, info, warning) tinted with `SourceIn` to a theme color.
   Fonts in `src/livesubs/assets/fonts/` (OFL texts next to them): **Inter** (body, modern
-  themes, overlay), **Audiowide** and **Monoton** (Vice). All cover Turkish (test).
+  themes), **Manrope** (overlay), **Audiowide** and **Monoton** (Vice). All cover Turkish (test).
   Own SVG art in `src/livesubs/assets/`: `icon.svg` (blue rounded square with subtitle bars,
   2026-10-30; replaced the sunset/palm icon), `header.svg` (Vice's banner, drawn dimmed at the
   top of the sidebar and faded into it so the name stays readable), `arrow_up/down.svg`
@@ -1091,3 +1092,11 @@ First **finish the app** (each step committed and pushed; no new release unless 
   token files `modern` / `modern_light`. An old config's theme id falls back to the default
   (dark). Only the phone page's standard iOS `<meta name="apple-mobile-web-app-capable">` stays
   (needed for full screen on an iPhone/iPad).
+- 2026-11-14 (user): **overlay font -> Manrope.** The user asked which font the in-game
+  subtitles in their gameplay videos use (burned in, no subtitle track). Ten open fonts were
+  rendered at the same line width next to a 1080p crop: Manrope matched best (x-height, open
+  "g", pointed "w", spacing), then Figtree and Red Hat Display; Montserrat looked close at
+  first but its x-height is clearly smaller. The original is most likely a custom font, so this
+  is a look-alike. Bundled as static Regular/Bold (fontTools instancer, wght 400/700) - the
+  overlay draws bold and a variable font's weights are a risk in the embedded build. The
+  user's two saved profiles were switched from Inter too.

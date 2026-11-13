@@ -200,6 +200,7 @@ atlanır.
 ## Teşekkürler
 
 - Yazı tipleri: [Inter](https://rsms.me/inter/),
+  [Manrope](https://fonts.google.com/specimen/Manrope) (çeviri katmanında),
   [Audiowide](https://fonts.google.com/specimen/Audiowide) ve
   [Monoton](https://fonts.google.com/specimen/Monoton) (son ikisi Vice temasında), hepsi
   SIL Open Font License ile (metinleri `src/livesubs/assets/fonts` içinde).

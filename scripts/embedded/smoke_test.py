@@ -27,7 +27,7 @@ def check() -> list[str]:
     theme.prepare(app)
     for name in theme.CHOICES:
         theme.apply_theme(name)  # template, token files, bundled fonts, system scheme
-    missing = {"Inter", "Audiowide", "Monoton"} - set(QFontDatabase.families())
+    missing = {"Inter", "Manrope", "Audiowide", "Monoton"} - set(QFontDatabase.families())
     if missing:
         raise RuntimeError(f"Bundled fonts missing: {sorted(missing)}")
     if app_icon().isNull() or not theme.asset("icon.ico").is_file():

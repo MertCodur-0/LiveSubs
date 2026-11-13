@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QFontDatabase, QRawFont
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QFontInfo, QRawFont
 from PySide6.QtWidgets import QApplication
 from pytestqt.qtbot import QtBot
 
@@ -100,13 +100,25 @@ def test_template_assets_exist() -> None:
 def test_bundled_fonts_load_and_cover_turkish(qapp: QApplication) -> None:
     theme.load_fonts()
     families = set(QFontDatabase.families())
-    assert {"Inter", "Audiowide", "Monoton"} <= families
+    assert {"Inter", "Manrope", "Audiowide", "Monoton"} <= families
     for path in (theme.ASSETS / "fonts").glob("*.ttf"):
         font = QRawFont(str(path), 20)
         # The int overload: PySide maps non-ASCII str arguments wrongly.
         assert all(font.supportsCharacter(ord(c)) for c in TURKISH), path.name
     licenses = {p.name for p in (theme.ASSETS / "fonts").glob("OFL-*.txt")}
-    assert licenses == {"OFL-inter.txt", "OFL-audiowide.txt", "OFL-monoton.txt"}
+    assert licenses == {"OFL-inter.txt", "OFL-manrope.txt", "OFL-audiowide.txt", "OFL-monoton.txt"}
+
+
+def test_default_overlay_font_is_bundled_with_regular_and_bold(qapp: QApplication) -> None:
+    theme.load_fonts()
+    family = OverlaySettings().font_family
+    assert family == "Manrope"
+    for bold in (False, True):
+        font = QFont(family)
+        font.setBold(bold)
+        info = QFontInfo(font)
+        assert info.family() == family  # no silent fallback to another font
+        assert info.bold() == bold
 
 
 @pytest.mark.parametrize("name", theme.THEMES)
