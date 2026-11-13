@@ -4,7 +4,7 @@ import json
 import pytest
 
 from livesubs.web.feed import WebFeed
-from livesubs.web.server import WebServer, lan_address, render_page
+from livesubs.web.server import FONT, WebServer, lan_address, render_page
 
 
 def texts(feed: WebFeed) -> tuple[list[str], str | None]:
@@ -109,10 +109,13 @@ def _next_event(response: http.client.HTTPResponse) -> dict:
 def test_serves_the_page_and_the_font(server: WebServer) -> None:
     page = _get(server, "/")
     assert page.status == 200
-    assert b"EventSource" in page.read()
-    font = _get(server, "/font.ttf")
+    body = page.read()
+    assert b"EventSource" in body
+    assert b'url("/manrope.ttf")' in body  # the page's font is the one served
+    font = _get(server, "/manrope.ttf")
     assert font.status == 200
-    assert len(font.read()) > 10_000
+    assert font.read() == FONT.read_bytes()
+    assert FONT.name == "Manrope-SemiBold.ttf"  # same family as the overlay
     assert _get(server, "/../config.json").status == 404
 
 

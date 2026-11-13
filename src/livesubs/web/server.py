@@ -25,7 +25,7 @@ from livesubs.web.feed import WebFeed
 log = logging.getLogger(__name__)
 
 STATIC = Path(__file__).parent / "static"
-FONT = Path(__file__).parents[1] / "assets" / "fonts" / "Inter-SemiBold.ttf"
+FONT = Path(__file__).parents[1] / "assets" / "fonts" / "Manrope-SemiBold.ttf"
 KEEPALIVE_S = 15.0  # a comment line now and then keeps phones and routers from dropping us
 CLIENT_BACKLOG = 4  # snapshots waiting for a slow client; only the newest matters
 _PLACEHOLDER = re.compile(r"\{\{([\w.]+)\}\}")
@@ -163,7 +163,7 @@ class _Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         if path == "/":
             self._send(self.app._page, "text/html; charset=utf-8")
-        elif path == "/font.ttf":
+        elif path == "/manrope.ttf":
             self._send(FONT.read_bytes(), "font/ttf", cache=True)
         elif path == "/events":
             self._stream()

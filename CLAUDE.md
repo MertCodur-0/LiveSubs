@@ -487,7 +487,7 @@ Duraklatıldı / Ollama kapalı / Durdu, `_update_status`). Selected button: fai
   anti-cheat friendly, no admin). Defaults: F8 calibration, overlay show/hide, pause/resume.
 - Web output (step 17, done 2026-10-23; page design by the user): `web/server.py` — stdlib
   `ThreadingHTTPServer` in the UI process (0.0.0.0, `config.web.port`, default 8765), routes `/`
-  (page), `/font.ttf` (bundled Inter SemiBold), `/events` (SSE, keep-alive comment every 15 s).
+  (page), `/manrope.ttf` (bundled Manrope SemiBold, like the overlay; Inter until 2026-11-14), `/events` (SSE, keep-alive comment every 15 s).
   `web/feed.py` `WebFeed` holds the state (current line + 30 older ones, keyed per page, line ids
   forgotten on a new Start); **every change sends the whole state**, so a reconnecting phone is
   right at once and the page only diffs it. Rules: new line -> current moves up; upgrade (same
@@ -1100,3 +1100,5 @@ First **finish the app** (each step committed and pushed; no new release unless 
   is a look-alike. Bundled as static Regular/Bold (fontTools instancer, wght 400/700) - the
   overlay draws bold and a variable font's weights are a risk in the embedded build. The
   user's two saved profiles were switched from Inter too.
+  Same day: the phone page too (static SemiBold cut, served as `/manrope.ttf` - a new URL,
+  since `/font.ttf` was cached for a day on the tablet).
