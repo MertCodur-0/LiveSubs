@@ -6,7 +6,8 @@
   0.57,
   0.285
  ],
- "text_colors": [
+ "holdout": ["v05", "v13", "v14", "v17", "v20"],
+  "text_colors": [
   "#FFFFFF",
   "#FFFF00"
  ],

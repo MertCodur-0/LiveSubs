@@ -49,6 +49,7 @@ from livesubs.core.profiles import Source, VisionSettings
 from livesubs.engine.capture import FrameSource, SourceLostError, SourceUnavailableError
 from livesubs.engine.capture import open_source as default_open_source
 from livesubs.engine.ocr.language import english_ocr_language
+from livesubs.engine.ocr.ppocr import LineReader, open_line_reader
 from livesubs.engine.ocr.winrt_ocr import OcrResult, WinRtOcr
 from livesubs.engine.text import filters
 from livesubs.engine.text.normalize import clean
@@ -285,11 +286,13 @@ class Pipeline:
         profile = self._start.profile
         tick = 1.0 / profile.capture.fps
         detector = ChangeDetector()
+        backoff = EmptyReadBackoff()
         stabilizer = Stabilizer(
             merge_split_sentences=profile.translation.merge_split_sentences, scorer=scorer.score
         )
         last_timestamp = -1.0
         paused = False
+        lines = open_line_reader()  # None: Windows OCR reads alone
         while not self._stop.wait(
             stabilizer.fast_reread_s if stabilizer.awaiting_confirmation else tick
         ):
@@ -301,6 +304,7 @@ class Pipeline:
                 self._region_changed = False
                 last_timestamp = -1.0  # process the current frame again, with the new settings
                 detector.reset()  # a new region: whatever was read before is gone
+                backoff.reset()
                 for event in stabilizer.update(Change.CLEARED, 0, time.monotonic()).events:
                     self._on_line(event, 0.0)
             if paused:
@@ -320,12 +324,15 @@ class Pipeline:
             if self._debug and now - self._last_debug >= 1 / DEBUG_FPS:
                 self._last_debug = now
                 self._emit(self._debug_frame(region, processed, change))
-            decision = stabilizer.update(change, cv2.countNonZero(processed.mask), now)
+            pixels = cv2.countNonZero(processed.mask)
+            decision = stabilizer.update(change, pixels, now)
             for event in decision.events:
                 self._on_line(event, 0.0)
-            if not decision.read:
+            idle = not stabilizer.current and not stabilizer.awaiting_confirmation
+            if not decision.read or backoff.skip(pixels, now, idle=idle):
                 continue
-            text, ocr_ms, rows = read_subtitle(ocr, processed, scorer)
+            text, ocr_ms, rows = read_subtitle(ocr, processed, scorer, lines, region)
+            backoff.on_read(bool(rows), pixels, now, idle=idle)
             self._last_read = clean(text)
             reason = filters.check(self._last_read).reason
             self._last_rejected = str(reason) if reason else ""
@@ -402,11 +409,62 @@ class Pipeline:
         self._emit(EngineError(kind, message, fatal=True))
 
 
+class EmptyReadBackoff:
+    """Fewer OCR reads while the region holds scenery only.
+
+    The text mask picks up scenery (signs, foliage, lights) as glyphs, and every frame whose mask
+    moved then asks for a read that finds nothing: half of all reads on the game clips. After a
+    read that found nothing while no line was on screen or waiting, further reads wait up to
+    ``hold_s`` - unless the mask grows by more than ``growth`` since that read (a subtitle that
+    appears adds a row of glyphs). A line on screen or waiting for confirmation is never slowed
+    down."""
+
+    def __init__(self, hold_s: float = 0.5, growth: float = 0.15) -> None:
+        self.hold_s = hold_s
+        self.growth = growth
+        self._empty_at: float | None = None  # last read that found nothing while idle
+        self._empty_pixels = 0
+
+    def skip(self, text_pixels: int, now: float, *, idle: bool) -> bool:
+        """``idle``: no line on screen and none waiting (``Stabilizer.current`` /
+        ``awaiting_confirmation``)."""
+        return (
+            idle
+            and self._empty_at is not None
+            and now - self._empty_at < self.hold_s
+            and text_pixels <= self._empty_pixels * (1 + self.growth)
+        )
+
+    def on_read(self, found: bool, text_pixels: int, now: float, *, idle: bool) -> None:
+        if idle and not found:
+            self._empty_at, self._empty_pixels = now, text_pixels
+        else:
+            self._empty_at = None
+
+    def reset(self) -> None:
+        self._empty_at = None
+
+
 def read_subtitle(
-    ocr: WinRtOcr, processed: Preprocessed, scorer: ReadScorer
+    ocr: WinRtOcr,
+    processed: Preprocessed,
+    scorer: ReadScorer,
+    lines: LineReader | None = None,
+    region: np.ndarray | None = None,
 ) -> tuple[str, float, list[Row]]:
-    """OCR every input of ``processed``; ``(the cleanest read, total OCR ms, its rows top to
-    bottom)`` - the rows are the subtitle lines the stabilizer tracks one by one."""
+    """OCR the subtitle; ``(the read, total OCR ms, its rows top to bottom)`` - the rows are the
+    subtitle lines the stabilizer tracks one by one.
+
+    With a PP-OCR ``lines`` reader and the raw ``region`` its read is used alone (it read 94 % of
+    the evaluation frames exactly, Windows' best of two 77 %; letting the scorer pick between
+    them lost 2-5 points). When it finds no text, or without it, Windows OCR reads every input
+    of ``processed`` and the cleanest read is kept: every input is read even when the first
+    finds nothing (on short, sparse lines over bright ground the grey image often reads nothing
+    and the mask image reads the line)."""
+    if lines is not None and region is not None:
+        read = lines.recognize(region, processed.mask)
+        if read.lines:
+            return read.text, read.elapsed_ms, rows_of(read, processed.mask.shape[1])
     images = processed.ocr_inputs
     reads = [ocr.recognize(image) for image in images]
     best = max(range(len(reads)), key=lambda i: scorer.score(reads[i].text))  # first on a tie

@@ -49,6 +49,7 @@ def check() -> list[str]:
     from livesubs.device.preview import PreviewWindow
     from livesubs.engine.capture.shared_frames import SharedFrameReader, SharedFrameWriter
     from livesubs.engine.capture.video_device import VideoDeviceCapture  # noqa: F401
+    from livesubs.engine.ocr.ppocr import open_line_reader
     from livesubs.engine.ocr.winrt_ocr import WinRtOcr
     from livesubs.engine.process import EngineProcess  # noqa: F401
     from livesubs.platform.audio_endpoints import default_output_id
@@ -76,6 +77,9 @@ def check() -> list[str]:
     default_output_id()
 
     WinRtOcr().recognize(np.full((40, 200), 255, np.uint8))
+    lines = open_line_reader()  # onnxruntime + the bundled PP-OCR model
+    assert lines is not None
+    assert lines.read_line(np.full((48, 200, 3), 255, np.uint8)) == ""
     checker = open_spell_checker()  # judges OCR reads; None where Windows has no en-US one
     assert checker is None or checker.misspelled("Heyl there") == ["Heyl"]
     assert b"EventSource" in render_page() and FONT.is_file()  # package data of the phone page

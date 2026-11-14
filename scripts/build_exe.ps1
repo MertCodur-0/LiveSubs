@@ -40,7 +40,10 @@ Remove-Item (Join-Path $dist "python.exe")
 #    site-packages' .pth files and sitecustomize (the launcher).
 Set-Content -Encoding ascii (Join-Path $dist "$pyTag._pth") "$pyTag.zip`r`n.`r`nLib\site-packages`r`n`r`nimport site"
 
-# 4. The app and its runtime dependencies (no dev tools), as prebuilt wheels.
+# 4. The app and its runtime dependencies (no dev tools), as prebuilt wheels; first the PP-OCR
+#    model it ships as package data (downloaded once, checksum verified).
+& $python (Join-Path $PSScriptRoot "get_ocr_model.py")
+if ($LASTEXITCODE -ne 0) { throw "OCR model download failed" }
 $sitePackages = Join-Path $dist "Lib\site-packages"
 & $python -m pip install --quiet --disable-pip-version-check --no-warn-script-location `
     --only-binary=:all: --target $sitePackages $root

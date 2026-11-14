@@ -43,6 +43,8 @@ dependencies = [
     "rapidfuzz>=3.9",
     "qrcode>=8.0",
     "platformdirs>=4.2",
+    # PP-OCR line reader (engine/ocr/ppocr.py); without it Windows OCR reads alone.
+    "onnxruntime>=1.20",
 ]
 
 [project.optional-dependencies]
@@ -75,6 +77,8 @@ livesubs = [
     "**/*.html",
     "**/*.mp4",
     "assets/fonts/*.txt",  # font licenses (OFL)
+    "assets/ocr/*.onnx",  # fetched by scripts/get_ocr_model.py, not in git
+    "assets/ocr/*.txt",
 ]
 
 [tool.ruff]

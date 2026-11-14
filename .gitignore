@@ -24,3 +24,9 @@ desktop.ini
 tests/samples/*.png
 tests/samples/*.jpg
 tests/samples/videos/
+
+# OCR models are downloaded (scripts/get_ocr_model.py), never committed
+src/livesubs/assets/ocr/*.onnx
+
+# Claude Code worktrees and settings
+.claude/
