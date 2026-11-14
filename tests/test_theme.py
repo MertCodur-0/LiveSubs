@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QFont, QFontDatabase, QFontInfo, QRawFont
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QFontInfo, QGuiApplication, QRawFont
 from PySide6.QtWidgets import QApplication
 from pytestqt.qtbot import QtBot
 
@@ -129,10 +129,12 @@ def test_apply_theme_restyles_the_app(qapp: QApplication, name: str) -> None:
         assert qapp.palette().window().color() == applied.color("window")
         assert applied.tokens["accent"] in qapp.styleSheet()
         assert qapp.font().family() == theme.BODY_FONT
-        # A forced theme also sets Qt's scheme (the Windows title bar follows it).
-        light = name in theme.LIGHT_THEMES
-        expected = Qt.ColorScheme.Light if light else Qt.ColorScheme.Dark
-        assert qapp.styleHints().colorScheme() == expected
+        # A forced theme also sets Qt's scheme (the Windows title bar follows it). The offscreen
+        # platform (CI) has no color scheme at all: it always reports Unknown.
+        if QGuiApplication.platformName() != "offscreen":
+            light = name in theme.LIGHT_THEMES
+            expected = Qt.ColorScheme.Light if light else Qt.ColorScheme.Dark
+            assert qapp.styleHints().colorScheme() == expected
     finally:
         theme.apply_theme(theme.DEFAULT_CHOICE)
 
