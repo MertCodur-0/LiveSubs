@@ -728,7 +728,7 @@ def test_edits_the_pipeline_does_not_use_do_not_restart_it(window: MainWindow) -
 def test_a_restart_while_paused_stays_paused(window: MainWindow) -> None:
     engine = _running(window)
     window.handle(StateChanged(EngineState.PAUSED))
-    window.settings.fps.setValue(window._profile.capture.fps + 5)
+    window.settings.fps.setValue(window._profile.capture.fps - 5)
     window._apply_timer.timeout.emit()
     assert isinstance(engine.sent[0], StartPipeline)
     assert engine.sent[-1] == SetPaused(True)

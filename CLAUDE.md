@@ -127,7 +127,7 @@ UI process (PySide6)                                  Engine process (multiproce
   play sample screenshots as a scripted video).
 - Region stored **normalized (0–1) to the source's frame space** (window client area / monitor /
   video frame), converted to physical pixels with DPI awareness.
-- Capture FPS configurable, default 10. WGC yellow border disabled where Windows 11 allows it.
+- Capture FPS configurable, default 30 (was 10 until 2026-11-14). WGC yellow border disabled where Windows 11 allows it.
 - Preprocessing (`engine/vision/preprocess.py`, rewritten 2026-11-14, see decision log): **no
   absolute color threshold** — games draw "white" subtitles light grey and video/capture/dark
   scenes dim them (glyph cores 145-190 measured). Per subtitle color a **tone** map: brightness
@@ -237,7 +237,7 @@ Designed from the start for three source kinds; video device lands in phase 2.
   WGC frames: BGRA, cropped to the window **client area** (WGC itself captures title bar and
   borders: frame = DWM extended frame bounds), stamped with WGC's composition time.
 - Capture runs up to `max_fps` (default 30, via `minimum_update_interval`); WGC delivers only on
-  content change. The pipeline tick (profile fps, default 10) is separate.
+  content change. The pipeline tick (profile fps, default 30) is separate.
 
 #### WGC pitfalls (windows-capture 2.0.1, reproduced 2026-10-21)
 
@@ -1152,6 +1152,18 @@ First **finish the app** (each step committed and pushed; no new release unless 
   token files `modern` / `modern_light`. An old config's theme id falls back to the default
   (dark). Only the phone page's standard iOS `<meta name="apple-mobile-web-app-capable">` stays
   (needed for full screen on an iPhone/iPad).
+- 2026-11-15: **gemma4:e4b-it-qat measured** (user: wants a model that fits 8 GB fully and
+  translates faster). Manifest: text 5.15 GB + projector 0.99 GB; text-only copy
+  `gemma4-text:e4b-it-qat` made with `client.create_text_only`. `/api/ps` reports ~3 GB, fully
+  on the GPU, for both (the copy gains nothing here: the model never overflowed). GTA VI pack,
+  60 lines, seed 6, back to back: e4b median **~250 ms** (p90 ~350, max ~515) plain and with
+  the pack; full e4b the same; `gemma4-text:26b` in the same run 1051 / 1166 ms (39 % on the
+  GPU this session; slower than the 867 ms of 2026-10-24). Quality: 48 of 60 lines differ,
+  mostly wording; e4b is flatter on slang/swearing ("Holy shit" -> "Aman Tanrım", "Cops" ->
+  "Polisler") and has ~5 meaning errors ("It's good to see you" -> "Görüşürüz", "bale mazes"
+  -> "Bale mazeleri", "I want you to meet Lucia" -> "Lucia'yı tanımamı istiyorum",
+  "Assholes!" -> "Siktir et!", "We're good" -> "Biz iyiyiz"); 26b's only clear slip:
+  "Vice City de de". e4b = the fast choice (~4x), 26b stays the quality choice.
 - 2026-11-14 (user): **overlay font -> Manrope.** The user asked which font the in-game
   subtitles in their gameplay videos use (burned in, no subtitle track). Ten open fonts were
   rendered at the same line width next to a 1080p crop: Manrope matched best (x-height, open
@@ -1185,3 +1197,6 @@ First **finish the app** (each step committed and pushed; no new release unless 
   matched those glued lines at ratio >= 80 and vanished. Fixed by the centre rule and the
   short-line guard (see Stabilizer): **253/294 (86.1 %), 12 never read**, 701 requests (the
   clips' watermark is now a line of its own that comes and goes; no game draws it).
+- 2026-11-14 (user): **reading fps default 10 -> 30** (latency: the wait for the next tick drops
+  from 0-100 ms to 0-33 ms; `CAPTURE_MAX_FPS` is 30 anyway). The user's two saved profiles were
+  switched too. CPU cost at 30 fps not measured yet (one preprocess per new frame).

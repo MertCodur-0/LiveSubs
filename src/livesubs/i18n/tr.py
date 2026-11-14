@@ -390,8 +390,8 @@ STRINGS: dict[str, str] = {
         "Bir sonraki Başlat'ta geçerli olur."
     ),
     "settings.fps_tip": (
-        "Yükseldikçe altyazı daha erken yakalanır ama işlemci daha çok çalışır; 10 çoğu oyun "
-        "için yeterli. Bir sonraki Başlat'ta geçerli olur."
+        "Yükseldikçe altyazı daha erken yakalanır ama işlemci daha çok çalışır. Oyun aynı "
+        "bilgisayarda çalışıyorsa düşürebilirsiniz. Bir sonraki Başlat'ta geçerli olur."
     ),
     "settings.hotkeys": "Kısayol tuşları",
     "settings.hotkey.calibration": "Ayar modu",

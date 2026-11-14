@@ -65,7 +65,7 @@ HexColor = Annotated[
 
 
 class CaptureSettings(SettingsModel):
-    fps: int = Field(10, ge=1, le=60)
+    fps: int = Field(30, ge=1, le=60)
 
 
 class VisionSettings(SettingsModel):
