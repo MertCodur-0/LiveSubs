@@ -75,10 +75,14 @@ class _FakeWindows:
 
 
 class _FakeLines:
-    def __init__(self, text: str) -> None:
+    """``text`` None: no segment to read; "": segments, none of them text."""
+
+    def __init__(self, text: str | None) -> None:
         self.text = text
 
-    def recognize(self, region: np.ndarray, letters: np.ndarray) -> OcrResult:
+    def recognize(self, region: np.ndarray, letters: np.ndarray) -> OcrResult | None:
+        if self.text is None:
+            return None
         lines = (OcrLine(self.text, Rect(10, 5, 80, 20)),) if self.text else ()
         return OcrResult(lines, 2.0)
 
@@ -100,11 +104,18 @@ def test_read_subtitle_uses_the_line_reader_alone() -> None:
     assert rows[0].center == pytest.approx(50 / 200)
 
 
-def test_read_subtitle_falls_back_to_windows_when_nothing_is_read() -> None:
+def test_read_subtitle_falls_back_to_windows_when_there_is_no_segment() -> None:
     region, processed = _processed()
     windows = _FakeWindows()
-    text, _, _ = read_subtitle(windows, processed, ReadScorer(None), _FakeLines(""), region)
+    text, _, _ = read_subtitle(windows, processed, ReadScorer(None), _FakeLines(None), region)
     assert text == "from windows" and windows.calls == len(processed.ocr_inputs)
+
+
+def test_segments_that_are_no_text_are_not_read_again_by_windows() -> None:
+    region, processed = _processed()
+    windows = _FakeWindows()
+    text, _, rows = read_subtitle(windows, processed, ReadScorer(None), _FakeLines(""), region)
+    assert (text, rows, windows.calls) == ("", [], 0)
 
 
 @pytest.fixture(scope="module")
@@ -124,3 +135,32 @@ def test_reads_rendered_subtitle(reader) -> None:
     assert read.text == "Come on, you fool!"
     box = read.lines[0].box
     assert 0 <= box.x < 60 and box.right > 400
+
+
+def test_a_clear_line_is_read_with_high_confidence(reader) -> None:
+    region = np.full((120, 900, 3), (40, 60, 50), np.uint8)
+    cv2.putText(region, "Get in the car!", (60, 75), cv2.FONT_HERSHEY_DUPLEX, 1.4, (235,) * 3, 2)
+    (segment,) = find_segments(preprocess(region, VisionSettings()).mask)
+    box = segment.box
+    text, confidence = reader.read_line(region[box.y : box.bottom, box.x : box.right])
+    assert text == "Get in the car!"
+    assert confidence > 0.9
+
+
+def test_scribbles_are_not_read_as_text(reader) -> None:
+    # Glyph-sized strokes in a row, like fence posts or window frames: the mask chains them into
+    # a segment, the recogniser is unsure of every "character" and the segment is dropped.
+    rng = np.random.default_rng(7)
+    region = np.full((120, 900, 3), (40, 60, 50), np.uint8)
+    for i in range(16):
+        x = 80 + 44 * i
+        points = np.column_stack([x + rng.integers(0, 30, 5), 45 + rng.integers(0, 34, 5)])
+        cv2.polylines(region, [points.astype(np.int32)], False, (235,) * 3, 3)
+    processed = preprocess(region, VisionSettings())
+    assert find_segments(processed.mask)  # the mask alone would call it text
+    assert reader.recognize(region, processed.mask).lines == ()
+
+
+def test_a_mask_without_segments_is_left_to_the_other_engine(reader) -> None:
+    region = np.zeros((60, 200, 3), np.uint8)
+    assert reader.recognize(region, np.zeros((60, 200), np.uint8)) is None

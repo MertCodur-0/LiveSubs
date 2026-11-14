@@ -43,6 +43,10 @@ INPUT_HEIGHT = 48  # the model's input height
 MIN_WIDTH = 320  # narrower inputs are padded (as PaddleOCR does)
 MAX_WIDTH = 3200  # a line wider than 66 glyph heights is squeezed
 THREADS = 2  # light on a PC that may also run the game; more threads gained little
+# The recogniser's mean character probability. Measured on six game clips: 99.9 % of the subtitle
+# reads are above 0.9 (1st percentile 0.95), while half of what it makes of scenery, HUD icons
+# and cut-off glyphs is below 0.5 - text it is not sure of is not text.
+MIN_CONFIDENCE = 0.8
 
 # Line finding, in glyph heights (``h``) of the letters mask.
 MIN_LETTER, MAX_LETTER, MAX_LETTER_WIDTH = 0.5, 1.8, 2.5  # a glyph-like component
@@ -148,37 +152,47 @@ class LineReader:
         self._alphabet = ["", *characters.splitlines(), " "]  # CTC blank first, space last
         self._input = self._session.get_inputs()[0].name
 
-    def recognize(self, region: np.ndarray, letters: np.ndarray) -> OcrResult:
+    def recognize(self, region: np.ndarray, letters: np.ndarray) -> OcrResult | None:
         """Read ``region`` (BGR/BGRA, the subtitle area) along the segments of ``letters`` (the
-        preprocessing's letters mask, same size)."""
+        preprocessing's letters mask, same size). ``None`` when the mask has no segment to read
+        (too few glyphs to measure, e.g. "No."): the caller's other engine should look. A result
+        without lines means there were segments and none was text."""
         started = time.perf_counter()
+        segments = find_segments(letters)
+        if not segments:
+            return None
         if region.ndim == 3 and region.shape[2] == 4:
             region = cv2.cvtColor(region, cv2.COLOR_BGRA2BGR)
         elif region.ndim == 2:
             region = cv2.cvtColor(region, cv2.COLOR_GRAY2BGR)
         read: list[tuple[Segment, str]] = []
-        for segment in find_segments(letters):
+        for segment in segments:
             b = segment.box
-            text = self.read_line(region[b.y : b.bottom, b.x : b.right]).strip()
-            if text:
+            text, confidence = self.read_line(region[b.y : b.bottom, b.x : b.right])
+            if text and confidence >= MIN_CONFIDENCE:
                 read.append((segment, text))
         h = glyph_height(letters) or 0.0
         return OcrResult(_join_rows(read, h), (time.perf_counter() - started) * 1000)
 
-    def read_line(self, image: np.ndarray) -> str:
-        """One text line (BGR) -> its text (greedy CTC decoding)."""
+    def read_line(self, image: np.ndarray) -> tuple[str, float]:
+        """One text line (BGR) -> ``(its text, the mean probability of its characters)``
+        (greedy CTC decoding)."""
         height, width = image.shape[:2]
         if height < 2 or width < 2:
-            return ""
+            return "", 0.0
         resized = min(MAX_WIDTH, math.ceil(INPUT_HEIGHT * width / height))
         batch = np.zeros((1, 3, INPUT_HEIGHT, max(MIN_WIDTH, resized)), np.float32)
         pixels = cv2.resize(image, (resized, INPUT_HEIGHT)).astype(np.float32)
         batch[0, :, :, :resized] = pixels.transpose(2, 0, 1) / 127.5 - 1.0
-        best = self._session.run(None, {self._input: batch})[0][0].argmax(axis=1)
+        probabilities = self._session.run(None, {self._input: batch})[0][0]
+        best = probabilities.argmax(axis=1)
         keep = np.ones(len(best), bool)
         keep[1:] = best[1:] != best[:-1]
         keep &= best != 0
-        return "".join(self._alphabet[i] for i in best[keep])
+        text = "".join(self._alphabet[i] for i in best[keep]).strip()
+        if not text:
+            return "", 0.0
+        return text, float(probabilities[keep, best[keep]].mean())
 
 
 def _join_rows(read: list[tuple[Segment, str]], h: float) -> tuple[OcrLine, ...]:

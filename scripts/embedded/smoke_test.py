@@ -79,7 +79,7 @@ def check() -> list[str]:
     WinRtOcr().recognize(np.full((40, 200), 255, np.uint8))
     lines = open_line_reader()  # onnxruntime + the bundled PP-OCR model
     assert lines is not None
-    assert lines.read_line(np.full((48, 200, 3), 255, np.uint8)) == ""
+    assert lines.read_line(np.full((48, 200, 3), 255, np.uint8))[0] == ""
     checker = open_spell_checker()  # judges OCR reads; None where Windows has no en-US one
     assert checker is None or checker.misspelled("Heyl there") == ["Heyl"]
     assert b"EventSource" in render_page() and FONT.is_file()  # package data of the phone page

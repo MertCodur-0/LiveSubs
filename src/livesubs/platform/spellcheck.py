@@ -22,6 +22,9 @@ _CHECK = 4  # ISpellChecker
 _NEXT = 3  # IEnumSpellingError
 _START_INDEX = 3  # ISpellingError
 _LENGTH = 4
+_CORRECTIVE_ACTION = 5
+# A repeated word ("Kitty Kitty", "yes yes"): normal in speech, so not a misspelling here.
+_ACTION_DELETE = 3
 _CLSCTX_INPROC_SERVER = 0x1
 _COINIT_MULTITHREADED = 0x0
 
@@ -31,7 +34,8 @@ class SpellCheckerUnavailableError(RuntimeError):
 
 
 class SpellChecker:
-    """``misspelled(text)``: the words of ``text`` the language's dictionary does not know."""
+    """``misspelled(text)``: the words of ``text`` the language's dictionary does not know.
+    Repeated words ("Kitty Kitty!") are not reported: subtitles repeat words all the time."""
 
     def __init__(self, language: str = "en-US") -> None:
         ole32 = ctypes.windll.ole32
@@ -85,6 +89,12 @@ class SpellChecker:
                     method(error, _LENGTH, ctypes.POINTER(wintypes.ULONG))(
                         error, ctypes.byref(length)
                     )
+                    action = ctypes.c_int()
+                    method(error, _CORRECTIVE_ACTION, ctypes.POINTER(ctypes.c_int))(
+                        error, ctypes.byref(action)
+                    )
+                    if action.value == _ACTION_DELETE:
+                        continue
                     words.append(text[start.value : start.value + length.value])
                 finally:
                     release(error)

@@ -27,6 +27,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+from rapidfuzz import fuzz
 
 from livesubs.core.geometry import NormRect
 from livesubs.core.messages import (
@@ -50,9 +51,9 @@ from livesubs.engine.capture import FrameSource, SourceLostError, SourceUnavaila
 from livesubs.engine.capture import open_source as default_open_source
 from livesubs.engine.ocr.language import english_ocr_language
 from livesubs.engine.ocr.ppocr import LineReader, open_line_reader
-from livesubs.engine.ocr.winrt_ocr import OcrResult, WinRtOcr
+from livesubs.engine.ocr.winrt_ocr import OcrLine, OcrResult, WinRtOcr
 from livesubs.engine.text import filters
-from livesubs.engine.text.normalize import clean
+from livesubs.engine.text.normalize import clean, key
 from livesubs.engine.text.quality import ReadScorer
 from livesubs.engine.text.stabilizer import (
     Event as LineEvent,
@@ -457,19 +458,41 @@ def read_subtitle(
 
     With a PP-OCR ``lines`` reader and the raw ``region`` its read is used alone (it read 94 % of
     the evaluation frames exactly, Windows' best of two 77 %; letting the scorer pick between
-    them lost 2-5 points). When it finds no text, or without it, Windows OCR reads every input
-    of ``processed`` and the cleanest read is kept: every input is read even when the first
-    finds nothing (on short, sparse lines over bright ground the grey image often reads nothing
-    and the mask image reads the line)."""
+    them lost 2-5 points). When the mask gives it no segment to read (a line of two glyphs), or
+    without it, Windows OCR reads every input of ``processed`` and the cleanest read is kept:
+    every input is read even when the first finds nothing (on short, sparse lines over bright
+    ground the grey image often reads nothing and the mask image reads the line); a row of the
+    cleanest read is replaced by the same row of the other input where that one reads cleaner."""
     if lines is not None and region is not None:
         read = lines.recognize(region, processed.mask)
-        if read.lines:
+        if read is not None:
             return read.text, read.elapsed_ms, rows_of(read, processed.mask.shape[1])
     images = processed.ocr_inputs
     reads = [ocr.recognize(image) for image in images]
     best = max(range(len(reads)), key=lambda i: scorer.score(reads[i].text))  # first on a tie
-    rows = rows_of(reads[best], images[best].shape[1])
+    others = [line for i, read in enumerate(reads) if i != best for line in read.lines]
+    lines = [_cleanest_row(line, others, scorer) for line in reads[best].lines]
+    rows = rows_of(OcrResult(tuple(lines), 0.0), images[best].shape[1])
     return reads[best].text, sum(read.elapsed_ms for read in reads), rows
+
+
+# A row of another input with keys this close (rapidfuzz ratio) at the same height is the same row.
+SAME_ROW_SIMILARITY = 70.0
+
+
+def _cleanest_row(line: OcrLine, others: list[OcrLine], scorer: ReadScorer) -> OcrLine:
+    """``line`` or the same row read from another input (same height, similar text), whichever
+    scores higher; ``line`` on a tie. All inputs share one size, so their boxes compare."""
+
+    def same(other: OcrLine) -> bool:
+        a, b = line.box, other.box
+        return (
+            b.y <= a.y + a.height / 2 < b.y + b.height
+            and a.y <= b.y + b.height / 2 < a.y + a.height
+            and fuzz.ratio(key(line.text), key(other.text)) >= SAME_ROW_SIMILARITY
+        )
+
+    return max([line, *filter(same, others)], key=lambda row: scorer.score(row.text))
 
 
 def rows_of(read: OcrResult, width: int) -> list[Row]:

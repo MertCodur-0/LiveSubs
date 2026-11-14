@@ -79,3 +79,83 @@ def test_windows_spell_checker_ranks_real_misreads(checker: SpellChecker) -> Non
     scorer = ReadScorer(checker.misspelled)
     for garbled, right in PAIRS:
         assert scorer.best([garbled, right]) == right, garbled
+
+
+def test_punctuation_glued_between_letters_is_a_misread() -> None:
+    scorer = ReadScorer()
+    assert scorer.score("Hey! Stop! The government's") > scorer.score("Hey! Stop!h'he government's")
+    assert scorer.score("Put the weapon away") > scorer.score("Put the.weapon away")
+    assert scorer.score("Go to the engineer") > scorer.score("Go to t)ie engineer")
+    # Initialisms, ellipses and hyphenated or contracted words are fine.
+    assert penalties("Wait...what, the U.S. at 3 a.m.? Don't. T-Then go")[0] == 3  # 3 lone letters
+    assert penalties("Wait...what. Don't. T-Then go")[0] == 0
+
+
+def test_a_lone_quote_or_bracket_costs_a_little() -> None:
+    assert penalties('Another one") You')[0] == 1  # both a lone quote and a lone bracket
+    assert penalties('Say "give them a show" (now)')[0] == 0
+
+
+def test_a_repeated_word_is_not_a_misspelling(checker: SpellChecker) -> None:
+    assert checker.misspelled("Here Kitty Kitty!") == []
+    assert checker.misspelled("Yes yes, Heyl") == ["Heyl"]
+    scorer = ReadScorer(checker.misspelled)
+    assert scorer.best(["Here Kitty Kittyl", "Here Kitty Kitty!"]) == "Here Kitty Kitty!"
+
+
+def test_a_dropped_g_is_a_word(checker: SpellChecker) -> None:
+    scorer = ReadScorer(checker.misspelled)
+    assert penalties("'cause girl was walkin' funny.", ["walkin"])[0] == 1  # the raw verdict
+    assert scorer.score("'cause girl was walkin' funny.") == scorer.score(
+        "'cause girl was walking funny."
+    )
+    assert scorer.best(["'cause girl was walktn' funny.", "'cause girl was walkin' funny."]) == (
+        "'cause girl was walkin' funny."
+    )
+    # Slang and names the dictionary lacks still cost less than a garbled read of the line.
+    assert scorer.score("I'ma fuck your ass up!") > scorer.score("I'ma fuck your ass upl")
+    assert scorer.score("They don't know nothin' about me") > scorer.score(
+        "They don't know nothln' about me"
+    )
+
+
+def test_a_mixed_run_of_punctuation_is_a_misread() -> None:
+    assert penalties("left met:. now")[0] == 0.5
+    assert penalties("Stop!. The end,. Go")[0] == 1
+    assert penalties("Wait... What?! No!! Really?? Hm.")[0] == 0
+
+
+def test_each_row_is_taken_from_the_input_that_reads_it_cleanest() -> None:
+    """Both OCR inputs are read; the cleaner one overall still garbles a row the other gets."""
+    import numpy as np
+
+    from livesubs.core.geometry import Rect
+    from livesubs.engine.ocr.winrt_ocr import OcrLine, OcrResult
+    from livesubs.engine.pipeline import read_subtitle
+    from livesubs.engine.vision.preprocess import Preprocessed
+
+    def result(*rows: tuple[str, int]) -> OcrResult:
+        return OcrResult(tuple(OcrLine(t, Rect(100, y, 400, 40)) for t, y in rows), 1.0)
+
+    first = result(("Police! Stop right there!", 10), ("Don't play dumbi", 60))
+    second = result(("Pol1ce! Stop rlght there!", 12), ("Don't play dumb!", 58))
+    image = np.zeros((300, 600), np.uint8)
+    processed = Preprocessed(mask=image, ocr_image=image, sharp_image=image.copy(), scale=1.0)
+
+    class FakeOcr:
+        def recognize(self, img: np.ndarray) -> OcrResult:
+            return first if img is processed.ocr_image else second
+
+    scorer = ReadScorer(lambda text: [w for w in text.split() if w in {"dumbi", "Pol1ce!"}])
+    _, _, rows = read_subtitle(FakeOcr(), processed, scorer)  # type: ignore[arg-type]
+    assert [row.text for row in rows] == ["Police! Stop right there!", "Don't play dumb!"]
+
+
+def test_an_unknown_possessive_is_not_slang() -> None:
+    assert penalties("Tltnat's them", ["Tltnat's"]) == (0.3, 1)
+    assert penalties("I'ma go", ["I'ma"]) == (0.3, 2)
+
+
+def test_a_hyphenated_word_with_an_unknown_part_is_unknown() -> None:
+    assert penalties("Uh-uhr bitch", ["uhr"])[0] == 1
+    assert penalties("Uh-uh, bitch. T-Then go", [])[0] == 0
