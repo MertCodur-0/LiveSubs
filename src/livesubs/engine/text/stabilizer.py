@@ -29,6 +29,9 @@ now) and the rows of every OCR result to ``on_read``. Both return events:
 - A line that continues the sentence of the line just before it (``text.sentences``; one
   subtitle replaced by the next piece) is merged into that line: ``LineUpgraded`` with the whole
   sentence under the earlier line's id.
+- ``expected`` is the text that goes out for translation if the next read agrees with the new
+  line read once: the caller may start translating it early, and must drop that work when
+  ``expected`` changes without the line being confirmed.
 
 All times are ``time.monotonic()`` seconds passed in by the caller.
 """
@@ -176,6 +179,7 @@ class Stabilizer:
     _gone: list[_Line] = field(default_factory=list, init=False)  # left recently, newest last
     _candidates: list[_Candidate] = field(default_factory=list, init=False)
     _shown: tuple[int, ...] = field(default=(), init=False)  # last ScreenChanged
+    _expected: str | None = field(default=None, init=False)
     _next_id: int = field(default=1, init=False)
     _next_read_at: float = field(default=0.0, init=False)
     _last_read_pixels: int = field(default=0, init=False)
@@ -185,6 +189,13 @@ class Stabilizer:
     def current(self) -> list[str]:
         """The texts of the lines on screen, top to bottom."""
         return [line.text for line in self._ordered()]
+
+    @property
+    def expected(self) -> str | None:
+        """The text a confirming read of the topmost new line would send for translation (the
+        whole sentence when the line continues one); None when no new line waits, or when it is
+        a line coming back (its translation is kept)."""
+        return self._expected
 
     @property
     def awaiting_confirmation(self) -> bool:
@@ -203,7 +214,7 @@ class Stabilizer:
             case Change.CLEARED:
                 for line in self._lines:
                     self._leave(line)
-                self._lines, self._candidates = [], []
+                self._lines, self._candidates, self._expected = [], [], None
                 self._last_read_pixels = 0
                 return Decision(read=False, events=self._screen_event())
             case Change.APPEARED | Change.CHANGED:
@@ -260,6 +271,7 @@ class Stabilizer:
             else:
                 events.append(self._confirm(candidate, row, now, matched))
         self._candidates = candidates
+        self._expected = self._outcome(candidates[0].text, now, matched) if candidates else None
         events.extend(self._screen_event())
         return events
 
@@ -315,20 +327,14 @@ class Stabilizer:
 
     def _confirm(self, candidate: _Candidate, row: int, now: float, matched: set[int]) -> Event:
         text = candidate.text
-        back = next(
-            (
-                g
-                for g in reversed(self._gone)
-                if now - g.seen <= RECENT_S and self._similar(text, g.text)
-            ),
-            None,
-        )
+        back = self._came_back(text, now)
         if back is not None:  # it left a moment ago and came back
             self._gone.remove(back)
             self._show(back, row, now, matched)
             return LineConfirmed(back.line_id, back.full, repeat=True)
         merged = self._merge_target(text, now, matched)
         if merged is not None:
+            (self._gone if merged in self._gone else self._lines).remove(merged)
             before = merged.full
             merged.pieces.append(merged.text)
             merged.text, merged.score = text, candidate.score
@@ -352,13 +358,25 @@ class Stabilizer:
             and now - line.seen <= MERGE_GAP_S
             and sentences.continues(line.text, text)
         )
-        if not ok:
+        return line if ok else None
+
+    def _came_back(self, text: str, now: float) -> _Line | None:
+        """The line that left a moment ago and reads like ``text``, if any."""
+        return next(
+            (
+                g
+                for g in reversed(self._gone)
+                if now - g.seen <= RECENT_S and self._similar(text, g.text)
+            ),
+            None,
+        )
+
+    def _outcome(self, text: str, now: float, matched: set[int]) -> str | None:
+        """What confirming ``text`` now would send for translation (see ``_confirm``)."""
+        if self._came_back(text, now) is not None:
             return None
-        if line in self._gone:
-            self._gone.remove(line)
-        else:
-            self._lines.remove(line)
-        return line
+        merged = self._merge_target(text, now, matched)
+        return text if merged is None else f"{merged.full} {text}"
 
     def _show(self, line: _Line, row: int, now: float, matched: set[int]) -> None:
         line.row, line.misses, line.seen, line.upgrade = row, 0, now, None

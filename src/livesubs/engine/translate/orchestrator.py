@@ -11,7 +11,11 @@ results are always published in reading order and history follows the dialogue. 
 ``history_timeout_s`` without a new line the history is dropped: the next line most likely
 belongs to another scene, and the old lines would only mislead the model.
 
-The CPU quality lane (optional, step 13) will plug in after the GPU result.
+**Early start** (``prepare``): the reader confirms a new line with a second read, ~80 ms after
+the first. While the lane is idle, the text of the first read is translated at once, as a job
+that belongs to no line yet. ``submit`` of exactly that text takes the job over (in flight or
+finished); anything else cancels it, and its result is never published, cached or used as
+context. So only confirmed lines reach the screen, ~80 ms earlier.
 """
 
 from __future__ import annotations
@@ -21,7 +25,7 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from livesubs.engine.translate import prompt
 from livesubs.engine.translate.base import (
@@ -41,6 +45,8 @@ log = logging.getLogger(__name__)
 MAX_BACKLOG = 3
 # Seconds without a new line after which the dialogue context is forgotten.
 HISTORY_TIMEOUT_S = 60.0
+# A finished early translation nobody claimed is dropped after this long.
+PREPARED_TTL_S = 2.0
 # Idle seconds after which the model's keep-alive is renewed; below the shortest keep-alive
 # choice (5 min), so the model stays loaded as long as translation runs. Ollama's own timer
 # still unloads it once translation stops.
@@ -64,10 +70,12 @@ class LineFailed:
 TranslationEvent = LineTranslated | LineFailed
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True, eq=False)
 class _Job:
-    line_id: int
+    line_id: int | None  # None: started early (``prepare``), no line owns it yet
     text: str
+    result: TranslationResult | None = None  # translated early: only publish it
+    cancel: CancelToken = field(default_factory=CancelToken)
 
 
 class TranslationOrchestrator:
@@ -106,7 +114,8 @@ class TranslationOrchestrator:
 
         self._cond = threading.Condition()
         self._pending: deque[_Job] = deque()
-        self._in_flight: tuple[int, CancelToken] | None = None  # line_id, cancel
+        self._in_flight: _Job | None = None
+        self._prepared: tuple[_Job, float] | None = None  # finished early, unclaimed; when
         self._closed = False
         self._worker = threading.Thread(target=self._run, name="translate-gpu", daemon=True)
         self._worker.start()
@@ -115,19 +124,60 @@ class TranslationOrchestrator:
         """Queue ``text`` for ``line_id``; reuse a line_id for an upgraded reading."""
         with self._cond:
             now = self._clock()
-            if self._last_submit is not None and now - self._last_submit > self._history_timeout_s:
-                self._history.clear()  # a long silence: most likely another scene
+            self._forget_old_history(now)
             self._last_submit = now
+            flying = self._in_flight
+            if flying is not None and flying.line_id is None and flying.text == text:
+                flying.line_id = line_id  # started early: it is this line's translation now
+                return
             job = _Job(line_id, text)
+            if self._prepared is not None:
+                early, finished = self._prepared
+                if early.text == text and now - finished <= PREPARED_TTL_S:
+                    job.result = early.result
+            self._drop_early()
             # An upgrade supersedes its own line's older reading, wherever that one is.
             self._pending = deque(j for j in self._pending if j.line_id != line_id)
-            if self._in_flight is not None and self._in_flight[0] == line_id:
-                self._in_flight[1].cancel()
+            if flying is not None and flying.line_id == line_id:
+                flying.cancel.cancel()
             self._pending.append(job)
             while len(self._pending) > self._max_backlog:
                 dropped = self._pending.popleft()
                 log.info("Translation backlog full, skipping %r", dropped.text)
             self._cond.notify()
+
+    def prepare(self, text: str | None) -> None:
+        """Start translating ``text`` before its line is confirmed, if the lane is idle; a
+        ``submit`` of the same text takes the translation over. ``None`` (or another text) drops
+        an early translation no line has claimed."""
+        with self._cond:
+            if self._closed:
+                return
+            flying = self._in_flight
+            if text is not None and (
+                (flying is not None and flying.line_id is None and flying.text == text)
+                or (self._prepared is not None and self._prepared[0].text == text)
+                or any(j.line_id is None and j.text == text for j in self._pending)
+            ):
+                return  # already on its way
+            self._drop_early()
+            if text is None or self._in_flight is not None or self._pending:
+                return  # confirmed lines come first: no early start behind them
+            self._forget_old_history(self._clock())
+            self._pending.append(_Job(None, text))
+            self._cond.notify()
+
+    def _drop_early(self) -> None:
+        """Forget early work no line has claimed (called with the lock held)."""
+        self._prepared = None
+        self._pending = deque(j for j in self._pending if j.line_id is not None)
+        if self._in_flight is not None and self._in_flight.line_id is None:
+            self._in_flight.cancel.cancel()
+            self._in_flight = None  # the worker drops its result
+
+    def _forget_old_history(self, now: float) -> None:
+        if self._last_submit is not None and now - self._last_submit > self._history_timeout_s:
+            self._history.clear()  # a long silence: most likely another scene
 
     def clear_history(self) -> None:
         """Forget the dialogue context (profile switch, scene change)."""
@@ -139,7 +189,7 @@ class TranslationOrchestrator:
             self._closed = True
             self._pending.clear()
             if self._in_flight is not None:
-                self._in_flight[1].cancel()
+                self._in_flight.cancel.cancel()
             self._cond.notify()
         self._worker.join(timeout)
 
@@ -155,26 +205,37 @@ class TranslationOrchestrator:
                     job = None
                 else:
                     job = self._pending.popleft()
-                    cancel = CancelToken()
-                    self._in_flight = (job.line_id, cancel)
+                    self._in_flight = job
                     request = self._request(job)
             if job is None:
                 self._keep_warm()
                 continue
+            result, error = job.result, None
             try:
-                result = self._translate(request, cancel)
+                if result is None:
+                    result = self._translate(request, job.cancel)
             except TranslationCancelledError:
-                continue
+                pass
             except TranslationError as exc:
-                log.warning("Translation failed for %r: %s", job.text, exc)
-                self._emit(LineFailed(job.line_id, job.text, exc))
+                error = exc
+            with self._cond:
+                if self._in_flight is job:
+                    self._in_flight = None
+                if job.cancel.cancelled or (result is None and error is None):
+                    continue  # superseded by an upgrade, or early work that was dropped
+                line_id = job.line_id
+                if line_id is None:  # nobody claimed it yet: keep the result for a moment
+                    if result is not None:
+                        job.result = result
+                        self._prepared = (job, self._clock())
+                    continue
+            if error is not None:
+                log.warning("Translation failed for %r: %s", job.text, error)
+                self._emit(LineFailed(line_id, job.text, error))
                 continue
-            finally:
-                with self._cond:
-                    if self._in_flight is not None and self._in_flight[1] is cancel:
-                        self._in_flight = None
-            if not cancel.cancelled:  # superseded by an upgrade while finishing
-                self._publish(job, result)
+            if not result.cached:
+                self._cache.put(self._gpu.model, self._cache_scope, job.text, result.text)
+            self._publish(job, result)
 
     def _keep_warm(self) -> None:
         """Idle for ``keep_warm_s``: renew the model's keep-alive (a request without a prompt),
@@ -191,9 +252,7 @@ class TranslationOrchestrator:
         cached = self._cache.get(self._gpu.model, self._cache_scope, request.text)
         if cached is not None:
             return TranslationResult(cached, self._gpu.model, self._gpu.lane, 0.0, cached=True)
-        result = self._gpu.translate(request, cancel)
-        self._cache.put(self._gpu.model, self._cache_scope, request.text, result.text)
-        return result
+        return self._gpu.translate(request, cancel)  # cached once a line owns the result
 
     def _request(self, job: _Job) -> TranslationRequest:
         # An upgraded reading must not see its own earlier version as context.

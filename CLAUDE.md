@@ -1164,6 +1164,10 @@ First **finish the app** (each step committed and pushed; no new release unless 
   -> "Bale mazeleri", "I want you to meet Lucia" -> "Lucia'yı tanımamı istiyorum",
   "Assholes!" -> "Siktir et!", "We're good" -> "Biz iyiyiz"); 26b's only clear slip:
   "Vice City de de". e4b = the fast choice (~4x), 26b stays the quality choice.
+  Same day, user asked to try a **text-only 12b** after all (`gemma4-text:12b-it-qat`; its
+  projector is only 0.18 GB): `/api/ps` still 8.5 GB, 73 % on the GPU (full 12b: 72 %), pack
+  median 1081 vs 1156 ms (e4b in the same run 237 ms). Same junk as before with the pack
+  ("Cops" -> "Köpekler", "Assholes" -> "Pis¡Os!", "Holy shit" -> "Hadi canım!") -> no use.
 - 2026-11-14 (user): **overlay font -> Manrope.** The user asked which font the in-game
   subtitles in their gameplay videos use (burned in, no subtitle track). Ten open fonts were
   rendered at the same line width next to a 1080p crop: Manrope matched best (x-height, open
@@ -1200,3 +1204,14 @@ First **finish the app** (each step committed and pushed; no new release unless 
 - 2026-11-14 (user): **reading fps default 10 -> 30** (latency: the wait for the next tick drops
   from 0-100 ms to 0-33 ms; `CAPTURE_MAX_FPS` is 30 anyway). The user's two saved profiles were
   switched too. CPU cost at 30 fps not measured yet (one preprocess per new frame).
+- 2026-11-15 (user agreed; **work in progress, stopped mid-way**): **early start of the
+  translation** — the request leaves at a new line's *first* read instead of after the
+  confirming one (~80-90 ms), and is only shown if the second read confirms exactly that text.
+  Done: `Stabilizer.expected` (the text a confirming read would send; None for a line coming
+  back) and `TranslationOrchestrator.prepare(text | None)` (idle lane only; `submit` of the same
+  text takes the job over, anything else cancels it; unclaimed results are never published,
+  cached or put in the history). **Still to do:** call `prepare(stabilizer.expected)` from
+  `pipeline._loop` after each batch of events (after the submits), tests for both parts, and
+  the measurement `scripts/measure_early_start.py` (how often the first read equals the
+  confirmed text on the 20 clips at 30 fps; it ran > 15 min without finishing, results not
+  seen) — then keep or drop the feature by that number, and remove the script.
