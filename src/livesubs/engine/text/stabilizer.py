@@ -16,8 +16,12 @@ now) and the rows of every OCR result to ``on_read``. Both return events:
   later instead of at the next tick.
 - While lines stay up they are re-read: at once when the text mask grows (glyphs that a bright
   background hid become visible), otherwise every ``upgrade_interval_s``. A read that adds words
-  to a line, confirmed the same way, replaces it (``LineUpgraded``). Other variations are
-  ignored, so the overlay never flickers between readings.
+  to a line, confirmed the same way, replaces it (``LineUpgraded``).
+- With a ``scorer`` (``text.quality``), the best-scoring of a new line's agreeing reads is
+  confirmed, not the latest, and a later read of a line that scores ``correct_margin`` higher
+  corrects it (also ``LineUpgraded``): OCR garbles a line differently from frame to frame
+  ("Heyl Get outl" / "Hey! Get out!"), so each line converges on its cleanest read. Without a
+  scorer, or within the margin, other variations are ignored, so the overlay never flickers.
 - A line missing from ``miss_reads`` reads in a row has left the screen. ``ScreenChanged`` lists
   the lines on screen, top to bottom, whenever that list changes (empty = no subtitle).
 - A confirmed line that matches one that left the screen a moment ago (``RECENT_S``) gets that
@@ -31,7 +35,7 @@ All times are ``time.monotonic()`` seconds passed in by the caller.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 
@@ -52,6 +56,9 @@ TRACK_SIMILARITY = 80.0
 # this many words to count as that line ("No." must not stick to "No! Bad! No!"); a line needs as
 # many to be upgraded by a longer read ("Yeah." -> "Yeah, I know." is the next line).
 MIN_PART_WORDS = 3
+# Rows of one wrapped sentence are centred under each other; a row whose centre is further off
+# (share of the region's width) is something else.
+MAX_CENTER_SHIFT = 0.05
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,30 +99,56 @@ def is_upgrade(new: str, current: str, min_kept: float = 0.85) -> bool:
     return kept >= min_kept * len(current_words)
 
 
-def group_rows(rows: Iterable[str]) -> list[str]:
+@dataclass(frozen=True, slots=True)
+class Row:
+    """One OCR row: its text and its horizontal centre (0-1 across the region; None = unknown)."""
+
+    text: str
+    center: float | None = None
+
+
+def group_rows(rows: Iterable[str | Row]) -> list[str]:
     """Join the rows of one sentence. A row continues the one above it when that row has no
     sentence end, or when it starts in lower case (a word of the end was lost); a new sentence
     in capitals is a new line - usually another speaker. Games that never punctuate therefore
-    keep all rows together, as one subtitle."""
+    keep all rows together, as one subtitle. Subtitle rows are centred under each other: a row
+    whose centre is off by more than ``MAX_CENTER_SHIFT`` (a HUD label, a watermark at the side)
+    never joins a sentence."""
     lines: list[str] = []
-    for row in rows:
-        if lines and (sentences.is_open(lines[-1]) or sentences.starts_lower(row)):
-            lines[-1] = f"{lines[-1]} {row}"
+    previous: Row | None = None
+    for item in rows:
+        row = item if isinstance(item, Row) else Row(item)
+        aligned = (
+            previous is None
+            or row.center is None
+            or previous.center is None
+            or abs(row.center - previous.center) <= MAX_CENTER_SHIFT
+        )
+        if lines and aligned and (sentences.is_open(lines[-1]) or sentences.starts_lower(row.text)):
+            lines[-1] = f"{lines[-1]} {row.text}"
         else:
-            lines.append(row)
+            lines.append(row.text)
+        previous = row
     return lines
 
 
 @dataclass
 class _Candidate:
     text: str
+    score: float = 0.0
     reads: int = 1
+
+    def agree(self, text: str, score: float) -> _Candidate:
+        """One more agreeing read: keep the best one (the latest when nothing scores reads)."""
+        best = (text, score) if score >= self.score else (self.text, self.score)
+        return _Candidate(*best, reads=self.reads + 1)
 
 
 @dataclass
 class _Line:
     line_id: int
     text: str  # what is on screen now (matched against new reads)
+    score: float = 0.0  # the scorer's verdict on ``text``
     pieces: list[str] = field(default_factory=list)  # earlier pieces of a merged sentence
     row: int = 0  # position among the lines of the last read that showed it
     misses: int = 0  # reads in a row without it
@@ -136,6 +169,8 @@ class Stabilizer:
     mask_growth: float = 0.15  # relative growth of text pixels that triggers a re-read
     miss_reads: int = 2  # reads in a row without a line before it counts as gone
     merge_split_sentences: bool = True
+    scorer: Callable[[str], float] | None = None  # read quality, higher = better
+    correct_margin: float = 0.5  # how much better a read must score to correct a line
 
     _lines: list[_Line] = field(default_factory=list, init=False)  # on screen
     _gone: list[_Line] = field(default_factory=list, init=False)  # left recently, newest last
@@ -180,11 +215,13 @@ class Stabilizer:
         grew = text_pixels > self._last_read_pixels * (1 + self.mask_growth)
         return Decision(read=grew or now >= self._next_read_at)
 
-    def on_read(self, rows: Iterable[str], now: float) -> list[Event]:
+    def on_read(self, rows: Iterable[str | Row], now: float) -> list[Event]:
         """Feed the rows (top to bottom) of the OCR result of a frame ``update`` asked to read."""
         self._last_read_pixels = self._pixels
-        texts = [clean(row) for row in rows]
-        events = self._judge(group_rows(t for t in texts if filters.check(t).ok), now)
+        cleaned = (
+            Row(clean(r.text), r.center) if isinstance(r, Row) else Row(clean(r)) for r in rows
+        )
+        events = self._judge(group_rows(r for r in cleaned if filters.check(r.text).ok), now)
         delay = self.fast_reread_s if self.awaiting_confirmation else self.upgrade_interval_s
         self._next_read_at = now + delay
         return events
@@ -215,12 +252,13 @@ class Stabilizer:
 
         candidates: list[_Candidate] = []
         for row, text in unmatched:
+            score = self._score(text)
             previous = next((c for c in self._candidates if self._similar(text, c.text)), None)
-            candidate = _Candidate(text, previous.reads + 1 if previous else 1)
+            candidate = previous.agree(text, score) if previous else _Candidate(text, score)
             if candidate.reads < self.required_reads:
                 candidates.append(candidate)
             else:
-                events.append(self._confirm(candidate.text, row, now, matched))
+                events.append(self._confirm(candidate, row, now, matched))
         self._candidates = candidates
         events.extend(self._screen_event())
         return events
@@ -233,8 +271,10 @@ class Stabilizer:
                 continue
             words, line_words = len(key(text).split()), len(key(line.text).split())
             score = fuzz.ratio(key(text), key(line.text))
-            if line_words >= MIN_PART_WORDS and is_upgrade(text, line.text):
-                score = 100.0
+            if is_upgrade(text, line.text):
+                # More words around all of the line's: a better read of it - or, for a short
+                # line, a new line glued to it ("Okay." under an unpunctuated label).
+                score = 100.0 if line_words >= MIN_PART_WORDS else 0.0
             elif MIN_PART_WORDS <= words <= line_words:
                 # A part of the line: its other rows scrolled out, or words were lost.
                 score = max(score, fuzz.partial_ratio(key(text), key(line.text)))
@@ -243,23 +283,38 @@ class Stabilizer:
         return best
 
     def _upgrade(self, line: _Line, text: str) -> LineUpgraded | None:
+        score = self._score(text)
         # A short line is rarely missing words, and "Yeah." -> "Yeah, I know." is a new line.
         short = len(key(line.text).split()) < MIN_PART_WORDS
         if short or not is_upgrade(text, line.text):
-            line.upgrade = None  # just another reading of the line
+            line.upgrade = None  # another reading of the line: maybe a cleaner one
+            if self._similar(text, line.text):
+                return self._correct(line, text, score)
             return None
         previous = line.upgrade
         if previous is not None and self._similar(text, previous.text):
-            line.upgrade = _Candidate(text, previous.reads + 1)
+            line.upgrade = previous.agree(text, score)
         else:
-            line.upgrade = _Candidate(text)
+            line.upgrade = _Candidate(text, score)
         if line.upgrade.reads < self.required_reads:
             return None
+        upgrade, line.upgrade = line.upgrade, None
+        return self._replace(line, upgrade.text, upgrade.score)
+
+    def _correct(self, line: _Line, text: str, score: float) -> LineUpgraded | None:
+        """A read of a line on screen replaces it when it scores clearly better."""
+        if self.scorer is None or score < line.score + self.correct_margin:
+            return None
+        return self._replace(line, text, score)
+
+    @staticmethod
+    def _replace(line: _Line, text: str, score: float) -> LineUpgraded:
         before = line.full
-        line.text, line.upgrade = text, None
+        line.text, line.score = text, score
         return LineUpgraded(line.line_id, line.full, previous=before)
 
-    def _confirm(self, text: str, row: int, now: float, matched: set[int]) -> Event:
+    def _confirm(self, candidate: _Candidate, row: int, now: float, matched: set[int]) -> Event:
+        text = candidate.text
         back = next(
             (
                 g
@@ -276,10 +331,10 @@ class Stabilizer:
         if merged is not None:
             before = merged.full
             merged.pieces.append(merged.text)
-            merged.text = text
+            merged.text, merged.score = text, candidate.score
             self._show(merged, row, now, matched)
             return LineUpgraded(merged.line_id, merged.full, previous=before)
-        line = _Line(self._next_id, text)
+        line = _Line(self._next_id, text, candidate.score)
         self._next_id += 1
         self._show(line, row, now, matched)
         return LineConfirmed(line.line_id, text)
@@ -326,6 +381,9 @@ class Stabilizer:
             return ()
         self._shown = shown
         return (ScreenChanged(shown),)
+
+    def _score(self, text: str) -> float:
+        return self.scorer(text) if self.scorer is not None else 0.0
 
     def _similar(self, a: str, b: str) -> bool:
         return fuzz.ratio(key(a), key(b)) >= self.similarity

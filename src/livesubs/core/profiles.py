@@ -72,17 +72,29 @@ class VisionSettings(SettingsModel):
     """Preprocessing steps; each can be switched off while calibrating."""
 
     text_colors: list[HexColor] = Field(default_factory=lambda: ["#FFFFFF"], min_length=1)
-    # Max per-channel distance from a subtitle color that still counts as text. 75 keeps glyphs
-    # dimmed by ~25 % (fades, translucent overlays); 85+ starts letting scenery in.
-    color_tolerance: int = Field(75, ge=0, le=255)
-    upscale: bool = True
-    color_mask: bool = True
-    # Keep only thin structures that stand out from their surroundings (white top-hat of the
-    # closeness to the subtitle color): rejects wide bright scenery, needs no dark outline/box.
+    # Colors are matched by *tone*, not brightness: games draw "white" subtitles light grey and
+    # video, capture and dark scenes dim them further (measured: glyph cores 145-190). A pixel
+    # counts as a subtitle color when it is that color scaled to its own brightness, within this
+    # many levels per channel. (Replaced `color_tolerance`, an absolute distance from the color,
+    # which missed dim text: the old name is dropped from saved profiles on purpose.)
+    tone_tolerance: int = Field(60, ge=0, le=255)
+    color_mask: bool = True  # off: any color counts, by its grey level
+    # Glyphs darker than this never count, however much they stand out.
+    min_brightness: int = Field(80, ge=0, le=255)
+    # Glyphs this much darker than the brightest text-like pixels of the region are dropped:
+    # scenery texture next to a bright subtitle. 255 = off.
+    brightness_drop: int = Field(90, ge=0, le=255)
+    # Keep only thin structures that stand out from their surroundings (a white top-hat of the
+    # brightness): rejects wide bright scenery, needs no dark outline/box.
     local_contrast: bool = True
-    min_local_contrast: int = Field(60, ge=1, le=255)
+    min_contrast: int = Field(45, ge=1, le=255)
     # Strokes thinner than this survive; raise it for very large or bold subtitle fonts.
     local_contrast_kernel_px: int = Field(15, ge=3, le=99)
+    # OCR input scaled so that glyphs are about this tall (small 720p fonts get ~3x, 1080p ~2x).
+    upscale: bool = True
+    text_height_px: int = Field(40, ge=12, le=120)
+    # Also read a sharp black-on-white rendering of the mask and keep the cleaner read.
+    second_read: bool = True
     morphology: bool = True
     component_filter: bool = True
     # Component limits at native resolution: specks below, scenery blobs above.

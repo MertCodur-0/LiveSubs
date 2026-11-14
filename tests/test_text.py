@@ -3,10 +3,12 @@ import pytest
 from livesubs.engine.text import filters, sentences
 from livesubs.engine.text.filters import Reject
 from livesubs.engine.text.normalize import clean, key
+from livesubs.engine.text.quality import ReadScorer
 from livesubs.engine.text.stabilizer import (
     MERGE_GAP_S,
     LineConfirmed,
     LineUpgraded,
+    Row,
     ScreenChanged,
     Stabilizer,
     group_rows,
@@ -216,6 +218,51 @@ def test_variants_never_replace_the_confirmed_line(clock: Clock) -> None:
     assert stab.current == [LINE]
 
 
+GARBLED = "Shitl my truck0 M-my gas!"  # letters mixed with digits: a misread
+CLEAN = "Shit, my truck! M-my gas!"
+
+
+def test_with_a_scorer_the_cleanest_agreeing_read_is_confirmed(clock: Clock) -> None:
+    stab = Stabilizer(scorer=ReadScorer().score)
+    assert read(stab, clock, CLEAN, change=Change.APPEARED) == []
+    assert read(stab, clock, GARBLED)[0] == LineConfirmed(1, CLEAN)  # not the latest read
+
+
+def test_a_clearly_cleaner_read_corrects_the_confirmed_line(clock: Clock) -> None:
+    """OCR garbles a line differently frame to frame; the line converges on its best read."""
+    stab = Stabilizer(scorer=ReadScorer().score)
+    appear_and_confirm(stab, clock, GARBLED)
+    assert read(stab, clock, CLEAN, after=0.6) == [LineUpgraded(1, CLEAN, previous=GARBLED)]
+    assert read(stab, clock, GARBLED, after=0.6) == []  # never back to a worse read
+    assert stab.current == [CLEAN]
+
+
+def test_reads_scoring_alike_never_flicker(clock: Clock) -> None:
+    stab = Stabilizer(scorer=ReadScorer().score)
+    appear_and_confirm(stab, clock, LINE)
+    for variant in ("Who is this guy? You knew, besides Brain's old cellmate.", LINE):
+        assert read(stab, clock, variant, after=0.6) == []
+    assert stab.current == [LINE]
+
+
+def test_a_cleaner_read_after_a_mask_change_corrects_the_line(clock: Clock) -> None:
+    stab = Stabilizer(scorer=ReadScorer().score)
+    appear_and_confirm(stab, clock, GARBLED)
+    events = read(stab, clock, CLEAN, change=Change.CHANGED, after=0.3)
+    assert events == [LineUpgraded(1, CLEAN, previous=GARBLED)]
+
+
+def test_each_stacked_line_converges_on_its_own_cleanest_read(clock: Clock) -> None:
+    other = "Step out of the vehicle!"
+    stab = Stabilizer(scorer=ReadScorer().score)
+    read(stab, clock, GARBLED, other, change=Change.APPEARED)
+    assert read(stab, clock, GARBLED, other)[:2] == [
+        LineConfirmed(1, GARBLED),
+        LineConfirmed(2, other),
+    ]
+    assert read(stab, clock, CLEAN, other, after=0.6) == [LineUpgraded(1, CLEAN, previous=GARBLED)]
+
+
 def test_replaced_line_stays_until_the_new_one_is_confirmed(clock: Clock) -> None:
     stab = Stabilizer()
     appear_and_confirm(stab, clock, LINE)
@@ -326,6 +373,23 @@ def test_a_wrapped_sentence_is_one_line(clock: Clock) -> None:
 )
 def test_group_rows(rows: list[str], lines: int) -> None:
     assert len(group_rows(rows)) == lines
+
+
+def test_a_row_off_to_the_side_never_joins_a_sentence() -> None:
+    """A HUD label or a watermark has no sentence end; if it joined the row below, every
+    subtitle under it became "LABEL What?" and short lines vanished into it."""
+    label, line = Row("TRADE $CYBERLEEK", 0.2), Row("What?", 0.5)
+    assert group_rows([label, line]) == ["TRADE $CYBERLEEK", "What?"]
+    wrapped = [Row("Hey. Got this Raul guy's car and", 0.5), Row("heading to the address.", 0.52)]
+    assert len(group_rows(wrapped)) == 1
+
+
+def test_short_lines_under_a_label_are_not_swallowed(clock: Clock) -> None:
+    stab = Stabilizer()
+    appear_and_confirm(stab, clock, "TRADE CYBERLEEK")
+    read(stab, clock, "TRADE CYBERLEEK What?", change=Change.CHANGED)
+    events = read(stab, clock, "TRADE CYBERLEEK What?")
+    assert events[0] == LineConfirmed(2, "TRADE CYBERLEEK What?")
 
 
 def test_a_sentence_split_over_two_subtitles_is_merged(clock: Clock) -> None:

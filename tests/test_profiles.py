@@ -13,6 +13,7 @@ from livesubs.core.profiles import (
     ProfileStore,
     SourceKind,
     VideoDeviceSource,
+    VisionSettings,
     VramSettings,
     WindowSource,
     slugify,
@@ -122,12 +123,17 @@ def test_load_all_skips_broken_files(store: ProfileStore) -> None:
 def test_files_with_retired_or_future_fields_still_load(store: ProfileStore) -> None:
     store.directory.mkdir(parents=True)
     (store.directory / "old.json").write_text(
-        '{"name": "Old", "vision": {"outline_support": true, "color_tolerance": 50},'
+        '{"name": "Old", "vision": {"outline_support": true, "color_tolerance": 50,'
+        ' "min_local_contrast": 70, "text_colors": ["#FFFF00"]},'
         ' "source": {"kind": "window", "exe_name": "GTA5.exe", "monitor_hint": 2}}',
         encoding="utf-8",
     )
     profile = store.load("old")
-    assert profile.vision.color_tolerance == 50
+    # The absolute color thresholds were retired (2026-11-14): saved values meant something else
+    # and missed dim subtitles, so old profiles get the new defaults; the colors are kept.
+    assert profile.vision.text_colors == ["#FFFF00"]
+    assert profile.vision.tone_tolerance == VisionSettings().tone_tolerance
+    assert profile.vision.min_contrast == VisionSettings().min_contrast
     assert isinstance(profile.source, WindowSource)
     assert profile.source.exe_name == "GTA5.exe"
 

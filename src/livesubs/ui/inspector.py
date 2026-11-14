@@ -90,9 +90,9 @@ class Inspector(QWidget):
             self.white.setChecked(WHITE in v.text_colors)
             self.yellow.setChecked(YELLOW in v.text_colors)
             self.custom.setChecked(bool(others))
-            self.tolerance.slider.setValue(v.color_tolerance)
+            self.tolerance.slider.setValue(v.tone_tolerance)
             self.contrast.setChecked(v.local_contrast)
-            self.min_contrast.slider.setValue(v.min_local_contrast)
+            self.min_contrast.slider.setValue(v.min_contrast)
         finally:
             self._loading = False
 
@@ -117,14 +117,12 @@ class Inspector(QWidget):
         row.addStretch(1)
         form.addRow(t("inspector.colors"), row)
 
-        self.tolerance = self._slider(0, 160, self.vision.color_tolerance, "color_tolerance")
+        self.tolerance = self._slider(0, 160, self.vision.tone_tolerance, "tone_tolerance")
         form.addRow(t("inspector.tolerance"), self.tolerance)
 
         self.contrast = QCheckBox(t("inspector.local_contrast"))
         self.contrast.toggled.connect(lambda v: self._set("local_contrast", v))
-        self.min_contrast = self._slider(
-            10, 160, self.vision.min_local_contrast, "min_local_contrast"
-        )
+        self.min_contrast = self._slider(10, 160, self.vision.min_contrast, "min_contrast")
         row = QHBoxLayout()
         row.addWidget(self.contrast)
         row.addWidget(self.min_contrast, 1)
