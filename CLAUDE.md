@@ -88,8 +88,13 @@ share the PC).
 
 App: PySide6-Essentials (not the `PySide6` meta package — it drags in WebEngine), numpy,
 opencv-python (required by `windows-capture`; do **not** also install `-headless`, they conflict),
-windows-capture (WGC), mss (fallback), sounddevice (card sound), winrt-* (Media.Ocr, Graphics.Imaging, Storage.Streams,
-Globalization, Foundation), httpx, pydantic, rapidfuzz, qrcode, platformdirs.
+windows-capture (WGC), mss (fallback), sounddevice (card sound), winrt-* **>= 4** (Media.Ocr,
+Graphics.Imaging, Storage.Streams, Globalization, Foundation; winrt 3 wheels ship msvcp140.dll
+14.29, which crashes onnxruntime when it is loaded first), onnxruntime (CPU; the PP-OCR line
+recogniser), httpx, pydantic, rapidfuzz, qrcode, platformdirs.
+The OCR model (`en_PP-OCRv5_rec_mobile.onnx`, 7.9 MB, Apache-2.0) is not in the repository:
+`scripts/get_ocr_model.py` downloads it into `src/livesubs/assets/ocr/` (sha256 checked; the
+build runs it). Without the model or onnxruntime the app reads with Windows OCR only.
 Dev: pytest, pytest-qt, respx, ruff. Packaging needs no extra tool (embeddable Python, see Other).
 
 ## Architecture
@@ -101,7 +106,7 @@ process of its own, the device host (see "Capture card" below).
 UI process (PySide6)                                  Engine process (multiprocessing)
   MainWindow / tabs / tray / hotkeys                    Capture thread  -> FrameSource
   Overlay, RegionFrame, Inspector (F8)    commands ->   Vision: crop, 2x, color mask, change detect
-  WebServer (SSE) + QR                    <- events     OCR thread: WinRT OcrEngine
+  WebServer (SSE) + QR                    <- events     OCR: PP-OCR line reader (Windows OCR fallback)
   ModelManager -> Ollama REST                           Text: normalize, filters, 2-frame stabilizer
                                                         TranslationOrchestrator: GPU lane, CPU lane
 ```
@@ -141,8 +146,16 @@ UI process (PySide6)                                  Engine process (multiproce
   detection: no specks, no scale dependence), `ocr_image` = the brightness, cubic-upscaled, only in
   the text rows (rest = median), `sharp_image` = the full mask black on white (`second_read`).
   Without the color mask any color counts by its grey level. Cost ~9.5 ms for a 1095x307 region.
-- **Reading** (`pipeline.read_subtitle`): both OCR images are read, `text/quality.ReadScorer`
-  keeps the read that looks most like English: +0.2 per plausible word, -1 per word Windows' spell
+- **Reading** (`pipeline.read_subtitle`, since 2026-11-15): the **PP-OCR line reader**
+  (`engine/ocr/ppocr.py`, below) reads the region's own colour pixels along the letters mask's
+  segments and its read is used alone. Windows OCR reads only when the mask gives no segment
+  (a line of two glyphs, "No.") or the reader is missing; then, as before, both OCR images are
+  read and the cleanest read kept (a row replaced by the same row of the other image where that
+  reads cleaner). `EmptyReadBackoff`: after a read that found nothing while no line is on
+  screen or waiting, further reads wait up to 0.5 s unless the mask grows > 15 % (scenery in
+  the mask asked for half of all reads on the clips); a line on screen is never slowed down.
+  `text/quality.ReadScorer` (the Windows fallback's choice, and the stabilizer's score for
+  every read) prefers the read that looks most like English: +0.2 per plausible word, -1 per word Windows' spell
   checker does not know (`platform/spellcheck.py`, `ISpellChecker` via COM ctypes, created on the
   pipeline thread; -0.3 for apostrophe slang like "I'ma"), letters mixed with digits, stray single
   letters, odd symbols; -0.5 for a trailing "'" (misread "!"). No spell checker -> shape rules only.
@@ -151,7 +164,19 @@ UI process (PySide6)                                  Engine process (multiproce
   triggers. Empty mask = subtitle gone (`CLEARED`); the overlay clears after a configurable delay.
   Thumbnails of different heights (never expected now that the mask is at region size) are
   resized before the IoU.
-- OCR (`engine/ocr/winrt_ocr.py`): `WinRtOcr.recognize(image) -> OcrResult` (lines with boxes,
+- **PP-OCR** (`engine/ocr/ppocr.py`): PaddleOCR's PP-OCRv5 English mobile *recogniser* (ONNX,
+  converted by RapidOCR) on onnxruntime, CPU, 2 threads, no spinning. It reads one text line
+  per image, so `find_segments` finds the lines in the letters mask (glyph-sized components
+  chained left to right along a band, gaps <= 1.2 glyph heights; a single component is no
+  segment; a HUD label at the side stays its own segment) and `LineReader.recognize(region,
+  letters)` reads each from the raw BGR region (48 px high, greedy CTC). A segment whose mean
+  character probability is under `MIN_CONFIDENCE` 0.8 is dropped (subtitle reads: 99.9 % above
+  0.9; half of what it makes of scenery/HUD icons is below 0.5). Segments of one row within 3
+  glyph heights join into one `OcrLine`. Returns `None` without segments (Windows OCR then
+  looks). `open_line_reader()` -> `None` when onnxruntime or the model is missing or
+  `LIVESUBS_NO_PPOCR=1` (logged); `LIVESUBS_OCR_MODELS` points at another model folder.
+  ~30-40 ms per read on the clips.
+- Windows OCR (`engine/ocr/winrt_ocr.py`, the fallback): `WinRtOcr.recognize(image) -> OcrResult` (lines with boxes,
   `text` = lines joined by spaces, `elapsed_ms`). Gray8 `SoftwareBitmap` filled through a WinRT
   `Buffer` memoryview; `recognize_async(...).get()` blocks the OCR thread (no asyncio); works
   from worker threads; images over `max_image_dimension` (10000) are downscaled, boxes mapped
@@ -167,7 +192,12 @@ UI process (PySide6)                                  Engine process (multiproce
   reading loop on a virtual clock and counts lines read exactly. Old preprocessing **18.7 %
   exact, 148 never read**; new **84.0 % exact, 22 never read** (with punctuation 232/294).
   Remaining misses: grey text on bright grey/skin (v19), pink objective words ("prison guard":
-  add the color), one-word lines next to the clips' watermarks. Region used: x 0.215-0.785,
+  add the color), one-word lines next to the clips' watermarks.
+  **With PP-OCR + votes (2026-11-15)**, scored by what is on screen, clips split into
+  `--set dev` (239 lines) and `holdout` (55, never tuned on): dev **237/239**, 1 never read,
+  654 requests; holdout **54/55**, 230 requests (Windows OCR on the same code: dev 204/239, 12
+  never read, holdout 50/55). Misses: v02 29 s "Excuse me, sir..." (very poor frame), two lines
+  with the clips' watermark glued on. Most phantom outputs are the clips' watermark text. Region used: x 0.215-0.785,
   y 0.70-0.985 — GTA stacks up to 4 rows when two people talk, so the region must reach ~70 %.
 - Text (`engine/text/`): `normalize.clean` = what is shown and translated (NFC, typographic
   quotes/dashes/ellipsis to ASCII, lone "|"/"l" before a word -> "I", edge junk stripped, single
@@ -199,6 +229,12 @@ UI process (PySide6)                                  Engine process (multiproce
   confirmed, and a later read of the same line scoring >= `correct_margin` 0.5 higher corrects
   it (`LineUpgraded`), per line: +5.5 points exact on the video benchmark, ~8 % more outputs
   (re-translations). Without a scorer the latest agreeing read wins.
+  **Votes** (2026-11-15): each read of a line on screen is a vote for its text (by key); a
+  text read more often gains `VOTE_VALUE` 0.25 per extra read, up to `MAX_VOTES` 4, so a glyph
+  misread on a few frames ("Coma on" once, "Come on" four times — both words) neither replaces
+  the line nor stays; votes alone (max +1.0) never beat a word the dictionary lacks (-1). A
+  read with no fewer words than the line counts as a read of it even under the similarity
+  ("fuckiJ1' left" -> "fuckin' left me..."). A merged sentence starts its votes anew.
 - **Read upgrades** (user's point: the background keeps moving, so words lost on a bright frame
   show up in later frames): a read that keeps >= 85 % of a line's words in order and adds words
   (`is_upgrade`), confirmed by a second read, replaces it -> `LineUpgraded(line_id, text,
@@ -612,7 +648,9 @@ Duraklatıldı / Ollama kapalı / Durdu, `_update_status`). Selected button: fai
   exe has no arguments (the engine child gets `-c ... --multiprocessing-fork`, so it is skipped);
   unused Qt parts trimmed (QML/Quick, Designer, tools, translations, opengl32sw: 421 -> 265 MB);
   `scripts/embedded/smoke_test.py` run through the packaged exe (Qt, theme + bundled fonts + SVG
-  icon, OpenCV, WinRT OCR, windows-capture, app modules); then `dist/LiveSubs-<version>-win64.zip` (~160 MB) for
+  icon, OpenCV, WinRT OCR, the PP-OCR reader (onnxruntime + the bundled model),
+  windows-capture, app modules); then `dist/LiveSubs-<version>-win64.zip` (126 MB with
+  onnxruntime, 99 MB before; folder 333 MB) for
   GitHub Releases. Taskbar grouping via `SetCurrentProcessExplicitAppUserModelID`.
 - Single instance (`ui/single_instance.py`): a `QLocalServer` named after the settings folder;
   a second start asks the first to show its window (`AllowSetForegroundWindow(ASFW_ANY)` first)
@@ -624,14 +662,15 @@ Duraklatıldı / Ollama kapalı / Durdu, `_update_status`). Selected button: fai
 ```
 src/livesubs/
   app.py, __main__.py, i18n/
-  assets/      icon.svg, icon.ico, header.svg, arrow_*.svg, check.svg, icons/, fonts/ (+ OFL)
+  assets/      icon.svg, icon.ico, header.svg, arrow_*.svg, check.svg, icons/, fonts/ (+ OFL),
+               ocr/ (the PP-OCR model, git-ignored, + its Apache-2.0 licence)
   core/        config.py, profiles.py, paths.py, jsonio.py, geometry.py, messages.py, backup.py,
                translation_pack.py, child_process.py, logs.py
   device/      host.py (device host process), messages.py, preview.py, audio.py
   engine/      process.py, pipeline.py
     capture/   base.py, wgc.py, mss_fallback.py, factory.py, video_device.py, shared_frames.py
     vision/    preprocess.py, change.py
-    ocr/       winrt_ocr.py, language.py
+    ocr/       ppocr.py, winrt_ocr.py, language.py
     text/      normalize.py, filters.py, stabilizer.py, quality.py, sentences.py
     translate/ base.py, ollama.py, orchestrator.py, prompt.py, cache.py
   ollama/      client.py, catalog.py, install.py, vram.py, compare.py
@@ -644,7 +683,8 @@ src/livesubs/
   web/         server.py, feed.py, static/index.html
 tests/         samples/ (+ samples.json, videos.json), helpers/, test_*.py
 scripts/       build_exe.ps1, embedded/ (sitecustomize.py, smoke_test.py), create_shortcut.ps1,
-               make_icon.py, bench_pipeline.py, bench_video_ocr.py, compare_models.py
+               make_icon.py, get_ocr_model.py, bench_pipeline.py, bench_video_ocr.py,
+               compare_models.py
 ```
 
 ## Plan and progress
@@ -1228,3 +1268,28 @@ First **finish the app** (each step committed and pushed; no new release unless 
   **Side finding, not changed:** the same +650 ms hits 26b whenever an upgrade or a merged
   sentence cancels its own request in flight (it explains the 1.34-1.40 s merged request of
   2026-10-30).
+- 2026-11-15: **OCR engine switched to PP-OCR** (branch `pp-ocr`; the user tried it in the real
+  app: "works well"). Windows OCR misread single glyphs on legible subtitles ("Kittyl", "Coma",
+  "walktn'") and dropped words on bright ground. PaddleOCR's PP-OCRv5 English mobile line
+  recogniser (ONNX from RapidOCR, 7.9 MB, Apache-2.0) on onnxruntime (MIT, CPU) read 94 % of
+  the offline evaluation frames exactly, the pipeline's Windows reads 77 %. It gets the
+  region's own colour pixels (our grey and mask images made it worse) cut along the letters
+  mask's segments; its read is used alone, Windows OCR reads only when the mask has no
+  segment or the reader is missing. Video benchmark, on-screen exact (`--set dev` / `holdout`):
+  Windows OCR dev 204/239 (12 never read), holdout 50/55; PP-OCR ~236/239 and 52/55; with the
+  per-line votes **237/239** (1 never read, 654 requests, 2466 Windows OCR calls instead of
+  16318) and **54/55** (230 requests); re-measured once after porting the votes onto `pp-ocr`:
+  the same. OCR ~30-40 ms per read (Windows: two images, 10-25 ms each).
+  **Confidence**: a segment under `MIN_CONFIDENCE` 0.8 (mean character probability) is dropped:
+  on six clips 99.9 % of subtitle reads are above 0.9 (1st percentile 0.95), half of what it
+  makes of scenery, HUD icons and cut-off glyphs is below 0.5.
+  **winrt / msvcp140 crash**: winrt 3.x wheels ship their own msvcp140.dll (14.29); once it is
+  loaded, importing onnxruntime segfaults (no Python error). Fixed by requiring winrt >= 4
+  (venv: 3.2.1 -> 4.1.0); never pin winrt below 4 again.
+  **Rejected** (measured): the ocr-preprocess branch's preprocessing on top of PP-OCR (v02
+  19 -> 18, requests +20-100 % on several clips, +4 ms); skipping the second Windows image;
+  cropping the OCR input; an int8 model; Tesseract; letting the scorer choose between the
+  PP-OCR and Windows reads (lost 2-5 points). Also in: `EmptyReadBackoff`, scorer rules for
+  glued punctuation and slang. Packaged build: smoke test passes, zip 98.6 -> 126.2 MB, the
+  packaged exe starts UI + engine. Open ideas: clips from other games as an independent check;
+  phantom outputs from static HUD text.

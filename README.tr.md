@@ -10,7 +10,7 @@
 [English](README.md)
 
 LiveSubs, bir oyun penceresinin, monitörün ya da HDMI yakalama kartından gelen konsol görüntüsünün
-altyazı bölgesini Windows'un yerleşik OCR'ı ile okur. Her satırı [Ollama](https://ollama.com)
+altyazı bölgesini yerel bir OCR modeliyle okur. Her satırı [Ollama](https://ollama.com)
 üzerinden yerel bir dil modeliyle çevirir ve çeviriyi oyunun üstünde, tıklamaları engellemeyen bir
 katmanda (overlay) ya da telefonunda gösterir. Bulut servisi kullanmaz: yakalama, OCR ve çeviri
 tamamen kendi bilgisayarında çalışır.
@@ -69,7 +69,7 @@ flowchart LR
     end
     subgraph ENG["Motor süreci"]
         CAP[Yakalama<br/>WGC / mss /<br/>kart kareleri] --> VIS[Renk maskesi +<br/>değişim algılama]
-        VIS --> OCR[Windows OCR]
+        VIS --> OCR[OCR<br/>PP-OCR satır okuyucu]
         OCR --> TXT[Temizleme, filtre,<br/>2 okuma onayı]
         TXT --> TR[Çeviri kuyruğu<br/>+ önbellek]
     end
@@ -96,11 +96,18 @@ flowchart LR
 - **Görüntü:** kareler arasında yalnızca yazı maskesi karşılaştırılır; hareket eden arka plan
   yeniden okumayı tetiklemez. Yeni bir satırın kabul edilmesi için iki okumanın aynı sonucu
   vermesi gerekir.
+- **Okuma:** yazı maskesi altyazının satırlarını da bulur; her satırı, görüntünün kendi
+  piksellerinden PaddleOCR'ın PP-OCRv5 İngilizce satır tanıma modeli okur (ONNX Runtime, CPU;
+  7,9 MB'lık model uygulamayla birlikte gelir). Modelin emin olmadığı okumalar atılır ve bir
+  satırın okumaları metni için oy verir; böylece tek karede yanlış okunan bir harf kalıcı
+  olmaz. Windows'un yerleşik OCR'ı yedektir (çok kısa satırlar ya da model yoksa). Oyun
+  kliplerinden oluşan ölçümümüzde (294 altyazı satırı) 291 satır birebir okunuyor; yalnızca
+  Windows OCR ile 254.
 - **Çeviri:** Ollama `/api/chat` akışı. Örnekli istem, sıcaklık 0, LRU + SQLite önbellek;
   önceki satırlar gerçek sohbet turları olarak verilir. Bir istek akış sırasında iptal
   edilebilir.
 
-RTX 4070 Laptop'ta (8 GB) ölçülen süreler: OCR satır başına 10–25 ms. Çeviri
+RTX 4070 Laptop'ta (8 GB) ölçülen süreler: OCR okuma başına 30–40 ms. Çeviri
 `gemma4:26b-a4b-it-qat` ya da `gemma4:12b-it-qat` ile yaklaşık 1,1–1,6 sn. Kurulum penceresi
 26b modelinin yalnızca metin kopyasını oluşturur: aynı ağırlıklar, ama kullanılmayan görüntü
 kodlayıcı olmadan. Açılan ~1 GB VRAM uzman katmanlarına kalır ve model ~%12 hızlanır.
@@ -185,6 +192,7 @@ yönetici izni gerekmez ve anti-cheat sistemlerine takılmaz.
 ```powershell
 py -3.13 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+.\.venv\Scripts\python.exe scripts\get_ocr_model.py   # OCR modeli (bir kez; depoda yok)
 .\.venv\Scripts\python.exe -m livesubs          # uygulamayı çalıştır
 .\.venv\Scripts\python.exe -m pytest            # tüm testler
 ruff check . ; ruff format .                    # lint / biçimlendirme
@@ -204,6 +212,10 @@ atlanır.
   [Audiowide](https://fonts.google.com/specimen/Audiowide) ve
   [Monoton](https://fonts.google.com/specimen/Monoton) (son ikisi Vice temasında), hepsi
   SIL Open Font License ile (metinleri `src/livesubs/assets/fonts` içinde).
+- OCR: [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR)'ın PP-OCRv5 İngilizce tanıma
+  modeli (Apache-2.0; ONNX dönüşümü [RapidOCR](https://github.com/RapidAI/RapidOCR); lisans
+  metni `src/livesubs/assets/ocr` içinde), [ONNX Runtime](https://onnxruntime.ai) (MIT) ile
+  çalışır.
 - Simgeler ve başlık görseli özgündür. LiveSubs hiçbir oyun ya da yayıncıyla bağlantılı
   değildir.
 

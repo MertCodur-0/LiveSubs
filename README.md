@@ -10,7 +10,7 @@
 [Türkçe](README.tr.md)
 
 LiveSubs reads the subtitle area of a game window, a monitor or a console's picture coming in
-through an HDMI capture card with Windows' built-in OCR, translates each line with a local LLM
+through an HDMI capture card with a local OCR model, translates each line with a local LLM
 through [Ollama](https://ollama.com), and shows the translation in a click-through overlay on top of
 the game, or on your phone. It uses no cloud APIs: capture, OCR and translation all run on your own
 PC.
@@ -67,7 +67,7 @@ flowchart LR
     end
     subgraph ENG["Engine process"]
         CAP[Capture<br/>WGC / mss /<br/>card frames] --> VIS[Colour mask +<br/>change detection]
-        VIS --> OCR[Windows OCR]
+        VIS --> OCR[OCR<br/>PP-OCR line reader]
         OCR --> TXT[Normalize, filter,<br/>2-read stabilizer]
         TXT --> TR[Translation queue<br/>+ cache]
     end
@@ -92,10 +92,16 @@ flowchart LR
   YUY2 (measured: steady 60 fps at 1080p, opens in ~0.3 s).
 - **Vision:** only the text mask is compared between frames, so a moving background never
   triggers a re-read. A new line needs two agreeing reads.
+- **Reading:** the text mask also finds the subtitle's lines; each is read from the picture's
+  own pixels by PaddleOCR's PP-OCRv5 English line recogniser on ONNX Runtime (CPU, a 7.9 MB
+  model shipped with the app). Reads the model is unsure of are dropped, and the reads of a
+  line vote on its text, so a glyph misread on one frame does not stick. Windows' built-in
+  OCR is the fallback (very short lines, or when the model is missing). On our benchmark of
+  game clips (294 subtitle lines) 291 are read exactly, against 254 with Windows OCR alone.
 - **Translation:** Ollama `/api/chat` streaming with a few-shot prompt, temperature 0, an LRU +
   SQLite cache, and history as real chat turns. Requests can be cancelled mid-stream.
 
-Measured on an RTX 4070 Laptop (8 GB): OCR takes 10–25 ms per line. Translation takes about
+Measured on an RTX 4070 Laptop (8 GB): OCR takes 30–40 ms per read. Translation takes about
 1.1–1.6 s with `gemma4:26b-a4b-it-qat` or `gemma4:12b-it-qat`. The setup dialog makes a
 text-only copy of the 26b model: the same weights without the unused vision encoder, which
 leaves ~1 GB of VRAM to the model's experts and makes it ~12 % faster.
@@ -179,6 +185,7 @@ Requires **Python 3.13** (some native dependencies do not build on newer version
 ```powershell
 py -3.13 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+.\.venv\Scripts\python.exe scripts\get_ocr_model.py   # the OCR model (once; not in the repo)
 .\.venv\Scripts\python.exe -m livesubs          # run the app
 .\.venv\Scripts\python.exe -m pytest            # all tests
 ruff check . ; ruff format .                    # lint / format
@@ -207,6 +214,10 @@ src/livesubs/
   translation overlay), [Audiowide](https://fonts.google.com/specimen/Audiowide)
   and [Monoton](https://fonts.google.com/specimen/Monoton) (the last two in the Vice theme), all
   under the SIL Open Font License (texts in `src/livesubs/assets/fonts`).
+- OCR: the PP-OCRv5 English recognition model from
+  [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) (Apache-2.0; ONNX conversion by
+  [RapidOCR](https://github.com/RapidAI/RapidOCR); licence text in `src/livesubs/assets/ocr`),
+  run with [ONNX Runtime](https://onnxruntime.ai) (MIT).
 - Icons and header art are original. LiveSubs is not affiliated with any game or publisher.
 
 ## License
