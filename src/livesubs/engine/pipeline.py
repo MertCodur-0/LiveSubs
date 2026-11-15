@@ -152,6 +152,7 @@ class Pipeline:
         self._lock = threading.Lock()
         self._orchestrator: TranslationOrchestrator | None = None
         self._waiting: tuple[int, str] | None = None
+        self._early: str | None = None  # the text whose translation was started early
         self._context_warned = False
 
     def start(self) -> None:
@@ -308,6 +309,7 @@ class Pipeline:
                 backoff.reset()
                 for event in stabilizer.update(Change.CLEARED, 0, time.monotonic()).events:
                     self._on_line(event, 0.0)
+                self._start_early(stabilizer.expected)
             if paused:
                 continue
             frame = source.latest_frame()
@@ -329,6 +331,7 @@ class Pipeline:
             decision = stabilizer.update(change, pixels, now)
             for event in decision.events:
                 self._on_line(event, 0.0)
+            self._start_early(stabilizer.expected)
             idle = not stabilizer.current and not stabilizer.awaiting_confirmation
             if not decision.read or backoff.skip(pixels, now, idle=idle):
                 continue
@@ -339,6 +342,18 @@ class Pipeline:
             self._last_rejected = str(reason) if reason else ""
             for event in stabilizer.on_read(rows, time.monotonic()):
                 self._on_line(event, ocr_ms)
+            self._start_early(stabilizer.expected)  # after the submits: they claim early work
+
+    def _start_early(self, expected: str | None) -> None:
+        """Translate a new line from its first read on (``Stabilizer.expected``); the
+        orchestrator shows the result only if the confirming read sends the same text."""
+        if expected == self._early:
+            return
+        self._early = expected
+        with self._lock:
+            orchestrator = self._orchestrator
+        if orchestrator is not None:
+            orchestrator.prepare(expected)
 
     def _debug_frame(
         self, region: np.ndarray, processed: Preprocessed, change: Change

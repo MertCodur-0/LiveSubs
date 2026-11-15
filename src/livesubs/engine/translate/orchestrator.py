@@ -16,6 +16,12 @@ the first. While the lane is idle, the text of the first read is translated at o
 that belongs to no line yet. ``submit`` of exactly that text takes the job over (in flight or
 finished); anything else cancels it, and its result is never published, cached or used as
 context. So only confirmed lines reach the screen, ~80 ms earlier.
+
+A wrong guess must be cheap for this to pay: Ollama finishes a request's prompt batch before it
+notices that the client left. With a small model on the GPU that is 20-40 ms; with a MoE model
+whose experts sit in RAM (gemma4:26b) ~650 ms, which the next line then waits. So the lane times
+how long a dropped early request keeps the backend busy, and the first one over
+``early_cancel_limit_s`` turns early starts off for the rest of the run.
 """
 
 from __future__ import annotations
@@ -47,6 +53,9 @@ MAX_BACKLOG = 3
 HISTORY_TIMEOUT_S = 60.0
 # A finished early translation nobody claimed is dropped after this long.
 PREPARED_TTL_S = 2.0
+# A dropped early request that keeps the backend busy longer than this ends early starts: at a
+# 70 % hit rate (measured on the game clips) a wrong guess may cost ~190 ms to break even.
+EARLY_CANCEL_LIMIT_S = 0.15
 # Idle seconds after which the model's keep-alive is renewed; below the shortest keep-alive
 # choice (5 min), so the model stays loaded as long as translation runs. Ollama's own timer
 # still unloads it once translation stops.
@@ -76,6 +85,7 @@ class _Job:
     text: str
     result: TranslationResult | None = None  # translated early: only publish it
     cancel: CancelToken = field(default_factory=CancelToken)
+    dropped_at: float | None = None  # early work cancelled while in flight: when
 
 
 class TranslationOrchestrator:
@@ -94,6 +104,7 @@ class TranslationOrchestrator:
         history_timeout_s: float = HISTORY_TIMEOUT_S,
         clock: Callable[[], float] = time.monotonic,
         keep_warm_s: float = KEEP_WARM_S,
+        early_cancel_limit_s: float = EARLY_CANCEL_LIMIT_S,
     ) -> None:
         self._gpu = gpu
         self._cache = cache
@@ -116,6 +127,8 @@ class TranslationOrchestrator:
         self._pending: deque[_Job] = deque()
         self._in_flight: _Job | None = None
         self._prepared: tuple[_Job, float] | None = None  # finished early, unclaimed; when
+        self._early_enabled = True
+        self._early_cancel_limit_s = early_cancel_limit_s
         self._closed = False
         self._worker = threading.Thread(target=self._run, name="translate-gpu", daemon=True)
         self._worker.start()
@@ -161,7 +174,9 @@ class TranslationOrchestrator:
             ):
                 return  # already on its way
             self._drop_early()
-            if text is None or self._in_flight is not None or self._pending:
+            if text is None or not self._early_enabled:
+                return
+            if self._in_flight is not None or self._pending:
                 return  # confirmed lines come first: no early start behind them
             self._forget_old_history(self._clock())
             self._pending.append(_Job(None, text))
@@ -172,6 +187,7 @@ class TranslationOrchestrator:
         self._prepared = None
         self._pending = deque(j for j in self._pending if j.line_id is not None)
         if self._in_flight is not None and self._in_flight.line_id is None:
+            self._in_flight.dropped_at = time.monotonic()
             self._in_flight.cancel.cancel()
             self._in_flight = None  # the worker drops its result
 
@@ -221,6 +237,11 @@ class TranslationOrchestrator:
             with self._cond:
                 if self._in_flight is job:
                     self._in_flight = None
+                if job.dropped_at is not None and self._early_enabled:
+                    busy = time.monotonic() - job.dropped_at
+                    if busy > self._early_cancel_limit_s:
+                        self._early_enabled = False
+                        log.info("Early starts off: a dropped request took %.0f ms", busy * 1000)
                 if job.cancel.cancelled or (result is None and error is None):
                     continue  # superseded by an upgrade, or early work that was dropped
                 line_id = job.line_id

@@ -437,3 +437,39 @@ def test_a_continuation_under_its_line_upgrades_it(clock: Clock) -> None:
 )
 def test_sentence_continues(previous: str, text: str, merged: bool) -> None:
     assert sentences.continues(previous, text) is merged
+
+
+# --- the text a confirming read would send (early start of the translation) ---------------------
+
+
+def test_a_line_read_once_is_expected_until_it_is_confirmed_or_gone(clock: Clock) -> None:
+    stab = Stabilizer()
+    assert stab.expected is None
+    read(stab, clock, "Heyl Get outl", change=Change.APPEARED)
+    assert stab.expected == "Heyl Get outl"
+    read(stab, clock, "Who is this guy?")  # another text: the first read was not the line
+    assert stab.expected == "Who is this guy?"
+    read(stab, clock, "Who is this guy?")
+    assert stab.expected is None and stab.current == ["Who is this guy?"]
+
+    read(stab, clock, "Who is this guy?", "Yeah.", change=Change.CHANGED, after=1.0)
+    assert stab.expected == "Yeah."
+    stab.update(Change.CLEARED, 0, clock(0.1))
+    assert stab.expected is None
+
+
+def test_a_line_coming_back_expects_no_translation(clock: Clock) -> None:
+    stab = Stabilizer()
+    appear_and_confirm(stab, clock, LINE)
+    stab.update(Change.CLEARED, 0, clock(0.1))
+    read(stab, clock, LINE, change=Change.APPEARED, after=0.1)
+    assert stab.expected is None  # its translation is kept
+
+
+def test_the_next_piece_of_a_sentence_expects_the_whole_sentence(clock: Clock) -> None:
+    stab = Stabilizer()
+    appear_and_confirm(stab, clock, "I knew Fisk")
+    read(stab, clock, "wouldn't go quietly.", change=Change.CHANGED, after=0.8)
+    assert stab.expected == "I knew Fisk wouldn't go quietly."
+    events = read(stab, clock, "wouldn't go quietly.")
+    assert events[0].text == "I knew Fisk wouldn't go quietly."  # what was expected

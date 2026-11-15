@@ -1,5 +1,6 @@
 import json
 import threading
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -588,3 +589,123 @@ def test_close_cancels_work(fake: FakeBackend, events: Events) -> None:
     fake.release.set()
     orch.close()
     assert events.items == []
+
+
+# --- early start: translating a line from its first read on -------------------------------------
+
+
+def _until(condition, timeout: float = 5.0) -> None:
+    deadline = time.monotonic() + timeout
+    while not condition():
+        assert time.monotonic() < deadline
+        time.sleep(0.005)
+
+
+def test_an_early_translation_in_flight_becomes_the_confirmed_lines(
+    orchestrator: TranslationOrchestrator, fake: FakeBackend, events: Events
+) -> None:
+    fake.release.clear()
+    orchestrator.prepare("Get in the car.")  # read once
+    assert fake.started.acquire(timeout=5)  # already being translated
+    orchestrator.submit(1, "Get in the car.")  # the second read agrees
+    fake.release.set()
+    done = events.wait_for(1)[0]
+    assert (done.line_id, done.result.text, done.result.cached) == (1, "GET IN THE CAR.", False)
+    assert len(fake.requests) == 1
+
+    orchestrator.submit(2, "Get in the car.")
+    assert events.wait_for(2)[1].result.cached  # it was cached once line 1 owned it
+
+
+def test_an_early_translation_that_finished_waits_for_its_line(
+    fake: FakeBackend, events: Events
+) -> None:
+    cache = TranslationCache()
+    orch = TranslationOrchestrator(fake, cache, events)
+    try:
+        orch.prepare("Get in the car.")
+        _until(lambda: orch._prepared is not None)
+        assert events.items == []  # nothing is shown before the line is confirmed
+        assert cache.get(fake.model, orch._cache_scope, "Get in the car.") is None
+        orch.submit(1, "Get in the car.")
+        done = events.wait_for(1)[0]
+        assert (done.line_id, done.result.text, done.result.cached) == (1, "GET IN THE CAR.", False)
+        assert len(fake.requests) == 1
+    finally:
+        orch.close()
+
+
+def test_an_early_translation_nobody_confirms_leaves_no_trace(
+    fake: FakeBackend, events: Events
+) -> None:
+    cache = TranslationCache()
+    orch = TranslationOrchestrator(fake, cache, events)
+    try:
+        fake.release.clear()
+        orch.prepare("TRADE CYBERLEEK")  # a sign in the scenery, read once
+        assert fake.started.acquire(timeout=5)
+        orch.prepare(None)  # the next read did not show it
+        fake.release.set()
+        orch.submit(1, "Who is this guy?")
+        assert [e.line_id for e in events.wait_for(1)] == [1]
+        assert fake.requests[-1].history == []  # never used as context
+        assert cache.get(fake.model, orch._cache_scope, "TRADE CYBERLEEK") is None
+        time.sleep(0.05)
+        assert len(events.items) == 1
+    finally:
+        orch.close()
+
+
+def test_a_line_confirmed_with_another_text_is_translated_anew(
+    orchestrator: TranslationOrchestrator, fake: FakeBackend, events: Events
+) -> None:
+    fake.release.clear()
+    orchestrator.prepare("Heyl Get outl")  # the first read was garbled
+    assert fake.started.acquire(timeout=5)
+    orchestrator.submit(1, "Hey! Get out!")  # the cleaner read was confirmed
+    fake.release.set()
+    done = events.wait_for(1)
+    assert [(e.line_id, e.source) for e in done] == [(1, "Hey! Get out!")]
+    assert [r.text for r in fake.requests] == ["Heyl Get outl", "Hey! Get out!"]
+    time.sleep(0.05)
+    assert len(events.items) == 1
+
+
+def test_nothing_starts_early_behind_confirmed_lines(
+    orchestrator: TranslationOrchestrator, fake: FakeBackend, events: Events
+) -> None:
+    fake.release.clear()
+    orchestrator.submit(1, "A slow line.")
+    assert fake.started.acquire(timeout=5)
+    orchestrator.prepare("Yeah.")  # the lane is busy: it waits for its confirmation
+    fake.release.set()
+    events.wait_for(1)
+    time.sleep(0.05)
+    assert [r.text for r in fake.requests] == ["A slow line."]
+    orchestrator.submit(2, "Yeah.")
+    assert [e.line_id for e in events.wait_for(2)] == [1, 2]
+
+
+def test_early_starts_end_when_a_dropped_request_keeps_the_model_busy(
+    fake: FakeBackend, events: Events
+) -> None:
+    """Ollama finishes the prompt of a request whose client left: with a slow model the next
+    line would wait for every wrong guess."""
+    orch = TranslationOrchestrator(fake, TranslationCache(), events, early_cancel_limit_s=0.05)
+    try:
+        orch.prepare("PARKING")
+        assert fake.started.acquire(timeout=5)
+        orch.prepare(None)  # dropped, and the backend lets go at once: early starts stay on
+        fake.release.clear()
+        orch.prepare("EXIT 24 NORTH")
+        assert fake.started.acquire(timeout=5)
+        orch.prepare(None)
+        time.sleep(0.15)  # the backend is still busy with the dropped request
+        fake.release.set()
+        _until(lambda: not orch._early_enabled)
+        orch.prepare("Who is this guy?")
+        orch.submit(1, "Who is this guy?")
+        assert [e.line_id for e in events.wait_for(1)] == [1]
+        assert [r.text for r in fake.requests] == ["PARKING", "EXIT 24 NORTH", "Who is this guy?"]
+    finally:
+        orch.close()

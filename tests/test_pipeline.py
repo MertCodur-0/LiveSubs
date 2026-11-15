@@ -526,3 +526,33 @@ def test_lines_stacked_by_several_speakers_are_translated_one_by_one() -> None:
     screens = [e.line_ids for e in recorder.of(SubtitleLines)]
     assert screens == [(1,), (1, 2), (1, 2, 3), (2, 3), (3,), ()]
     assert len(recorder.of(SubtitleCleared)) == 1
+
+
+def test_translation_starts_at_the_first_read_of_a_line(
+    two_lines_and_a_gap: tuple[list[Sample], list[tuple[np.ndarray, float]]],
+) -> None:
+    """The request leaves before the line is confirmed (``SubtitleRead``), and each line still
+    costs one request and is shown once."""
+    (a, _), scenes = two_lines_and_a_gap
+    source, recorder = ScriptedSource(scenes), Recorder()
+
+    class Backend(UpperCaseBackend):
+        def translate(self, request: TranslationRequest, cancel: CancelToken) -> TranslationResult:
+            recorder(request)  # in the order things happened
+            return super().translate(request, cancel)
+
+    pipeline = Pipeline(
+        start_command(a),
+        recorder,
+        open_source=lambda spec: (source.open(), source)[1],
+        backend_factory=lambda start: Backend(),
+    )
+    run(pipeline, source)
+
+    reads = [e for e in recorder.of(SubtitleRead) if not e.upgrade]
+    requests = recorder.of(TranslationRequest)
+    assert [r.text for r in requests] == [e.text for e in reads]
+    assert [e.line_id for e in recorder.of(SubtitleTranslated)] == [1, 2]
+    second = reads[1]  # the first line may be read while the model still warms up
+    request = next(r for r in requests if r.text == second.text)
+    assert recorder.events.index(request) < recorder.events.index(second)

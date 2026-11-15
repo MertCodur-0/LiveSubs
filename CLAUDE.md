@@ -217,7 +217,8 @@ UI process (PySide6)                                  Engine process (multiproce
 - Cache: in-memory LRU + SQLite, key = (model, profile + settings digest, normalized text);
   dialogue context not in key.
 - Latency budget (8B on GPU): capture+preprocess ~10 ms, OCR 30–80 ms, confirm ~50 ms,
-  translate 250–600 ms => ~0.4–0.8 s on-screen to overlay. `scripts/bench_pipeline.py` measures it.
+  translate 250–600 ms => ~0.4–0.8 s on-screen to overlay. With the early start (model on the GPU)
+  the confirming read no longer adds to it: measured ~35 ms + the model's time at 30 fps reading. `scripts/bench_pipeline.py` measures it.
 
 ### Capture source abstraction (`engine/capture/base.py`)
 
@@ -361,7 +362,7 @@ Implementation (step 7, `engine/translate/`):
   updated on publish; an upgrade replaces its own entry and never sees itself as context;
   forgotten after 60 s without a new line (`HISTORY_TIMEOUT_S`: another scene). Idle for 240 s
   (`KEEP_WARM_S`, below the shortest keep-alive choice) -> `backend.load()` renews the model's
-  keep-alive (18 ms when loaded), so it never unloads while translation runs. Events: `LineTranslated` / `LineFailed`. (Was "newest wins" until 2026-10-22, see log.)
+  keep-alive (18 ms when loaded), so it never unloads while translation runs. Events: `LineTranslated` / `LineFailed`. **Early start** (`prepare`, 2026-11-15, see decision log): a new line's first read is translated while the lane is idle and claimed by the confirming `submit`; it switches itself off when a dropped request keeps the model busy (26b). (Was "newest wins" until 2026-10-22, see log.)
 - `scripts/compare_models.py`: sample lines (expected EN) through several models next to the
   user's `reference_tr`, with warm-up time, VRAM fit (`/api/ps` size_vram vs size) and latency.
   `bench_pipeline.py` now runs stabilizer + orchestrator and reports **appear -> translated**.
@@ -1204,14 +1205,26 @@ First **finish the app** (each step committed and pushed; no new release unless 
 - 2026-11-14 (user): **reading fps default 10 -> 30** (latency: the wait for the next tick drops
   from 0-100 ms to 0-33 ms; `CAPTURE_MAX_FPS` is 30 anyway). The user's two saved profiles were
   switched too. CPU cost at 30 fps not measured yet (one preprocess per new frame).
-- 2026-11-15 (user agreed; **work in progress, stopped mid-way**): **early start of the
-  translation** — the request leaves at a new line's *first* read instead of after the
-  confirming one (~80-90 ms), and is only shown if the second read confirms exactly that text.
-  Done: `Stabilizer.expected` (the text a confirming read would send; None for a line coming
-  back) and `TranslationOrchestrator.prepare(text | None)` (idle lane only; `submit` of the same
-  text takes the job over, anything else cancels it; unclaimed results are never published,
-  cached or put in the history). **Still to do:** call `prepare(stabilizer.expected)` from
-  `pipeline._loop` after each batch of events (after the submits), tests for both parts, and
-  the measurement `scripts/measure_early_start.py` (how often the first read equals the
-  confirmed text on the 20 clips at 30 fps; it ran > 15 min without finishing, results not
-  seen) — then keep or drop the feature by that number, and remove the script.
+- 2026-11-15 (user agreed): **early start of the translation** — the request leaves at a new
+  line's *first* read instead of after the confirming one, and is shown only if the second read
+  sends exactly that text. `Stabilizer.expected` = the text a confirming read of the topmost new
+  line would send (the merged sentence for a continuation; None for a line coming back);
+  `pipeline._start_early` passes it to `TranslationOrchestrator.prepare(text | None)` after each
+  batch of events: idle lane only, `submit` of the same text takes the job over (in flight or
+  finished, kept `PREPARED_TTL_S` 2 s), anything else cancels it; unclaimed results are never
+  published, cached or put in the history. Measured:
+  (1) 20 clips replayed at 30 fps: the first read equals the confirmed text for **490 of 698**
+  new lines (70 %; 97 % on a clean clip, v16) — the misses are mostly the clips' watermark rows
+  and garbled first reads; ~60 % of the early starts are dropped again (watermark, scenery).
+  (2) **What a dropped request costs** (live, request cancelled after 80 ms, then the real
+  line): `gemma4-text:e4b` +20-40 ms; `gemma4-text:26b` **+650 ms** — Ollama finishes the
+  request's prompt batch before it notices the client left, even when the connection itself is
+  dropped at once (tried). So the lane times each dropped early request and the first one that
+  keeps the backend busy > `EARLY_CANCEL_LIMIT_S` (0.15 s) turns early starts off for the rest
+  of the run (one log line): on for models on the GPU, off after the first wrong guess with 26b.
+  (3) End to end (real pipeline + Ollama, rendered captions at 60 fps, 9 lines, back to back):
+  e4b appear -> translated mean 362 / 383 ms with, 456 / 412 ms without (minus the model's own
+  time: ~35 vs ~115 ms, i.e. the expected ~80 ms); 26b 979 vs 1098 ms while every guess is right.
+  **Side finding, not changed:** the same +650 ms hits 26b whenever an upgrade or a merged
+  sentence cancels its own request in flight (it explains the 1.34-1.40 s merged request of
+  2026-10-30).
