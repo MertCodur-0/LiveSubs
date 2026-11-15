@@ -387,6 +387,7 @@ STRINGS: dict[str, str] = {
     "settings.advanced": "Gelişmiş",
     "settings.context_lines_tip": (
         "Önceki satırlar çeviriye bağlam olarak verilir: daha tutarlı, biraz daha yavaş. "
+        "En az bu kadar, en çok iki katına yakın satır gönderilir (böylesi daha hızlı). "
         "Bir sonraki Başlat'ta geçerli olur."
     ),
     "settings.fps_tip": (

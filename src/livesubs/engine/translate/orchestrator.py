@@ -11,6 +11,13 @@ results are always published in reading order and history follows the dialogue. 
 ``history_timeout_s`` without a new line the history is dropped: the next line most likely
 belongs to another scene, and the old lines would only mislead the model.
 
+The history **grows and is cut in one go** (``history_size`` lines up to twice that minus one,
+then back to ``history_size``) instead of sliding by one line per line: llama.cpp cannot rewind
+the prompt cache of a sliding-window model (Gemma), so a prompt that only *continues* the last
+one (the same lines plus the new one) costs the new line alone, while one whose first history
+line changed is processed again from the examples on. With gemma4:26b that is ~280 ms of prompt
+time instead of ~530 ms on the lines between two cuts.
+
 **Early start** (``prepare``): the reader confirms a new line with a second read, ~80 ms after
 the first. While the lane is idle, the text of the first read is translated at once, as a job
 that belongs to no line yet. ``submit`` of exactly that text takes the job over (in flight or
@@ -115,7 +122,8 @@ class TranslationOrchestrator:
         # Cache scope: the profile plus a digest of its translation settings.
         digest = prompt.fingerprint(game_context, self._glossary, self._examples)
         self._cache_scope = f"{profile_id}#{digest}"
-        self._history: deque[tuple[int, ContextLine]] = deque(maxlen=max(history_size, 1))
+        self._history: deque[tuple[int, ContextLine]] = deque()
+        self._history_size = max(history_size, 1)
         self._history_enabled = history_size > 0
         self._history_timeout_s = history_timeout_s
         self._clock = clock
@@ -293,6 +301,9 @@ class TranslationOrchestrator:
                 self._history[-1] = entry
             else:
                 self._history.append(entry)
+                if len(self._history) > 2 * self._history_size - 1:
+                    while len(self._history) > self._history_size:
+                        self._history.popleft()  # one cut, then the prompt only grows again
         self._emit(LineTranslated(job.line_id, job.text, result))
 
     def _emit(self, event: TranslationEvent) -> None:

@@ -383,7 +383,10 @@ Implementation (step 7, `engine/translate/`):
   the glossary terms found in the line (`relevant_terms`: whole words, case/accents/punctuation
   ignored, plural "s" allowed) -> the line. The stable prefix is reused by Ollama's prompt cache.
 - `ollama.py`: `/api/chat` stream, `think: false`, `num_ctx`, optional `num_gpu`, `num_predict` 200,
-  temperature 0, `keep_alive` 30m; `load()`, `unload()` (`keep_alive: 0`) and **`warm_up()`**:
+  temperature 0, `keep_alive` 30m, **`num_batch` 128** (`NUM_BATCH`: the prompt cache of a
+  sliding-window model only resumes from a checkpoint llama.cpp saves one batch before the
+  prompt's end; see decision log 2026-11-15); `load()` (sends the same options — without them
+  Ollama reloads the model twice), `unload()` (`keep_alive: 0`) and **`warm_up()`**:
   the first chat after a load took ~4 s (measured twice) even with the model already loaded,
   later ones 100-600 ms — so translation start runs one tiny real translation.
 - `cache.py`: LRU (2000) + SQLite WAL (`cache_dir()/translations.sqlite3`), key = (model, profile,
@@ -394,11 +397,12 @@ Implementation (step 7, `engine/translate/`):
   new line never cancels the one in flight; waiting lines form a FIFO of at most `MAX_BACKLOG` (3,
   the oldest waiting line is dropped beyond that); cache hits go through the queue too (instant
   when their turn comes), so publishing order = reading order. An upgrade (same `line_id`)
-  replaces its own waiting job or cancels its own in-flight request. History (default 3 lines)
+  replaces its own waiting job or cancels its own in-flight request. History (default 3 lines; it **grows to 2N-1 = 5 and is cut back to N in one go**
+  instead of sliding per line, so most prompts only continue the last one — prompt cache)
   updated on publish; an upgrade replaces its own entry and never sees itself as context;
   forgotten after 60 s without a new line (`HISTORY_TIMEOUT_S`: another scene). Idle for 240 s
   (`KEEP_WARM_S`, below the shortest keep-alive choice) -> `backend.load()` renews the model's
-  keep-alive (18 ms when loaded), so it never unloads while translation runs. Events: `LineTranslated` / `LineFailed`. **Early start** (`prepare`, 2026-11-15, see decision log): a new line's first read is translated while the lane is idle and claimed by the confirming `submit`; it switches itself off when a dropped request keeps the model busy (26b). (Was "newest wins" until 2026-10-22, see log.)
+  keep-alive (~25 ms when loaded), so it never unloads while translation runs. Events: `LineTranslated` / `LineFailed`. **Early start** (`prepare`, 2026-11-15, see decision log): a new line's first read is translated while the lane is idle and claimed by the confirming `submit`; it switches itself off when a dropped request keeps the model busy (26b). (Was "newest wins" until 2026-10-22, see log.)
 - `scripts/compare_models.py`: sample lines (expected EN) through several models next to the
   user's `reference_tr`, with warm-up time, VRAM fit (`/api/ps` size_vram vs size) and latency.
   `bench_pipeline.py` now runs stabilizer + orchestrator and reports **appear -> translated**.
@@ -1297,3 +1301,23 @@ First **finish the app** (each step committed and pushed; no new release unless 
   PP-OCR reader with per-line votes, dim-subtitle preprocessing, stacked lines translated one
   by one, split sentences, early start of the translation, 30 fps reading, Manrope overlay
   font, live edits reaching the running pipeline.
+- 2026-11-15: **Prompt cache made to work for gemma4:26b** (branch `prompt-cache`; started as
+  "make a cancelled request cheaper", user's pick). Measured first: replacing a request in
+  flight by cancelling it is already the cheapest way (letting it finish costs ~190 ms more,
+  a second connection the same); the loss is the cancelled request's prompt batch, which
+  Ollama cannot abandon — and that batch was the **whole prompt on every line** (~740 ms of a
+  ~1.1 s line, whatever changed). Ollama's log (llama.cpp server): Gemma's sliding-window
+  attention cannot rewind the cache, only restore a *context checkpoint*, saved one batch
+  before the prompt's end and 4 tokens before it; with the default batch of 512 a 370-token
+  prompt has no usable one ("forcing full prompt re-processing"). The 2026-10-30 cache
+  measurement worked only because the pack's prompt was > 512 tokens.
+  Two changes: (1) `num_batch` 128; (2) the history grows and is cut in one go. Dialogue of
+  16 lines, real history, 26b at 39 % on the GPU, median per line: 1049 -> 822 ms with (1)
+  -> **645 ms** with both (pack-sized prompt, 661 tokens: 1136 -> 913 -> 813); through the
+  real orchestrator ~1050 -> 697 ms. An upgrade 100 ms into its line's request: 1848 ->
+  ~1350 ms. Batch 96 / 160 / 256 no better; 32 and 8 make a full prompt take 3-4 s.
+  `gemma4-text:e4b` (all on the GPU): ~250 ms either way. Lines right after a cut still
+  cost ~1.0-1.2 s.
+  **Found on the way:** `load()` (the keep-warm request every 240 s idle) sent no options,
+  so Ollama 0.40.15 reloaded the model with its defaults (14 s) and the next translation
+  reloaded it again (13-16 s); it sends the options now (22-30 ms).

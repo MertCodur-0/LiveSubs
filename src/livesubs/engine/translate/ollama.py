@@ -29,6 +29,14 @@ DEFAULT_URL = "http://127.0.0.1:11434"
 _TIMEOUT = httpx.Timeout(connect=2.0, read=120.0, write=10.0, pool=5.0)
 # A subtitle translation is short; this only stops a model that rambles.
 MAX_OUTPUT_TOKENS = 200
+# Tokens per prompt batch. llama.cpp saves a prompt-cache checkpoint one batch before the end of
+# the prompt, and a sliding-window model (Gemma) can only resume from a checkpoint: with the
+# default 512 a prompt shorter than that never gets one and is processed whole for every line.
+# 128 covers the part that changes (history + line) and leaves the checkpoint in the stable part
+# (rules + examples). gemma4:26b, per line: 1049 -> 822 ms; 96 and 160 were no better, 32 and
+# below make a full prompt slow (366 tokens: 3.9 s). Models fully on the GPU do not care.
+# A request in flight is also only abandoned between batches.
+NUM_BATCH = 128
 
 
 class OllamaBackend:
@@ -64,6 +72,7 @@ class OllamaBackend:
         options: dict[str, Any] = {
             "num_ctx": self.num_ctx,
             "num_predict": MAX_OUTPUT_TOKENS,
+            "num_batch": NUM_BATCH,
             "temperature": self.temperature,
         }
         if self.num_gpu is not None:
@@ -122,8 +131,14 @@ class OllamaBackend:
         )
 
     def load(self) -> None:
-        """Load the model into memory (empty prompt)."""
-        self._generate({"model": self._model, "keep_alive": self.keep_alive})
+        """Load the model into memory (empty prompt), or renew the keep-alive of a loaded one.
+
+        The options must be those of the translations: without them Ollama reloads the model
+        with its defaults, and the next translation reloads it once more (gemma4:26b: 14 s
+        each, measured; with the options 30 ms)."""
+        self._generate(
+            {"model": self._model, "keep_alive": self.keep_alive, "options": self._options()}
+        )
 
     def warm_up(self) -> float:
         """Load the model and run one short translation; returns the time it took in ms.

@@ -1,3 +1,4 @@
+import itertools
 import json
 import threading
 import time
@@ -166,6 +167,7 @@ def test_streamed_translation(backend: OllamaBackend) -> None:
     assert body["think"] is False
     assert body["keep_alive"] == "30m"
     assert body["options"]["num_ctx"] == 2048
+    assert body["options"]["num_batch"] == 128  # the prompt cache needs it, see NUM_BATCH
     assert body["options"]["num_gpu"] == 99
     assert body["messages"][-1] == {"role": "user", "content": "Get in the car."}
 
@@ -258,6 +260,10 @@ def test_load_and_unload(backend: OllamaBackend) -> None:
     bodies = [json.loads(call.request.content) for call in route.calls]
     assert [b["keep_alive"] for b in bodies] == ["30m", 0]
     assert all(b["model"] == "qwen3:8b" and b["stream"] is False for b in bodies)
+    # Without the translations' options Ollama reloads the model with its defaults (14 s for a
+    # big one), and the next translation reloads it again.
+    assert bodies[0]["options"]["num_ctx"] == 2048
+    assert bodies[0]["options"]["num_batch"] == 128
 
 
 @respx.mock
@@ -526,6 +532,27 @@ def test_history_feeds_the_next_request(
         "We're late.",
         "Now get in the car.",
     ]
+
+
+def test_history_grows_and_is_cut_in_one_go(
+    orchestrator: TranslationOrchestrator, fake: FakeBackend, events: Events
+) -> None:
+    """A prompt that continues the previous one costs only its new line (the model's prompt
+    cache); one whose first history line changed is processed again. So the history must not
+    slide on every line: it grows from 3 to 5 lines and is then cut back to 3."""
+    for line_id in range(1, 11):
+        orchestrator.submit(line_id, f"Line {line_id}.")
+        events.wait_for(line_id)
+    seen = [[c.source.split()[1].rstrip(".") for c in r.history] for r in fake.requests]
+    assert seen[:6] == [[], ["1"], ["1", "2"], ["1", "2", "3"], ["1", "2", "3", "4"], list("12345")]
+    assert seen[6:] == [
+        ["4", "5", "6"],
+        ["4", "5", "6", "7"],
+        ["4", "5", "6", "7", "8"],
+        list("789"),
+    ]
+    continued = [new[: len(old)] == old for old, new in itertools.pairwise(seen)]
+    assert continued.count(False) == 2  # two cuts in ten lines, not one per line
 
 
 def test_history_is_bounded_and_can_be_cleared(fake: FakeBackend, events: Events) -> None:
