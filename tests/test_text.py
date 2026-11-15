@@ -473,3 +473,61 @@ def test_the_next_piece_of_a_sentence_expects_the_whole_sentence(clock: Clock) -
     assert stab.expected == "I knew Fisk wouldn't go quietly."
     events = read(stab, clock, "wouldn't go quietly.")
     assert events[0].text == "I knew Fisk wouldn't go quietly."  # what was expected
+
+
+# --- choosing among many reads of one line --------------------------------------------------------
+
+
+def test_the_text_read_most_often_wins_a_tie(clock: Clock) -> None:
+    """Both are words, so they score alike; the line was read "Come" far more often."""
+    stab = Stabilizer(scorer=ReadScorer().score)
+    appear_and_confirm(stab, clock, "Coma on, you fuck!")
+    events = []
+    for _ in range(3):
+        events += read(stab, clock, "Come on, you fuck!", after=0.5)
+    assert events == [LineUpgraded(1, "Come on, you fuck!", previous="Coma on, you fuck!")]
+    for _ in range(2):  # one stray read of the old text never brings it back
+        assert read(stab, clock, "Coma on, you fuck!", after=0.5) == []
+    assert stab.current == ["Come on, you fuck!"]
+
+
+def test_one_differing_read_never_replaces_a_line_scoring_alike(clock: Clock) -> None:
+    stab = Stabilizer(scorer=ReadScorer().score)
+    appear_and_confirm(stab, clock, "Come on, you fuck!")
+    for text in ("Coma on, you fuck!", "Come on, you fuck!", "Coma on, you fuck!"):
+        assert read(stab, clock, text, after=0.5) == []
+    assert stab.current == ["Come on, you fuck!"]
+
+
+def test_votes_never_outweigh_a_word_the_dictionary_lacks(clock: Clock) -> None:
+    """A misread repeated on every frame (one OCR input keeps reading "Kittyl") must not beat the
+    clean read with votes alone."""
+    unknown = {"Kittyl"}
+    scorer = ReadScorer(lambda text: [w for w in text.split() if w in unknown])
+    stab = Stabilizer(scorer=scorer.score)
+    appear_and_confirm(stab, clock, "Here kitty, Kitty!")
+    for _ in range(8):
+        assert read(stab, clock, "Here kitty, Kittyl", after=0.5) == []
+    assert stab.current == ["Here kitty, Kitty!"]
+
+
+def test_slang_read_more_often_is_kept(clock: Clock) -> None:
+    """ "I'ma" is unknown to the dictionary, "lima" is a word: the slang must not be "corrected"
+    away by a single read, and wins back when it is what the screen shows."""
+    scorer = ReadScorer(lambda text: [w for w in text.split() if w == "I'ma"])
+    stab = Stabilizer(scorer=scorer.score)
+    appear_and_confirm(stab, clock, "I'ma fuck your ass up!")
+    assert read(stab, clock, "lima fuck your ass up!", after=0.5) == []
+    assert stab.current == ["I'ma fuck your ass up!"]
+
+
+def test_a_cleaner_read_with_a_garbled_word_fixed_corrects_the_line(clock: Clock) -> None:
+    """Neither an upgrade (a word differs) nor similar enough by ratio, but the same line."""
+    stab = Stabilizer(scorer=ReadScorer().score)
+    appear_and_confirm(stab, clock, "This is why she fuckiJ1' left")
+    events = read(stab, clock, "This is why she fuckin' left me...", after=0.5)
+    assert events == [
+        LineUpgraded(
+            1, "This is why she fuckin' left me...", previous="This is why she fuckiJ1' left"
+        )
+    ]

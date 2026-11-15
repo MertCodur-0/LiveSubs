@@ -62,6 +62,11 @@ MIN_PART_WORDS = 3
 # Rows of one wrapped sentence are centred under each other; a row whose centre is further off
 # (share of the region's width) is something else.
 MAX_CENTER_SHIFT = 0.05
+# Each read of a line on screen is a vote for its text (by key); a text read more often than
+# another gains this much score per extra read, up to MAX_VOTES of them. Windows OCR misreads a
+# glyph on some frames only ("Coma on" once, "Come on" four times), and both may be words.
+VOTE_VALUE = 0.25
+MAX_VOTES = 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,6 +153,22 @@ class _Candidate:
 
 
 @dataclass
+class _Vote:
+    text: str  # the best-scoring read of this key
+    score: float
+    reads: int = 0
+
+    def add(self, text: str, score: float) -> None:
+        self.reads += 1
+        if score > self.score:
+            self.text, self.score = text, score
+
+    @property
+    def value(self) -> float:
+        return self.score + VOTE_VALUE * min(self.reads - 1, MAX_VOTES)
+
+
+@dataclass
 class _Line:
     line_id: int
     text: str  # what is on screen now (matched against new reads)
@@ -157,6 +178,7 @@ class _Line:
     misses: int = 0  # reads in a row without it
     seen: float = 0.0  # last read that showed it
     upgrade: _Candidate | None = None
+    votes: dict[str, _Vote] = field(default_factory=dict)  # reads of ``text``, by key
 
     @property
     def full(self) -> str:
@@ -300,7 +322,10 @@ class Stabilizer:
         short = len(key(line.text).split()) < MIN_PART_WORDS
         if short or not is_upgrade(text, line.text):
             line.upgrade = None  # another reading of the line: maybe a cleaner one
-            if self._similar(text, line.text):
+            # Not fewer words: a garbled word can push a read of the same line under
+            # ``similarity`` ("fuckiJ1' left" / "fuckin' left me...").
+            fuller = len(key(text).split()) >= len(key(line.text).split())
+            if self._similar(text, line.text) or fuller:
                 return self._correct(line, text, score)
             return None
         previous = line.upgrade
@@ -314,15 +339,25 @@ class Stabilizer:
         return self._replace(line, upgrade.text, upgrade.score)
 
     def _correct(self, line: _Line, text: str, score: float) -> LineUpgraded | None:
-        """A read of a line on screen replaces it when it scores clearly better."""
-        if self.scorer is None or score < line.score + self.correct_margin:
+        """A read of a line on screen replaces it when it scores clearly better - counting the
+        reads that agree with it (``VOTE_VALUE``)."""
+        if self.scorer is None:
             return None
-        return self._replace(line, text, score)
+        current = line.votes.setdefault(key(line.text), _Vote(line.text, line.score, 1))
+        line.votes.setdefault(key(text), _Vote(text, score)).add(text, score)
+        best = max(line.votes.values(), key=lambda vote: vote.value)
+        # (Scores are sums of fractions: a margin met exactly must not fail on rounding.)
+        if best is current:  # the same words, other punctuation
+            better = best.score - line.score > self.correct_margin - 1e-9
+        else:
+            better = best.value - current.value > self.correct_margin - 1e-9
+        return self._replace(line, best.text, best.score) if better else None
 
     @staticmethod
     def _replace(line: _Line, text: str, score: float) -> LineUpgraded:
         before = line.full
         line.text, line.score = text, score
+        line.votes.setdefault(key(text), _Vote(text, score, 1))
         return LineUpgraded(line.line_id, line.full, previous=before)
 
     def _confirm(self, candidate: _Candidate, row: int, now: float, matched: set[int]) -> Event:
@@ -337,7 +372,7 @@ class Stabilizer:
             (self._gone if merged in self._gone else self._lines).remove(merged)
             before = merged.full
             merged.pieces.append(merged.text)
-            merged.text, merged.score = text, candidate.score
+            merged.text, merged.score, merged.votes = text, candidate.score, {}
             self._show(merged, row, now, matched)
             return LineUpgraded(merged.line_id, merged.full, previous=before)
         line = _Line(self._next_id, text, candidate.score)
