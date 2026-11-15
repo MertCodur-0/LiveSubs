@@ -1293,3 +1293,7 @@ First **finish the app** (each step committed and pushed; no new release unless 
   glued punctuation and slang. Packaged build: smoke test passes, zip 98.6 -> 126.2 MB, the
   packaged exe starts UI + engine. Open ideas: clips from other games as an independent check;
   phantom outputs from static HUD text.
+- 2026-11-15: **Released v0.7.0** (user's choice: merge `pp-ocr` into main, push, release):
+  PP-OCR reader with per-line votes, dim-subtitle preprocessing, stacked lines translated one
+  by one, split sentences, early start of the translation, 30 fps reading, Manrope overlay
+  font, live edits reaching the running pipeline.
