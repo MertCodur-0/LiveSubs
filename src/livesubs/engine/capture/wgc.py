@@ -4,11 +4,14 @@ Frames arrive on the library's native thread, only when the content changes and 
 ``1 / max_fps`` seconds. They are stored without copying: each frame owns its buffer, which the
 library never reuses (verified on 2.0.1; see CLAUDE.md decision log).
 
-windows-capture 2.0.1 crashes (access violation) when a later session starts in two situations,
-both reproduced and guarded against here:
+windows-capture 2.0.1 crashes (access violation) when a later session starts in three
+situations, all reproduced and guarded against here:
 
 - a window of the capturing process was captured before -> such windows are refused;
-- a WMI query ran after a session -> ``platform`` is kept off WMI (``keep_platform_off_wmi``).
+- a WMI query ran after a session -> ``platform`` is kept off WMI (``keep_platform_off_wmi``);
+- the process's COM multithreaded apartment was torn down since the last session (the thread
+  that held it ended) -> it is kept alive (``com.keep_mta_alive``). The WMI case is most
+  likely the same thing: Python's WMI query initialises and leaves COM on a thread of its own.
 """
 
 from __future__ import annotations
@@ -30,7 +33,7 @@ from livesubs.engine.capture.base import (
     SourceLostError,
     SourceUnavailableError,
 )
-from livesubs.platform import win32
+from livesubs.platform import com, win32
 
 log = logging.getLogger(__name__)
 
@@ -92,6 +95,8 @@ class _WgcSource(BaseFrameSource):
 
     def _start(self) -> None:
         keep_platform_off_wmi()
+        if not com.keep_mta_alive():
+            log.warning("COM's apartment could not be pinned; a later capture start may crash")
         win32.enable_per_monitor_dpi_awareness()
         interval_ms = round(1000 / self._max_fps) if self._max_fps else None
         try:

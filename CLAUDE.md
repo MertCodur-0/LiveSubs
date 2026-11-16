@@ -288,9 +288,14 @@ Designed from the start for three source kinds; video device lands in phase 2.
 - mss copies screen pixels: it sees the lock screen while the session is locked
   (`win32.is_session_locked()`, WTS session flags — the OpenInputDesktop/SwitchDesktop trick
   reported "unlocked" under LockApp on Windows 11), and obscured windows.
-- A third, unexplained trigger (2026-10-23): Stop then Start on an Opera window in the same
-  engine process crashed at the same offset (`windows_capture.pyd` +0x3aad3, as on 2026-10-21).
-  Not reproduced with a flicker window. Hence the UI watches the engine (below, Main window).
+- A third trigger (seen 2026-10-23, 11-12, 11-14; **explained and fixed 2026-11-16**): Stop then
+  Start in the same engine process crashed at the same offset (`windows_capture.pyd` +0x3aad3).
+  Cause: the pipeline thread is the only one with COM initialised (WinRT OCR, spell checker);
+  when it ends, the process's MTA is torn down and the next session crashes. Reproduced on an
+  Opera window playing video (8 start/stop rounds per run: 5 of 8 runs crashed; a flicker
+  window or raw WGC without the pipeline never did). Fix: `platform/com.keep_mta_alive()`
+  (`CoIncrementMTAUsage`), called in `engine_main` and in `_WgcSource._start`: 18 of 18 runs
+  clean. The WMI trigger is most likely the same thing. The UI still watches the engine.
 - Typed errors: `SourceUnavailableError`, `SourceBusyError` (device held by another app such as OBS
   -> UI suggests using the OBS preview window as a *window* source), `SourceLostError`.
 - Health signals: black-frame detector emits `BlackFrameWarning` (window/monitor: protected content;
@@ -563,7 +568,9 @@ Duraklatıldı / Ollama kapalı / Durdu, `_update_status`). Selected button: fai
   **Fullscreen warning**: every 3 s while running, once per occurrence (status bar + tray).
 - **Engine watchdog** (2026-10-23): every 1 s the UI checks `EngineProcess.alive`; a dead engine
   (native crash, no log line) is replaced (`restart()`: new process + queues), the state goes to
-  STOPPED and the status bar + tray say so; the user presses Start again.
+  STOPPED and the status bar + tray say so. Since 2026-11-16 a pipeline that was active is
+  started again at once (paused stays paused); a second death within `ENGINE_RESUME_GAP_S`
+  (60 s) waits for the user's Start.
 
 ### Other
 
@@ -1321,3 +1328,24 @@ First **finish the app** (each step committed and pushed; no new release unless 
   **Found on the way:** `load()` (the keep-warm request every 240 s idle) sent no options,
   so Ollama 0.40.15 reloaded the model with its defaults (14 s) and the next translation
   reloaded it again (13-16 s); it sends the options now (22-30 ms).
+- 2026-11-16: **Bug audit** (user: "a detailed bug-fix investigation"; branch `bug-audit`). Read
+  the real logs first, then the engine, capture, translation and main-window code (not read:
+  the Settings / Profiles / Models tabs, setup dialog, audio, preview window).
+  **The engine crash is explained** (see WGC pitfalls: COM's MTA died with the pipeline thread).
+  Other fixes, each with a regression test: the engine watchdog resumes the pipeline; a pause
+  made while the model warms up stays PAUSED (the warm-up thread reported RUNNING over it); a
+  Start that replaces a running pipeline drops the old pipeline's subtitle events until the new
+  one's STARTING (`MainWindow._replacing`; line ids restart at 1); a line that comes back as a
+  `repeat` without a translation (request failed, dropped from the backlog, read during the
+  warm-up) is submitted then (`Pipeline._translate_again`, `TranslationOrchestrator.pending`);
+  `MainWindow.restart()` (after a settings import) emits `restarting`, which closes the
+  single-instance server first - the new instance used to find the closing one and exit (found
+  by reading, not tried live); a window source whose window was reopened is looked up again
+  every 3 s (`_find_window_again`), the pipeline's frame place meanwhile; the cache key keeps
+  a trailing "?" (a question no longer gets the statement's translation; old question entries
+  miss once); `clean_output` strips wrapping quotes only when none are inside; Start names the
+  model it really uses when the configured one is not installed; the translation lane, the
+  warm-up thread and the device thread survive unexpected exceptions; the Ollama status checks
+  treat a non-Ollama answer as "no answer"; each Start's backend (httpx client) is closed.
+  Open: tests write into the real log folder (no `conftest.py` sets `LIVESUBS_HOME`; the 51
+  "UI process is gone" lines in engine.log are test runs).

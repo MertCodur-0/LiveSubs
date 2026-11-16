@@ -35,6 +35,7 @@ def main() -> int:
 
     window = MainWindow(EngineProcess())
     instance.activated.connect(window.show_from_tray)
+    window.restarting.connect(instance.close)
     window.show()
     window.run_setup_check()
     return app.exec()

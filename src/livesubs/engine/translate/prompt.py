@@ -107,6 +107,8 @@ def clean_output(text: str) -> str:
     text = _THINK_BLOCK.sub("", text).strip()
     text = _LABEL.sub("", text)
     text = " ".join(text.split())
-    if len(text) >= 2 and text[0] in _QUOTES and text[-1] in _QUOTES:
-        text = text[1:-1].strip()
+    # Quotes around the whole answer only: '"Dur!" dedi, "kaç!"' keeps its own.
+    inner = text[1:-1]
+    if len(text) >= 2 and text[0] in _QUOTES and text[-1] in _QUOTES and '"' not in inner:
+        text = inner.strip()
     return text

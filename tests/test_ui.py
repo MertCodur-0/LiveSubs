@@ -56,6 +56,7 @@ from livesubs.device.messages import (
 from livesubs.engine.capture.shared_frames import SharedFrameWriter
 from livesubs.engine.translate.cache import TranslationCache
 from livesubs.i18n import t
+from livesubs.ollama.client import InstalledModel
 from livesubs.platform import hotkeys, win32
 from livesubs.platform.video_devices import VideoDevice
 from livesubs.platform.win32 import MonitorInfo, WindowInfo
@@ -369,6 +370,9 @@ def test_lines_after_a_restart_go_on_top_of_the_feed(window: MainWindow) -> None
     window._poll()
     window._send_start()
     engine.queue = [
+        StateChanged(EngineState.STOPPED),  # the replaced pipeline
+        StateChanged(EngineState.STARTING),
+        StateChanged(EngineState.RUNNING),
         SubtitleRead(1, "Who are you?", 9.0),
         SubtitleTranslated(1, "Who are you?", "Sen kimsin?", "m", "gpu", 9, 500, False),
     ]
@@ -1754,3 +1758,105 @@ def test_info_tip_shows_while_another_window_has_focus(window: MainWindow, qtbot
     qtbot.waitUntil(QToolTip.isVisible, timeout=2000)
     assert QToolTip.text() == tip.toolTip()
     QToolTip.hideText()
+
+
+def test_a_crashed_engine_resumes_the_translation_once(window: MainWindow) -> None:
+    """The engine died mid-game (a native crash in the capture library): the new engine got
+    no Start, so translations stopped until the user came back to the window."""
+    engine = _running(window)
+    window.handle(StateChanged(EngineState.PAUSED))
+    engine.alive = False
+    window._check_engine()
+    assert engine.restarts == 1
+    assert isinstance(engine.sent[0], StartPipeline)
+    assert engine.sent[-1] == SetPaused(True)  # it was paused: it stays paused
+    assert window.start_button.text() == "Durdur"
+    assert "sürüyor" in window.statusBar().currentMessage()
+
+    # Dies again right away: no restart loop, the user decides.
+    window.handle(StateChanged(EngineState.RUNNING))
+    engine.sent.clear()
+    engine.alive = False
+    window._check_engine()
+    assert engine.restarts == 2
+    assert engine.sent == []
+    assert window.start_button.text() == "Başlat"
+
+
+def test_events_of_a_replaced_pipeline_are_dropped(window: MainWindow) -> None:
+    """A Start over a running pipeline (new source, edited settings) clears the line ids; what
+    the old pipeline still had on its way then landed in rows the new one's lines reuse."""
+    engine = _running(window)
+    window.handle(SubtitleRead(7, "Old line.", 9.0))
+    window._send_start()
+    rows = window.feed.rowCount()
+    engine.queue = [
+        SubtitleTranslated(7, "Old line.", "Eski satır.", "m", "gpu", 9, 500, False),
+        SubtitleRead(8, "Older still.", 9.0),
+        SubtitleLines((8,)),
+        StateChanged(EngineState.STOPPED),
+        StateChanged(EngineState.STARTING),
+        SubtitleRead(1, "New line.", 9.0),
+        SubtitleTranslated(1, "New line.", "Yeni satır.", "m", "gpu", 9, 500, False),
+    ]
+    window._poll()
+    assert window.feed.rowCount() == rows + 1
+    assert window.feed.item(0, 2).text() == "Yeni satır."
+    assert "Eski satır." not in [
+        window.feed.item(row, 2).text() for row in range(window.feed.rowCount())
+    ]
+
+
+def test_restart_frees_the_single_instance_name_first(
+    window: MainWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: the new instance found this one still answering (it closes its child
+    processes first), asked it to show its window and exited: the app was gone."""
+    order: list[str] = []
+    window.restarting.connect(lambda: order.append("released"))
+    monkeypatch.setattr(
+        "livesubs.ui.main_window.subprocess.Popen", lambda *a, **k: order.append("spawned")
+    )
+    window.restart()
+    assert order == ["released", "spawned"]
+
+
+def test_start_names_the_model_it_really_uses(window: MainWindow) -> None:
+    """The configured model is not installed: Start takes the one the combo shows, and the
+    summary kept naming the missing one."""
+    _with_monitor_source(window)
+    window._on_models([InstalledModel("qwen3:8b", 1, "8B", "Q4")])
+    assert window._config.ollama.gpu_model != "qwen3:8b"
+    window.toggle()
+    assert engine_of(window).sent[0].ollama.gpu_model == "qwen3:8b"
+    assert "qwen3:8b" in window.summary_title.text()
+
+
+def test_the_overlay_follows_a_window_that_was_opened_again(
+    window: MainWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The source list holds window handles. After the game was closed and opened again the
+    pipeline found the new window, but the overlay and the region frame followed the old
+    handle - nowhere - until "Yenile" was pressed."""
+    old, area = _window("Game", "game.exe", Rect(100, 100, 800, 600))
+    monkeypatch.setattr("livesubs.ui.main_window.other_windows", lambda own=(): [old])
+    monkeypatch.setattr("livesubs.ui.main_window.visible_client_area", lambda hwnd: area)
+    window._profile.source = WindowSource(exe_name="game.exe", title="Game")
+    window.refresh_sources()
+    window.set_region(NormRect(x=0.1, y=0.8, width=0.8, height=0.15))
+    assert window._source_area() == area
+
+    # The game restarts: a new handle, somewhere else on the desktop.
+    new = WindowInfo(old.hwnd + 1, "Game", 2, "game.exe", old.client_rect, False)
+    moved = Rect(300, 200, 800, 600)
+    monkeypatch.setattr("livesubs.ui.main_window.other_windows", lambda own=(): [new])
+    monkeypatch.setattr(
+        "livesubs.ui.main_window.visible_client_area",
+        lambda hwnd: moved if hwnd == new.hwnd else None,
+    )
+    monkeypatch.setattr("livesubs.ui.main_window.win32.is_window", lambda hwnd: hwnd == new.hwnd)
+    window.handle(FrameInfo(800, 600, (300, 200, 800, 600)))
+    assert window._source_area() == moved  # from the pipeline's frame, until it is found again
+    window._follow()
+    assert window.selected_source().window is new
+    assert window._source_area() == moved

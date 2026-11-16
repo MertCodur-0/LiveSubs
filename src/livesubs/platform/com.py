@@ -40,3 +40,32 @@ def release(obj: ctypes.c_void_p) -> None:
     ctypes.WINFUNCTYPE(ctypes.c_ulong, ctypes.c_void_p)(
         ctypes.cast(obj, ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p))).contents[RELEASE]
     )(obj)
+
+
+_mta_cookie: ctypes.c_void_p | None = None
+
+
+def keep_mta_alive() -> bool:
+    """Keep this process's COM multithreaded apartment alive until the process ends.
+
+    The MTA lives as long as some thread has COM initialised in it. The pipeline thread does
+    (WinRT OCR, the spell checker) and ends with every Stop; when it was the only one, the
+    apartment was torn down with it, and the next Windows Graphics Capture session crashed the
+    process in ``start_free_threaded`` (windows-capture keeps objects of the old apartment).
+    Reproduced on a browser window playing video: 5 of 8 runs of eight start/stop rounds
+    crashed, none of 8 with the apartment kept. ``CoIncrementMTAUsage`` is made for this.
+    """
+    global _mta_cookie
+    if _mta_cookie is not None:
+        return True
+    cookie = ctypes.c_void_p()
+    try:
+        increment = ctypes.windll.combase.CoIncrementMTAUsage
+    except (AttributeError, OSError):  # not Windows 8+
+        return False
+    increment.argtypes = (ctypes.POINTER(ctypes.c_void_p),)
+    increment.restype = ctypes.c_long
+    if increment(ctypes.byref(cookie)) < 0:
+        return False
+    _mta_cookie = cookie
+    return True

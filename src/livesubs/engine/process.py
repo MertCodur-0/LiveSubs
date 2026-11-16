@@ -29,6 +29,7 @@ from livesubs.core.messages import (
     StopPipeline,
 )
 from livesubs.engine.pipeline import Pipeline
+from livesubs.platform import com
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +38,7 @@ def engine_main(commands: Queue, events: Queue) -> None:
     """Entry point of the engine process."""
     setup_file_logging("engine.log")
     exit_with_parent()
+    com.keep_mta_alive()  # before any pipeline thread comes and goes (see its docstring)
     log.info("Engine started (pid %d)", os.getpid())
     pipeline: Pipeline | None = None
     events.put(StateChanged(EngineState.IDLE))

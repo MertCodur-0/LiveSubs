@@ -167,6 +167,14 @@ class TranslationOrchestrator:
                 log.info("Translation backlog full, skipping %r", dropped.text)
             self._cond.notify()
 
+    def pending(self, line_id: int) -> bool:
+        """A translation of ``line_id`` is waiting or in flight."""
+        with self._cond:
+            flying = self._in_flight
+            return (flying is not None and flying.line_id == line_id) or any(
+                job.line_id == line_id for job in self._pending
+            )
+
     def prepare(self, text: str | None) -> None:
         """Start translating ``text`` before its line is confirmed, if the lane is idle; a
         ``submit`` of the same text takes the translation over. ``None`` (or another text) drops
@@ -242,6 +250,9 @@ class TranslationOrchestrator:
                 pass
             except TranslationError as exc:
                 error = exc
+            except Exception as exc:  # a reply nobody expected must not end the lane for good
+                log.exception("Translating %r failed unexpectedly", job.text)
+                error = TranslationError(f"{type(exc).__name__}: {exc}")
             with self._cond:
                 if self._in_flight is job:
                     self._in_flight = None

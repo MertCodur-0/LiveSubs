@@ -45,7 +45,10 @@ class TranslationCache:
 
     @staticmethod
     def make_key(model: str, profile: str, text: str) -> CacheKey:
-        return model, profile, text_key(text)
+        """Punctuation does not matter (OCR drops and adds it), except that a question is not
+        the statement with the same words: "He's dead?" must not get the cached "O öldü."."""
+        question = text.rstrip(" \"')]").endswith("?")
+        return model, profile, text_key(text) + ("?" if question else "")
 
     def get(self, model: str, profile: str, text: str) -> str | None:
         cache_key = self.make_key(model, profile, text)

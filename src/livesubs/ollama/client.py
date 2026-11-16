@@ -39,25 +39,31 @@ class OllamaError(Exception):
     """Ollama refused a request; the message is Ollama's own."""
 
 
+# Not Ollama's answer: no server, a URL httpx cannot use, or something else on that port (not
+# JSON, or not the expected shape). The status checks run on worker threads; an exception there
+# left the UI on "checking" for good.
+_NO_ANSWER = (httpx.HTTPError, httpx.InvalidURL, ValueError, KeyError, TypeError, AttributeError)
+
+
 def list_models(url: str = DEFAULT_URL, timeout: float = 3.0) -> list[InstalledModel] | None:
     """Installed models, or None when Ollama does not answer."""
     try:
         response = httpx.get(f"{url}/api/tags", timeout=timeout)
         response.raise_for_status()
-    except httpx.HTTPError:
-        return None
-    models = []
-    for entry in response.json().get("models", []):
-        details = entry.get("details", {})
-        models.append(
-            InstalledModel(
-                name=entry["name"],
-                size_bytes=entry.get("size", 0),
-                parameter_size=details.get("parameter_size", ""),
-                quantization=details.get("quantization_level", ""),
-                digest=entry.get("digest", ""),
+        models = []
+        for entry in response.json().get("models", []):
+            details = entry.get("details", {})
+            models.append(
+                InstalledModel(
+                    name=entry["name"],
+                    size_bytes=entry.get("size", 0),
+                    parameter_size=details.get("parameter_size", ""),
+                    quantization=details.get("quantization_level", ""),
+                    digest=entry.get("digest", ""),
+                )
             )
-        )
+    except _NO_ANSWER:
+        return None
     return sorted(models, key=lambda m: m.name)
 
 
@@ -66,12 +72,12 @@ def loaded_models(url: str = DEFAULT_URL, timeout: float = 3.0) -> list[LoadedMo
     try:
         response = httpx.get(f"{url}/api/ps", timeout=timeout)
         response.raise_for_status()
-    except httpx.HTTPError:
+        return [
+            LoadedModel(entry["name"], entry.get("size", 0), entry.get("size_vram", 0))
+            for entry in response.json().get("models", [])
+        ]
+    except _NO_ANSWER:
         return None
-    return [
-        LoadedModel(entry["name"], entry.get("size", 0), entry.get("size_vram", 0))
-        for entry in response.json().get("models", [])
-    ]
 
 
 def model_info(name: str, url: str = DEFAULT_URL, timeout: float = 10.0) -> dict[str, Any]:

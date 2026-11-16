@@ -492,6 +492,9 @@ STRINGS: dict[str, str] = {
     "error.engine_crashed": (
         "Çeviri motoru beklenmedik şekilde kapandı ve yeniden başlatıldı. Başlat'a tekrar basın."
     ),
+    "error.engine_resumed": (
+        "Çeviri motoru beklenmedik şekilde kapandı; yeniden başlatıldı ve çeviri sürüyor."
+    ),
     "error.no_source": "Önce bir kaynak seçin.",
     "error.no_region": "Önce altyazı bölgesini seçin.",
     "error.region_needs_screen": "Seçilen alan hiçbir ekranda değil; tekrar deneyin.",

@@ -111,6 +111,11 @@ FOLLOW_MS = 300
 FULLSCREEN_CHECK_MS = 3000
 WEB_STATUS_MS = 2000
 ENGINE_CHECK_MS = 1000
+# After a crash of the engine the pipeline is started again by itself, but not in a loop: a
+# second crash this soon after waits for the user.
+ENGINE_RESUME_GAP_S = 60.0
+# A window source whose window is gone (the game was restarted) is looked up again this often.
+SOURCE_LOOKUP_S = 3.0
 # Edits that the running pipeline reads only at Start apply after typing pauses this long.
 APPLY_MS = 1500
 SIDEBAR_WIDTH = 200
@@ -235,6 +240,8 @@ class _Bridge(QObject):
 
 
 class MainWindow(QMainWindow):
+    restarting = Signal()  # about to start a new instance: let it pass the single-instance check
+
     def __init__(
         self,
         engine: Engine,
@@ -295,6 +302,11 @@ class MainWindow(QMainWindow):
         self._bridge.spill.connect(self._on_spill)
         self._discard_changes = False  # settings were imported: never write the old ones back
         self._started_with: tuple | None = None  # what the running pipeline was started with
+        # A Start that replaces a running pipeline: until the new one reports in, subtitle
+        # events still come from the old one, with line ids the new one will use again.
+        self._replacing = False
+        self._engine_resumed_at = float("-inf")
+        self._source_looked_up_at = 0.0
         self.setup = SetupDialog(self._config, self)
         self.setup.model_selected.connect(self._on_model_selected)
         self.setup.settings_imported.connect(self._on_settings_imported)
@@ -1207,6 +1219,9 @@ class MainWindow(QMainWindow):
 
     def restart(self) -> None:
         """Start a new instance (same interpreter and arguments) and close this one."""
+        # This instance still answers the single-instance check while it closes (engine and
+        # device host take a moment): the new one would greet it and exit, leaving none.
+        self.restarting.emit()
         subprocess.Popen([sys.executable, *sys.orig_argv[1:]], close_fds=True)
         self.close()
 
@@ -1249,10 +1264,15 @@ class MainWindow(QMainWindow):
             return
         self._card_waiting = False
         self._card_started_on = self._card.shared_frames if card is not None else ""
-        if self.model_combo.currentText():
-            self._config.ollama.gpu_model = self.model_combo.currentText()
+        chosen = self.model_combo.currentText()
+        if chosen and chosen != self._config.ollama.gpu_model:
+            # The configured model is not installed: the combo's model is used, so say so.
+            self._config.ollama.gpu_model = chosen
+            self._update_summary()
+            self.models.mark_in_use()
         self._save()
         self._apply_timer.stop()
+        self._replacing = self._state in ACTIVE_STATES
         self._started_with = self._pipeline_settings()
         self._reads = 0
         self._translate_ms.clear()
@@ -1288,17 +1308,38 @@ class MainWindow(QMainWindow):
         if self._engine.alive:
             return
         log.error("The engine process died; starting a new one")
+        was_active, paused = self._state in ACTIVE_STATES, self._paused
         self._engine.restart()
-        if not self._card_waiting:
-            self._card.set_pipeline_device(None)
+        self._replacing = False
+        now = time.monotonic()
+        # Mid-game nobody is looking at this window: carry on without a press of Start.
+        resume = (
+            was_active
+            and self._profile.source is not None
+            and self._profile.region is not None
+            and now - self._engine_resumed_at > ENGINE_RESUME_GAP_S
+        )
         self._set_state(EngineState.STOPPED, "")
-        self.statusBar().showMessage(t("error.engine_crashed"), 30000)
-        self.tray.notify(APP_NAME, t("error.engine_crashed"))
+        if resume:
+            self._engine_resumed_at = now
+            self._paused = paused
+            self._send_start()
+        elif not self._card_waiting:
+            self._card.set_pipeline_device(None)
+        text = t("error.engine_resumed" if resume else "error.engine_crashed")
+        self.statusBar().showMessage(text, 30000)
+        self.tray.notify(APP_NAME, text)
 
     def handle(self, event: Event) -> None:
         match event:
             case StateChanged(state=state, detail=detail):
+                if state in (EngineState.STARTING, EngineState.WARMING_UP):
+                    self._replacing = False  # the new pipeline: its lines count from here
                 self._set_state(state, detail)
+            case SubtitleRead() | SubtitleTranslated() | SubtitleLines() | SubtitleCleared() if (
+                self._replacing
+            ):
+                pass  # the replaced pipeline's last words
             case EngineError(kind=ErrorKind.SOURCE_LOST) if self._reading_card():
                 # The device host reopens the card; the pipeline follows (_on_card_opened).
                 self._card_waiting = True
@@ -1448,15 +1489,32 @@ class MainWindow(QMainWindow):
         """Where the source's frame is on screen right now (physical); None for video devices."""
         option = self.selected_source()
         if option is not None and option.spec == self._profile.source:
-            return option.area()
+            area = option.area()
+            if area is not None or option.window is None:
+                return area
+            # The window is gone (closed, or the game was restarted): where the pipeline's
+            # frame was is the best guess until the window is found again (_follow).
         if self._frame is not None and self._frame.screen_rect is not None:
             return Rect(*self._frame.screen_rect)
         return None
 
     def _follow(self) -> None:
+        self._find_window_again()
         self._place_overlay()
         if self._calibrating:
             self._place_region_frame()
+
+    def _find_window_again(self) -> None:
+        """The source list holds window handles; a game that was closed and opened again has a
+        new one. The pipeline finds it by exe name, but the overlay and the region frame
+        followed the dead handle (nowhere) until the list was refreshed by hand."""
+        option = self.selected_source()
+        if option is None or option.window is None or win32.is_window(option.window.hwnd):
+            return
+        now = time.monotonic()
+        if now - self._source_looked_up_at >= SOURCE_LOOKUP_S and not self.source_sheet.isVisible():
+            self._source_looked_up_at = now
+            self.refresh_sources()
 
     def _place_overlay(self) -> None:
         active = self._state in ACTIVE_STATES

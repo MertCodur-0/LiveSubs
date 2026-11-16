@@ -127,8 +127,17 @@ class DeviceWorker:
                 self._wake.wait(self._retry_s)
                 self._wake.clear()
                 continue
+            except Exception:  # a dead device thread would leave the preview black for good
+                log.exception("Opening %s failed unexpectedly", spec.device_name)
+                self._wake.wait(self._retry_s)
+                self._wake.clear()
+                continue
             last_failure = None
-            lost = self._pump(spec, source)
+            try:
+                lost = self._pump(spec, source)
+            except Exception as exc:
+                log.exception("Reading %s failed unexpectedly", spec.device_name)
+                lost = SourceLostError(f"{type(exc).__name__}: {exc}")
             if lost is not None:
                 log.warning("%s lost: %s", spec.device_name, lost)
                 self._emit(DeviceFailed(spec.device_name, DeviceErrorKind.LOST, str(lost)))

@@ -736,3 +736,44 @@ def test_early_starts_end_when_a_dropped_request_keeps_the_model_busy(
         assert [r.text for r in fake.requests] == ["PARKING", "EXIT 24 NORTH", "Who is this guy?"]
     finally:
         orch.close()
+
+
+def test_a_question_does_not_get_the_statements_cached_translation() -> None:
+    cache = TranslationCache()
+    cache.put("m", "gta", "He's dead.", "O öldü.")
+    assert cache.get("m", "gta", "He's dead?") is None
+    assert cache.get("m", "gta", "he's dead!") == "O öldü."
+    cache.put("m", "gta", "He's dead?\"", "O öldü mü?")
+    assert cache.get("m", "gta", "He's dead?") == "O öldü mü?"
+    assert cache.get("m", "gta", "He's dead.") == "O öldü."
+
+
+def test_quotes_inside_a_translation_are_not_taken_for_wrapping_quotes() -> None:
+    assert clean_output('"Dur!" dedi, "kaç!"') == '"Dur!" dedi, "kaç!"'
+
+
+def test_an_unexpected_backend_error_does_not_end_the_lane(
+    fake: FakeBackend, events: Events, orchestrator: TranslationOrchestrator
+) -> None:
+    """Regression: anything but a TranslationError killed the worker thread, and no line was
+    translated again until the next Start."""
+    fake.release.set()
+    fake.fail_with = AttributeError("'NoneType' object has no attribute 'get'")  # type: ignore[assignment]
+    orchestrator.submit(1, "First line.")
+    assert isinstance(events.wait_for(1)[0], LineFailed)
+    fake.fail_with = None
+    orchestrator.submit(2, "Second line.")
+    assert isinstance(events.wait_for(2)[1], LineTranslated)
+
+
+def test_pending_names_the_lines_still_on_their_way(
+    fake: FakeBackend, events: Events, orchestrator: TranslationOrchestrator
+) -> None:
+    fake.release.clear()
+    orchestrator.submit(1, "First line.")
+    assert fake.started.acquire(timeout=2)
+    orchestrator.submit(2, "Second line.")
+    assert orchestrator.pending(1) and orchestrator.pending(2) and not orchestrator.pending(3)
+    fake.release.set()
+    events.wait_for(2)
+    assert not orchestrator.pending(1) and not orchestrator.pending(2)

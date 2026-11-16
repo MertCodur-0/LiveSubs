@@ -556,3 +556,128 @@ def test_translation_starts_at_the_first_read_of_a_line(
     second = reads[1]  # the first line may be read while the model still warms up
     request = next(r for r in requests if r.text == second.text)
     assert recorder.events.index(request) < recorder.events.index(second)
+
+
+def test_a_pause_during_the_warm_up_stays_paused() -> None:
+    """Regression: the warm-up thread reported RUNNING when the model was ready, also over a
+    pause made meanwhile: the UI showed "running" while nothing was read, and the pause key did
+    nothing at its first press."""
+
+    class SlowStart(UpperCaseBackend):
+        def warm_up(self) -> float:
+            time.sleep(0.6)
+            return 600.0
+
+    source, recorder = ScriptedSource([(_caption(""), 1.5)]), Recorder()
+    pipeline = Pipeline(
+        start_command_for(CAPTION_REGION),
+        recorder,
+        open_source=lambda spec: (source.open(), source)[1],
+        backend_factory=lambda start: SlowStart(),
+    )
+    pipeline.start()
+    time.sleep(0.2)
+    pipeline.set_paused(True)  # while the model loads
+    time.sleep(1.0)
+    states = recorder.states()
+    pipeline.stop()
+
+    assert EngineState.WARMING_UP in states
+    assert states[-1] == EngineState.PAUSED
+
+
+def test_a_line_that_comes_back_untranslated_is_translated_then() -> None:
+    """A line whose request failed (or was dropped) and that shows again within seconds came
+    back as a "repeat": its translation is kept - but it had none, so it stayed untranslated
+    for as long as it was on screen."""
+
+    class FailsOnce(UpperCaseBackend):
+        calls = 0
+
+        def translate(self, request: TranslationRequest, cancel: CancelToken) -> TranslationResult:
+            FailsOnce.calls += 1
+            if FailsOnce.calls == 1:
+                raise BackendUnavailableError("Ollama is not reachable")
+            return super().translate(request, cancel)
+
+    source = ScriptedSource(
+        [
+            (_caption("Get in the car now."), 1.0),
+            (_caption(""), 0.8),
+            (_caption("Get in the car now."), 1.2),
+            (_caption(""), 0.6),
+        ]
+    )
+    recorder = Recorder()
+    pipeline = Pipeline(
+        start_command_for(CAPTION_REGION),
+        recorder,
+        open_source=lambda spec: (source.open(), source)[1],
+        backend_factory=lambda start: FailsOnce(),
+    )
+    run(pipeline, source)
+
+    reads = [(e.line_id, e.repeat) for e in recorder.of(SubtitleRead)]
+    assert reads == [(1, False), (1, True)]
+    assert [(e.line_id, e.translation) for e in recorder.of(SubtitleTranslated)] == [
+        (1, "GET IN THE CAR NOW.")
+    ]
+
+
+def test_a_repeat_of_a_translated_line_costs_no_request() -> None:
+    requests: list[str] = []
+
+    class Counting(UpperCaseBackend):
+        def translate(self, request: TranslationRequest, cancel: CancelToken) -> TranslationResult:
+            requests.append(request.text)
+            return super().translate(request, cancel)
+
+    source = ScriptedSource(
+        [
+            (_caption("Get in the car now."), 1.0),
+            (_caption(""), 0.8),
+            (_caption("Get in the car now."), 1.2),
+            (_caption(""), 0.6),
+        ]
+    )
+    recorder = Recorder()
+    pipeline = Pipeline(
+        start_command_for(CAPTION_REGION),
+        recorder,
+        open_source=lambda spec: (source.open(), source)[1],
+        backend_factory=lambda start: Counting(),
+    )
+    run(pipeline, source)
+
+    assert [(e.line_id, e.repeat) for e in recorder.of(SubtitleRead)] == [(1, False), (1, True)]
+    assert requests.count("Get in the car now.") == 1
+    assert len(recorder.of(SubtitleTranslated)) == 1
+
+
+def test_an_unexpected_warm_up_failure_does_not_leave_the_state_at_warming_up() -> None:
+    """The warm-up thread died on anything but a translation error; the UI then showed
+    "loading the model" for good."""
+
+    class Broken(UpperCaseBackend):
+        closed = False
+
+        def warm_up(self) -> float:
+            raise KeyError("message")  # e.g. a reply of an unexpected shape
+
+        def close(self) -> None:
+            Broken.closed = True
+
+    source, recorder = ScriptedSource([(_caption("Still reading here."), 1.0)]), Recorder()
+    pipeline = Pipeline(
+        start_command_for(CAPTION_REGION),
+        recorder,
+        open_source=lambda spec: (source.open(), source)[1],
+        backend_factory=lambda start: Broken(),
+    )
+    run(pipeline, source)
+
+    states = recorder.states()
+    assert states.index(EngineState.RUNNING) > states.index(EngineState.WARMING_UP)
+    assert [e.kind for e in recorder.of(EngineError)] == [ErrorKind.INTERNAL]
+    assert [e.text for e in recorder.of(SubtitleRead)] == ["Still reading here."]
+    assert Broken.closed  # its connections are released

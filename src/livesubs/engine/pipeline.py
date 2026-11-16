@@ -151,7 +151,9 @@ class Pipeline:
         # Set by the warm-up thread once the model answers; lines read before that wait.
         self._lock = threading.Lock()
         self._orchestrator: TranslationOrchestrator | None = None
+        self._backend: TranslationBackend | None = None
         self._waiting: tuple[int, str] | None = None
+        self._translated: set[int] = set()  # lines whose translation went out
         self._early: str | None = None  # the text whose translation was started early
         self._context_warned = False
 
@@ -224,8 +226,10 @@ class Pipeline:
             self._stop.set()  # also tells a warm-up still in progress to give up
             with self._lock:
                 orchestrator, self._orchestrator = self._orchestrator, None
+                backend, self._backend = self._backend, None
             if orchestrator is not None:
                 orchestrator.close()
+            _close(backend)
             if source is not None:
                 source.close()
             if cache is not None:
@@ -251,17 +255,24 @@ class Pipeline:
     def _prepare_translation(self, cache: TranslationCache) -> None:
         """Warm-up thread: load the model, then let waiting and new lines through."""
         assert self._backend_factory is not None
-        backend = self._backend_factory(self._start)
-        self._emit(StateChanged(EngineState.WARMING_UP, backend.model))
-        warm_up = getattr(backend, "warm_up", None)
+        backend: TranslationBackend | None = None
         try:
+            backend = self._backend_factory(self._start)
+            self._emit(StateChanged(EngineState.WARMING_UP, backend.model))
+            warm_up = getattr(backend, "warm_up", None)
             if warm_up is not None:
                 warm_up()
-        except TranslationError as exc:
+        except Exception as exc:
+            _close(backend)
+            if self._stop.is_set():
+                return  # stopped while the model was loading: nothing to report
             # Keep reading subtitles; the UI shows English only and explains why.
-            self._emit(EngineError(_error_kind(exc), str(exc)))
-            if not self._stop.is_set():
-                self._emit(StateChanged(EngineState.RUNNING))
+            if isinstance(exc, TranslationError):
+                self._emit(EngineError(_error_kind(exc), str(exc)))
+            else:  # never leave the UI in "warming up" because of a bug or an odd reply
+                log.exception("Preparing the translation failed")
+                self._emit(EngineError(ErrorKind.INTERNAL, f"{type(exc).__name__}: {exc}"))
+            self._emit(StateChanged(self._ready_state()))
             return
         profile = self._start.profile
         orchestrator = TranslationOrchestrator(
@@ -277,12 +288,20 @@ class Pipeline:
         with self._lock:
             if self._stop.is_set():  # stopped while the model was loading
                 orchestrator.close()
+                _close(backend)
                 return
             self._orchestrator = orchestrator
+            self._backend = backend
             waiting, self._waiting = self._waiting, None
-        self._emit(StateChanged(EngineState.RUNNING))
+        self._emit(StateChanged(self._ready_state()))
         if waiting is not None:
             orchestrator.submit(*waiting)
+
+    def _ready_state(self) -> EngineState:
+        """The state once the model is ready (or given up on): paused stays paused. The warm-up
+        used to report RUNNING over a pause made meanwhile, and the pause key then did nothing
+        at its first press."""
+        return EngineState.PAUSED if self._paused else EngineState.RUNNING
 
     def _loop(self, source: FrameSource, ocr: WinRtOcr, scorer: ReadScorer) -> None:
         profile = self._start.profile
@@ -377,6 +396,7 @@ class Pipeline:
                     self._emit(SubtitleCleared())
             case LineConfirmed(line_id=line_id, text=text, repeat=True):
                 self._emit(SubtitleRead(line_id, text, ocr_ms, repeat=True))
+                self._translate_again(line_id, text)
             case LineConfirmed(line_id=line_id, text=text):
                 self._submit(line_id, text, ocr_ms, upgrade=False)
             case LineUpgraded(line_id=line_id, text=text):
@@ -392,9 +412,23 @@ class Pipeline:
         if orchestrator is not None:
             orchestrator.submit(line_id, text)
 
+    def _translate_again(self, line_id: int, text: str) -> None:
+        """A line that came back keeps its translation - when it has one. Its request may have
+        failed, been dropped from a full backlog, or been read while the model warmed up: then
+        it is sent now, instead of staying untranslated however long it is on screen."""
+        if line_id in self._translated:
+            return
+        with self._lock:
+            orchestrator = self._orchestrator
+            if orchestrator is None:
+                self._waiting = (line_id, text)
+        if orchestrator is not None and not orchestrator.pending(line_id):
+            orchestrator.submit(line_id, text)
+
     def _on_translation(self, event: TranslationEvent) -> None:
         match event:
             case LineTranslated(line_id=line_id, source=source, result=result):
+                self._translated.add(line_id)
                 self._check_context(result.prompt_tokens)
                 self._emit(
                     SubtitleTranslated(
@@ -514,6 +548,16 @@ def rows_of(read: OcrResult, width: int) -> list[Row]:
     """The read's rows, top to bottom, with their horizontal centres (0-1 of ``width``)."""
     lines = sorted(read.lines, key=lambda line: line.box.y)
     return [Row(line.text, (line.box.x + line.box.width / 2) / width) for line in lines]
+
+
+def _close(backend: TranslationBackend | None) -> None:
+    """Release a backend's connections (each Start makes a new one)."""
+    close = getattr(backend, "close", None)
+    if close is not None:
+        try:
+            close()
+        except Exception:
+            log.exception("Closing the translation backend failed")
 
 
 def _shrink(image: np.ndarray) -> np.ndarray:
