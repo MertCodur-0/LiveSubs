@@ -52,8 +52,15 @@ MIN_CONFIDENCE = 0.8
 MIN_LETTER, MAX_LETTER, MAX_LETTER_WIDTH = 0.5, 1.8, 2.5  # a glyph-like component
 MAX_GAP = 1.2  # wider gaps end a segment (each segment is recognised alone)
 MAX_BAND_SHIFT = 0.35  # a component's centre this far from the segment's: another row
+MAX_SPAN_SHIFT = 0.6  # ... unless it is inside the segment's span, up to this far
 ROW_JOIN_GAP = 3.0  # segments of one row closer than this form one OCR line
 PAD_X, PAD_Y = 0.6, 0.3
+INSIDE_SHARE = 0.5  # a segment box with this share of its area inside a larger one is dropped
+# Colored glyphs beside a line (``colored_glyphs``): the preprocessing's defaults for brightness,
+# local contrast and its kernel.
+COLORED_MIN_BRIGHTNESS, COLORED_MIN_CONTRAST, COLORED_KERNEL = 80, 45, 15
+WORD_GAP = 0.3  # narrower gaps between glyphs are inside a word
+COLORED_MIN_SPREAD = 40  # max - min channel: pink objective glyphs 60-110, their grey halo ~10
 
 
 def default_models_dir() -> Path:
@@ -89,39 +96,56 @@ class Segment:
     row: int  # index of the text row, top to bottom
 
 
-def find_segments(letters: np.ndarray) -> list[Segment]:
+def find_segments(letters: np.ndarray, colored: np.ndarray | None = None) -> list[Segment]:
     """Text segments of the letters mask in reading order: glyph-sized components chained
     left to right along a shared band. Clutter (irregular blobs on bright ground) seldom chains,
     and a label beside a subtitle stays a segment of its own, so neither is glued into the
-    subtitle's text."""
+    subtitle's text.
+
+    ``colored`` (same size, optional): glyph candidates of any colour (``colored_glyphs``). Games
+    color single words of a white line (GTA's objectives: "Land near the" white, "docks" pink);
+    such words never start a line, but chained next to one on its band they become segments of
+    their own. Each segment is read alone and must pass the recogniser's confidence, so scenery
+    beside a subtitle is dropped without spoiling the subtitle's read."""
     h = glyph_height(letters)
     if h is None:
         return []
-    _, _, stats, _ = cv2.connectedComponentsWithStats(letters, connectivity=8)
-    comps = sorted(
-        (int(x), int(y), int(w), int(ch))
-        for x, y, w, ch, _ in stats[1:]
-        if MIN_LETTER * h <= ch <= MAX_LETTER * h and w <= MAX_LETTER_WIDTH * h
-    )
-    chains: list[list[float]] = []  # [left, top, right, bottom, centre y, count]
-    for x, y, w, ch in comps:
-        centre = y + ch / 2
-        for c in chains:
-            if -0.5 * h <= x - c[2] <= MAX_GAP * h and abs(centre - c[4]) <= MAX_BAND_SHIFT * h:
-                c[1], c[2], c[3] = min(c[1], y), max(c[2], x + w), max(c[3], y + ch)
-                c[4] = (c[4] * c[5] + centre) / (c[5] + 1)
-                c[5] += 1
-                break
-        else:
-            chains.append([x, y, x + w, y + ch, centre, 1])
+    chains = [c for c in _chain(_glyphs(letters, h), h) if c[5] >= 2]
+    if colored is not None:
+        for word in _colored_neighbours(chains, _glyphs(colored, h), h):
+            # Touching a line without a word gap: the rest of a word the letters mask holds in
+            # part ("Find Arn" + "old") - one segment, or it would read "Arn old".
+            touching = [
+                c
+                for c in chains
+                if abs(word[4] - c[4]) <= MAX_BAND_SHIFT * h
+                and (abs(word[0] - c[2]) <= WORD_GAP * h or abs(c[0] - word[2]) <= WORD_GAP * h)
+            ]
+            if touching:
+                line = touching[0]
+                line[0], line[2] = min(line[0], word[0]), max(line[2], word[2])
+            else:
+                chains.append(word)
     height, width = letters.shape
-    boxes = []
-    for left, top, right, bottom, _, count in chains:
-        if count < 2:
-            continue
-        x0, y0 = max(0, int(left - PAD_X * h)), max(0, int(top - PAD_Y * h))
-        x1, y1 = min(width, int(right + PAD_X * h)), min(height, int(bottom + PAD_Y * h))
-        boxes.append(Rect(x0, y0, x1 - x0, y1 - y0))
+    padded = []
+    for c in chains:
+        left, right = c[0] - PAD_X * h, c[2] + PAD_X * h
+        for other in chains:  # never into a neighbour on the band: the glyphs would read twice
+            if other is not c and abs(other[4] - c[4]) <= MAX_BAND_SHIFT * h:
+                if other[2] <= c[0]:
+                    left = max(left, (other[2] + c[0]) / 2)
+                elif other[0] >= c[2]:
+                    right = min(right, (c[2] + other[0]) / 2)
+        x0, y0 = max(0, int(left)), max(0, int(c[1] - PAD_Y * h))
+        x1, y1 = min(width, int(right)), min(height, int(c[3] + PAD_Y * h))
+        padded.append(Rect(x0, y0, x1 - x0, y1 - y0))
+    # A box lying mostly inside a larger one is a piece of that line (glyph parts over bright
+    # ground chained off its band): read alone it would come back as a fragment ("Tha", "t duc").
+    padded.sort(key=lambda b: b.width * b.height, reverse=True)
+    boxes: list[Rect] = []
+    for box in padded:
+        if all(_overlap(box, big) < INSIDE_SHARE * box.width * box.height for big in boxes):
+            boxes.append(box)
     boxes.sort(key=lambda b: b.y + b.height / 2)
     segments: list[Segment] = []
     row, row_centre = -1, -math.inf
@@ -132,6 +156,103 @@ def find_segments(letters: np.ndarray) -> list[Segment]:
         segments.append(Segment(box, row))
     segments.sort(key=lambda s: (s.row, s.box.x))
     return segments
+
+
+def _glyphs(mask: np.ndarray, h: float) -> list[tuple[int, int, int, int]]:
+    """Glyph-sized components of ``mask`` (x, y, w, h), left to right."""
+    _, _, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    return sorted(
+        (int(x), int(y), int(w), int(ch))
+        for x, y, w, ch, _ in stats[1:]
+        if MIN_LETTER * h <= ch <= MAX_LETTER * h and w <= MAX_LETTER_WIDTH * h
+    )
+
+
+def _chain(glyphs: list[tuple[int, int, int, int]], h: float) -> list[list[float]]:
+    """Glyphs (left to right) chained along bands: [left, top, right, bottom, centre y, count]."""
+    chains: list[list[float]] = []
+    for x, y, w, ch in glyphs:
+        centre = y + ch / 2
+        for c in chains:
+            if not -0.5 * h <= x - c[2] <= MAX_GAP * h:
+                continue
+            if abs(centre - c[4]) <= MAX_BAND_SHIFT * h:
+                c[1], c[2], c[3] = min(c[1], y), max(c[2], x + w), max(c[3], y + ch)
+                c[4] = (c[4] * c[5] + centre) / (c[5] + 1)
+                c[5] += 1
+                break
+            if abs(centre - c[4]) <= MAX_SPAN_SHIFT * h and c[1] <= centre <= c[3]:
+                # Off the band's mean but inside its span: a "!" or a capital after x-height
+                # letters ("mean!" once became two segments whose padded boxes both read the
+                # "!"). It lengthens the chain but never widens its span or moves its band,
+                # so scenery next to a line cannot stretch the box row by row.
+                c[2] = max(c[2], x + w)
+                c[5] += 1
+                break
+        else:
+            chains.append([x, y, x + w, y + ch, centre, 1])
+    return chains
+
+
+def _overlap(a: Rect, b: Rect) -> int:
+    """The area two boxes share."""
+    width = min(a.right, b.right) - max(a.x, b.x)
+    height = min(a.bottom, b.bottom) - max(a.y, b.y)
+    return max(0, width) * max(0, height)
+
+
+def _colored_neighbours(
+    lines: list[list[float]], glyphs: list[tuple[int, int, int, int]], h: float
+) -> list[list[float]]:
+    """Chains of colored glyphs on a line's band, beside it (not over it) and within a word gap
+    of it, or of such a chain."""
+
+    def on_a_line_band(x: int, y: int, w: int, ch: int) -> bool:
+        centre = y + ch / 2
+        same = [c for c in lines if abs(centre - c[4]) <= MAX_BAND_SHIFT * h]
+        # beside the line's glyphs, not over them (those are read already)
+        return bool(same) and all(x + w <= c[0] or x >= c[2] for c in same)
+
+    near = [g for g in glyphs if on_a_line_band(*g)]
+    found: list[list[float]] = []
+    reach = list(lines)
+    for c in _chain(near, h):
+        if c[5] < 2:
+            continue
+        found.append(c)
+    added = True
+    while added:  # a colored word reaches a line directly or through another colored word
+        added = False
+        for c in list(found):
+            if any(
+                abs(c[4] - r[4]) <= MAX_BAND_SHIFT * h
+                and (0 <= c[0] - r[2] <= MAX_GAP * h or 0 <= r[0] - c[2] <= MAX_GAP * h)
+                for r in reach
+            ):
+                reach.append(c)
+                found.remove(c)
+                added = True
+    return reach[len(lines) :]
+
+
+def colored_glyphs(region: np.ndarray) -> np.ndarray:
+    """Pixels of colored text (BGR ``region``): colourful (the channels at least
+    ``COLORED_MIN_SPREAD`` apart; white and grey glyphs are in the letters mask already, and a
+    grey halo around colored text would join its glyphs into one blob), the brightest channel at
+    least ``COLORED_MIN_BRIGHTNESS`` and ``COLORED_MIN_CONTRAST`` above its surroundings (a white
+    top-hat, as the preprocessing does per subtitle colour)."""
+    if region.ndim != 3:
+        return np.zeros(region.shape[:2], np.uint8)
+    b, g, r = cv2.split(region)
+    brightest = cv2.max(cv2.max(b, g), r)
+    spread = cv2.subtract(brightest, cv2.min(cv2.min(b, g), r))
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (COLORED_KERNEL, COLORED_KERNEL))
+    contrast = cv2.morphologyEx(brightest, cv2.MORPH_TOPHAT, kernel)
+    return (
+        cv2.compare(brightest, COLORED_MIN_BRIGHTNESS, cv2.CMP_GE)
+        & cv2.compare(spread, COLORED_MIN_SPREAD, cv2.CMP_GE)
+        & cv2.compare(contrast, COLORED_MIN_CONTRAST, cv2.CMP_GE)
+    )
 
 
 class LineReader:
@@ -158,13 +279,15 @@ class LineReader:
         (too few glyphs to measure, e.g. "No."): the caller's other engine should look. A result
         without lines means there were segments and none was text."""
         started = time.perf_counter()
-        segments = find_segments(letters)
-        if not segments:
+        if glyph_height(letters) is None:
             return None
         if region.ndim == 3 and region.shape[2] == 4:
             region = cv2.cvtColor(region, cv2.COLOR_BGRA2BGR)
         elif region.ndim == 2:
             region = cv2.cvtColor(region, cv2.COLOR_GRAY2BGR)
+        segments = find_segments(letters, colored_glyphs(region))
+        if not segments:
+            return None
         read: list[tuple[Segment, str]] = []
         for segment in segments:
             b = segment.box

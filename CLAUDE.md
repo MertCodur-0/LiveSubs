@@ -169,7 +169,13 @@ UI process (PySide6)                                  Engine process (multiproce
   per image, so `find_segments` finds the lines in the letters mask (glyph-sized components
   chained left to right along a band, gaps <= 1.2 glyph heights; a single component is no
   segment; a HUD label at the side stays its own segment) and `LineReader.recognize(region,
-  letters)` reads each from the raw BGR region (48 px high, greedy CTC). A segment whose mean
+  letters)` reads each from the raw BGR region (48 px high, greedy CTC). Since 2026-11-18:
+  a glyph off the band's mean but inside its span ("!", a capital after x-height letters)
+  lengthens the chain without widening its span; **coloured words** next to a line
+  (`colored_glyphs`: channel spread >= 40, bright, top-hat; GTA's pink objective words) form
+  segments of their own on its band (never a line alone), or extend it when touching (< 0.3 h:
+  part of a word); padding never reaches into a neighbour; a box mostly (>= 50 %) inside a
+  larger one is dropped (glyph pieces over bright ground read as "Tha", "t duc"). A segment whose mean
   character probability is under `MIN_CONFIDENCE` 0.8 is dropped (subtitle reads: 99.9 % above
   0.9; half of what it makes of scenery/HUD icons is below 0.5). Segments of one row within 3
   glyph heights join into one `OcrLine`. Returns `None` without segments (Windows OCR then
@@ -201,7 +207,7 @@ UI process (PySide6)                                  Engine process (multiproce
   y 0.70-0.985 — GTA stacks up to 4 rows when two people talk, so the region must reach ~70 %.
 - Text (`engine/text/`): `normalize.clean` = what is shown and translated (NFC, typographic
   quotes/dashes/ellipsis to ASCII, lone "|"/"l" before a word -> "I", edge junk stripped, single
-  spaces); `normalize.key` = comparisons and cache key (casefold, accents and punctuation dropped).
+  spaces, exactly two dots -> "..." — PP-OCR reads the ellipsis glyph as ".."); `normalize.key` = comparisons and cache key (casefold, accents and punctuation dropped).
   `filters.check` -> `Verdict(reason)`: empty, < 2 letters, repeated junk runs, letter ratio
   < 0.5, a vowel-less letter run of 5+ ("Hmm"/"Shh" pass); reasons are shown in the Inspector.
 - Stabilizer (`engine/text/stabilizer.py`, pure logic, caller passes `time.monotonic()`):
@@ -213,7 +219,9 @@ UI process (PySide6)                                  Engine process (multiproce
   has no sentence end, **or** this row starts in lower case — a lost word; a new sentence in
   capitals = a new line, usually another speaker; unpunctuated games stay one line) — only rows
   centred within `MAX_CENTER_SHIFT` (0.05 of the region; wrapped rows measured <= 0.002 apart),
-  so a HUD label or watermark at the side never joins a subtitle. A read that adds words to a
+  so a HUD label or watermark at the side never joins a subtitle, and only rows with at most
+  one row height of empty space between them (`Row.top/height`, `MAX_ROW_GAP`; a weapon prompt
+  high above an objective is not its first row). A read that adds words to a
   line under 3 words is not that line (it was a new line glued under a label). Each line
   is tracked with its own `line_id` (assigned by the stabilizer): a read row matches a tracked
   line at rapidfuzz ratio >= 80 of the keys, as an upgrade, or as a *part* of it (>= 3 words,
@@ -234,7 +242,8 @@ UI process (PySide6)                                  Engine process (multiproce
   misread on a few frames ("Coma on" once, "Come on" four times — both words) neither replaces
   the line nor stays; votes alone (max +1.0) never beat a word the dictionary lacks (-1). A
   read with no fewer words than the line counts as a read of it even under the similarity
-  ("fuckiJ1' left" -> "fuckin' left me..."). A merged sentence starts its votes anew.
+  ("fuckiJ1' left" -> "fuckin' left me..."). A merged sentence starts its votes anew. Votes
+  never take a line back to a text it was upgraded from (that flipped a line every read).
 - **Read upgrades** (user's point: the background keeps moving, so words lost on a bright frame
   show up in later frames): a read that keeps >= 85 % of a line's words in order and adds words
   (`is_upgrade`), confirmed by a second read, replaces it -> `LineUpgraded(line_id, text,
@@ -695,7 +704,7 @@ src/livesubs/
 tests/         samples/ (+ samples.json, videos.json), helpers/, test_*.py
 scripts/       build_exe.ps1, embedded/ (sitecustomize.py, smoke_test.py), create_shortcut.ps1,
                make_icon.py, get_ocr_model.py, bench_pipeline.py, bench_video_ocr.py,
-               compare_models.py
+               compare_models.py, scan_video.py
 ```
 
 ## Plan and progress
@@ -1349,3 +1358,25 @@ First **finish the app** (each step committed and pushed; no new release unless 
   treat a non-Ollama answer as "no answer"; each Start's backend (httpx client) is closed.
   Open: tests write into the real log folder (no `conftest.py` sets `LIVESUBS_HOME`; the 51
   "UI process is gone" lines in engine.log are test runs).
+- 2026-11-18: **105-minute GTA VI gameplay recording checked** (user: "make sure the subtitle
+  system works, fix errors, especially OCR failing to read"; 1080p30, kept outside the repo, no
+  ground truth). Played through the reading loop (`scripts/scan_video.py`, new: lists every line
+  that would be translated, `--reads` keeps each read with segment confidences), suspicious
+  outputs ranked by `ReadScorer` and checked on frames. Dialogue reads cleanly; the faults were
+  in line finding and the stabilizer, each fixed with a test that fails on the old code:
+  (1) **pink objective words** were cut off ("Land near the" for "... docks", "Find Arn",
+  "Get in the" for "... sea plane") — coloured glyphs beside a line are now segments (see
+  PP-OCR); (2) a "!" after x-height letters started its own segment and was **read twice**
+  ("mean!! And also crazy."); (3) glyph pieces over bright ground (floral shirts, white boats)
+  were read again as **fragment lines** ("Tha", "t duc", "ndrew", ", thi"); (4) "…" came out as
+  "..";  (5) a weapon prompt high above an objective was joined to it, and the line then
+  **flipped** between the joined and the plain text on every read (a re-translation each
+  0.2 s) — rows far apart never join, votes never go back to a pre-upgrade text. Rejected on
+  the way: extending a line's segment over any-colour glyphs (on busy scenery one box grew over
+  three rows and the subtitle was lost); merging overlapping chains (pulled junk into lines).
+  Measured: video benchmark 291/294 on screen before and after, requests 884 -> 813, phantoms
+  630 -> 587; on ~49 min of the recording scanned with both versions, outputs 959 -> 818 and
+  suspicious ones 167 -> 109. Not fixed (by choice): the opening credits (names in a script
+  font) and the game's HUD/loot menu text ("GIRARDI ES9 PISTOL", "SUNGLASSES") and tilted phone
+  messages inside the region are read as lines; an all-caps filter would hit shouted subtitles
+  in other games.

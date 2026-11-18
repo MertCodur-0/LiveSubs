@@ -39,7 +39,7 @@ All times are ``time.monotonic()`` seconds passed in by the caller.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from difflib import SequenceMatcher
 
 from rapidfuzz import fuzz
@@ -62,6 +62,8 @@ MIN_PART_WORDS = 3
 # Rows of one wrapped sentence are centred under each other; a row whose centre is further off
 # (share of the region's width) is something else.
 MAX_CENTER_SHIFT = 0.05
+# ... and stacked closely: an empty gap of more than this many row heights separates two things.
+MAX_ROW_GAP = 1.0
 # Each read of a line on screen is a vote for its text (by key); a text read more often than
 # another gains this much score per extra read, up to MAX_VOTES of them. Windows OCR misreads a
 # glyph on some frames only ("Coma on" once, "Come on" four times), and both may be words.
@@ -109,10 +111,21 @@ def is_upgrade(new: str, current: str, min_kept: float = 0.85) -> bool:
 
 @dataclass(frozen=True, slots=True)
 class Row:
-    """One OCR row: its text and its horizontal centre (0-1 across the region; None = unknown)."""
+    """One OCR row: its text, its horizontal centre (0-1 across the region) and its box's top and
+    height (pixels of the read; only compared within one read). None = unknown."""
 
     text: str
     center: float | None = None
+    top: float | None = None
+    height: float | None = None
+
+    def far_below(self, above: Row) -> bool:
+        """More than ``MAX_ROW_GAP`` row heights of empty space between ``above`` and this row:
+        not the next row of the same subtitle (a weapon prompt high above an objective)."""
+        if None in (self.top, self.height, above.top, above.height):
+            return False
+        gap = self.top - (above.top + above.height)
+        return gap > MAX_ROW_GAP * max(self.height, above.height)
 
 
 def group_rows(rows: Iterable[str | Row]) -> list[str]:
@@ -120,8 +133,8 @@ def group_rows(rows: Iterable[str | Row]) -> list[str]:
     sentence end, or when it starts in lower case (a word of the end was lost); a new sentence
     in capitals is a new line - usually another speaker. Games that never punctuate therefore
     keep all rows together, as one subtitle. Subtitle rows are centred under each other: a row
-    whose centre is off by more than ``MAX_CENTER_SHIFT`` (a HUD label, a watermark at the side)
-    never joins a sentence."""
+    whose centre is off by more than ``MAX_CENTER_SHIFT`` (a HUD label, a watermark at the side),
+    or far below the row above (``Row.far_below``), never joins a sentence."""
     lines: list[str] = []
     previous: Row | None = None
     for item in rows:
@@ -131,7 +144,7 @@ def group_rows(rows: Iterable[str | Row]) -> list[str]:
             or row.center is None
             or previous.center is None
             or abs(row.center - previous.center) <= MAX_CENTER_SHIFT
-        )
+        ) and not (previous is not None and row.far_below(previous))
         if lines and aligned and (sentences.is_open(lines[-1]) or sentences.starts_lower(row.text)):
             lines[-1] = f"{lines[-1]} {row.text}"
         else:
@@ -252,7 +265,7 @@ class Stabilizer:
         """Feed the rows (top to bottom) of the OCR result of a frame ``update`` asked to read."""
         self._last_read_pixels = self._pixels
         cleaned = (
-            Row(clean(r.text), r.center) if isinstance(r, Row) else Row(clean(r)) for r in rows
+            replace(r, text=clean(r.text)) if isinstance(r, Row) else Row(clean(r)) for r in rows
         )
         events = self._judge(group_rows(r for r in cleaned if filters.check(r.text).ok), now)
         delay = self.fast_reread_s if self.awaiting_confirmation else self.upgrade_interval_s
@@ -345,7 +358,11 @@ class Stabilizer:
             return None
         current = line.votes.setdefault(key(line.text), _Vote(line.text, line.score, 1))
         line.votes.setdefault(key(text), _Vote(text, score)).add(text, score)
-        best = max(line.votes.values(), key=lambda vote: vote.value)
+        # Never back to a text the line was upgraded from: its earlier votes would win it back
+        # and the next reads upgrade it again - a new translation every read (seen on a weapon
+        # prompt above a GTA objective, "GIRARDI ES9 PISTOL" scoring low).
+        votes = [v for v in line.votes.values() if not is_upgrade(line.text, v.text)]
+        best = max(votes, key=lambda vote: vote.value)
         # (Scores are sums of fractions: a margin met exactly must not fail on rounding.)
         if best is current:  # the same words, other punctuation
             better = best.score - line.score > self.correct_margin - 1e-9

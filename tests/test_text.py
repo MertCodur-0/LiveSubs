@@ -37,6 +37,9 @@ ELLIPSIS = chr(0x2026)
         ("Hello .", "Hello."),
         ("Ill be back", "Ill be back"),  # an "l" inside a word stays
         ("I was going to-", "I was going to-"),  # an interrupted line keeps its dash
+        ("Okay..", "Okay..."),  # PP-OCR reads the ellipsis glyph as two dots
+        ("Yeah, he's.. my boyfriend.", "Yeah, he's... my boyfriend."),
+        ("Wait.... what", "Wait.... what"),  # longer runs stay
     ],
 )
 def test_clean(raw: str, cleaned: str) -> None:
@@ -519,6 +522,34 @@ def test_slang_read_more_often_is_kept(clock: Clock) -> None:
     appear_and_confirm(stab, clock, "I'ma fuck your ass up!")
     assert read(stab, clock, "lima fuck your ass up!", after=0.5) == []
     assert stab.current == ["I'ma fuck your ass up!"]
+
+
+def test_an_upgraded_line_never_flips_back_to_its_shorter_text(clock: Clock) -> None:
+    """Seen on a 105-minute GTA VI recording: once an upgrade replaced the line, the shorter
+    text's earlier votes won it back, the next reads upgraded it again - a new translation every
+    0.2 s for as long as both were on screen."""
+    scorer = ReadScorer(lambda text: [w for w in text.split() if w == "GIRARDI"])
+    stab = Stabilizer(scorer=scorer.score)
+    appear_and_confirm(stab, clock, "Get in Brian's truck now")
+    for _ in range(4):
+        read(stab, clock, "Get in Brian's truck now", after=0.5)
+    events = []
+    for _ in range(8):
+        events += read(stab, clock, "GIRARDI ES9 PISTOL Get in Brian's truck now", after=0.2)
+    texts = [e.text for e in events if isinstance(e, LineUpgraded)]
+    assert texts == ["GIRARDI ES9 PISTOL Get in Brian's truck now"]
+
+
+def test_rows_far_apart_are_never_one_sentence() -> None:
+    # A weapon prompt high in the region over an objective at its bottom: both centred, the
+    # prompt without a full stop - but far apart, so not two rows of one subtitle.
+    label = Row("GIRARDI ES9 PISTOL", 0.5, top=70, height=30)
+    objective = Row("Get in Brian's truck", 0.5, top=262, height=32)
+    assert group_rows([label, objective]) == ["GIRARDI ES9 PISTOL", "Get in Brian's truck"]
+    wrapped = Row("trying to hook up with a chick,", 0.5, top=228, height=44)
+    assert group_rows([Row("When you're hooking up", 0.5, top=180, height=44), wrapped]) == [
+        "When you're hooking up trying to hook up with a chick,"
+    ]
 
 
 def test_a_cleaner_read_with_a_garbled_word_fixed_corrects_the_line(clock: Clock) -> None:

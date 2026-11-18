@@ -46,6 +46,46 @@ def test_specks_and_lone_components_are_no_segment() -> None:
     assert len(segments) == 1 and segments[0].box.x < 50
 
 
+def test_colored_words_beside_a_line_are_segments_but_never_start_one() -> None:
+    letters = np.zeros((200, 900), np.uint8)
+    end = _glyphs(letters, 100, 40, 6)
+    colored = np.zeros_like(letters)
+    word = end + 10
+    word_end = _glyphs(colored, word, 40, 5)  # a colored word after the white ones
+    _glyphs(colored, 300, 130, 8)  # colored glyphs alone on another row (scenery, a sign)
+    line, extra = find_segments(letters, colored)
+    assert line.row == extra.row == 0
+    # Each is read alone, and their boxes never share a glyph.
+    assert line.box.x < 100 and end - 4 <= line.box.right <= word
+    assert extra.box.x >= end - 4 and extra.box.right >= word_end - 4
+
+
+def test_a_colored_word_touching_a_line_joins_its_segment() -> None:
+    # The letters mask holds "Find Arn" of "Find Arnold" (bright pink passes as white) and the
+    # colored glyphs the rest: one segment, or the reads would be "Arn" + "old".
+    letters = np.zeros((100, 600), np.uint8)
+    end = _glyphs(letters, 100, 40, 6)
+    colored = np.zeros_like(letters)
+    word_end = _glyphs(colored, end + 2, 40, 3)
+    (segment,) = find_segments(letters, colored)
+    assert segment.box.x < 100 and segment.box.right >= word_end - 4
+
+
+def test_a_tall_glyph_after_short_ones_stays_in_the_segment() -> None:
+    # "mean! And": x-height letters, then a "!" and a capital that sit higher. The "!" used to
+    # start a segment of its own, and both padded boxes read it ("mean!! And also crazy.").
+    # Sizes as measured on the frame: x-height 18 px, "!" 17 px whose centre is 6.5 px higher.
+    mask = np.zeros((120, 600), np.uint8)
+    for i in range(4):
+        cv2.rectangle(mask, (100 + 20 * i, 46), (113 + 20 * i, 63), 255, -1)  # "mean"
+    cv2.rectangle(mask, (188, 40), (190, 56), 255, -1)  # "!" bar
+    cv2.rectangle(mask, (205, 40), (224, 63), 255, -1)  # "A"
+    for i in range(6):
+        cv2.rectangle(mask, (229 + 20 * i, 46), (242 + 20 * i, 63), 255, -1)  # "nd also"
+    (segment,) = find_segments(mask)
+    assert segment.box.x < 100 and segment.box.right > 340
+
+
 def test_empty_mask_has_no_segments() -> None:
     assert find_segments(np.zeros((50, 200), np.uint8)) == []
 
@@ -135,6 +175,17 @@ def test_reads_rendered_subtitle(reader) -> None:
     assert read.text == "Come on, you fool!"
     box = read.lines[0].box
     assert 0 <= box.x < 60 and box.right > 400
+
+
+def test_reads_a_colored_word_of_a_white_line(reader) -> None:
+    # GTA's objectives: "Land near the" white, "docks" pink; the mask holds the white only.
+    region = np.full((120, 900, 3), (40, 35, 30), np.uint8)
+    font = cv2.FONT_HERSHEY_DUPLEX
+    cv2.putText(region, "Land near the", (60, 75), font, 1.4, (235,) * 3, 2)
+    x = 60 + cv2.getTextSize("Land near the ", font, 1.4, 2)[0][0]
+    cv2.putText(region, "docks", (x, 75), font, 1.4, (160, 90, 235), 2)  # BGR pink
+    processed = preprocess(region, VisionSettings())
+    assert reader.recognize(region, processed.mask).text == "Land near the docks"
 
 
 def test_a_clear_line_is_read_with_high_confidence(reader) -> None:

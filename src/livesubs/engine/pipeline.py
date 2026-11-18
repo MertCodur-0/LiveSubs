@@ -547,7 +547,10 @@ def _cleanest_row(line: OcrLine, others: list[OcrLine], scorer: ReadScorer) -> O
 def rows_of(read: OcrResult, width: int) -> list[Row]:
     """The read's rows, top to bottom, with their horizontal centres (0-1 of ``width``)."""
     lines = sorted(read.lines, key=lambda line: line.box.y)
-    return [Row(line.text, (line.box.x + line.box.width / 2) / width) for line in lines]
+    return [
+        Row(line.text, (line.box.x + line.box.width / 2) / width, line.box.y, line.box.height)
+        for line in lines
+    ]
 
 
 def _close(backend: TranslationBackend | None) -> None:

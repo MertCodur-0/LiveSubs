@@ -27,6 +27,9 @@ _PIPE_AS_I = re.compile(r"(?<![^\s\"(])[|l](?='\w|\s+[\w\"'(])")
 # Stray marks OCR finds at the edges of a line (caption box corners, outline fragments).
 _EDGE_JUNK = re.compile(r"^[\s|_~•·*=+^`<>\\/-]+|[\s|_~•·*=+^`<>\\/]+$")
 _SPACES = re.compile(r"\s+")
+# The PP-OCR reader reads a subtitle font's ellipsis glyph as two dots ("Okay..", "he's.. my");
+# English writes no double dot.
+_TWO_DOTS = re.compile(r"(?<!\.)\.\.(?!\.)")
 _SPACE_BEFORE_PUNCT = re.compile(r"\s+([,.!?;:])")
 _NOT_WORD = re.compile(r"[^\w\s]")
 
@@ -37,6 +40,7 @@ def clean(text: str) -> str:
     text = _SPACES.sub(" ", text).strip()
     text = _PIPE_AS_I.sub("I", text)
     text = _EDGE_JUNK.sub("", text)
+    text = _TWO_DOTS.sub("...", text)
     return _SPACE_BEFORE_PUNCT.sub(r"\1", text)
 
 
