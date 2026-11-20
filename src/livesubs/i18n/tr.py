@@ -60,6 +60,9 @@ STRINGS: dict[str, str] = {
     "appearance.style.box": "Kutu (kontursuz, koyu kutu)",
     "appearance.style_hint": "Stil renkleri ve konturu ayarlar; sonra tek tek değiştirebilirsiniz.",
     "appearance.placement": "Çevirinin yeri",
+    "appearance.placement.on_text": (
+        "İngilizce altyazının hemen üstünde (boyu ve genişliği ona uyar)"
+    ),
     "appearance.placement.above": "Altyazının üstünde",
     "appearance.placement.over": "Altyazının yerinde (İngilizcenin üstünü kaplar)",
     "appearance.placement.below": "Altyazının altında",
@@ -420,7 +423,8 @@ STRINGS: dict[str, str] = {
         "OBS ve ekran görüntüleri çeviriyi de görür. Normalde çeviri ekran yakalamadan "
         "gizlenir; böylece OCR kendi çevirimizi okumaz. "
         "Kayıt modunda çeviri altyazı bölgesiyle çakışırsa OCR onu da okuyabilir; "
-        "bu durumda uyarı gösterilir."
+        'bu durumda uyarı gösterilir. "İngilizce altyazının hemen üstünde" yerleşiminde '
+        "çeviri her zaman gizli kalır (okuma bölgesinin içindedir)."
     ),
     "settings.web": "Telefonda göster",
     "settings.web_enabled": "Çeviriyi telefona gönder",

@@ -155,6 +155,24 @@ def glyph_height(mask: np.ndarray) -> float | None:
     return _letters(mask)[0]
 
 
+TALL_PERCENTILE = 90  # of glyph heights: capitals, ascenders and descenders, whatever the text
+
+
+def tall_glyph_height(mask: np.ndarray) -> float | None:
+    """The height of a text's tall glyphs (capitals, "d", "g", ...) in pixels; ``None`` with
+    fewer than three glyphs. Unlike ``glyph_height`` it hardly depends on the words: the 75th
+    percentile falls between x-height and capital height, wherever the text's share of short
+    letters puts it (measured: 45 vs 68 px for two sentences in one font and size). Used to
+    draw the translation as large as the subtitle."""
+    _, _, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    heights = stats[1:, cv2.CC_STAT_HEIGHT]
+    widths = stats[1:, cv2.CC_STAT_WIDTH]
+    plausible = heights[(heights >= 4) & (widths <= 3 * heights)]
+    if len(plausible) < 3:
+        return None
+    return float(np.percentile(plausible, TALL_PERCENTILE))
+
+
 def _letters(mask: np.ndarray) -> tuple[float | None, np.ndarray]:
     """``(glyph height, letters)``: ``letters`` keeps the components at least
     ``LETTER_SHARE`` of the glyph height tall, i.e. no specks, dots or commas."""

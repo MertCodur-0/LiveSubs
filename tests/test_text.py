@@ -562,3 +562,42 @@ def test_a_cleaner_read_with_a_garbled_word_fixed_corrects_the_line(clock: Clock
             1, "This is why she fuckin' left me...", previous="This is why she fuckiJ1' left"
         )
     ]
+
+
+def test_stabilizer_knows_where_the_lines_on_screen_are() -> None:
+    """The overlay can sit right on the English lines: the box of the lines on screen, the rows
+    of one sentence and stacked lines together; junk rows that are no line never count."""
+    s = Stabilizer()
+    first = Row("When you're hooking up", 0.5, 10, 20, box=(0.3, 0.5, 0.7, 0.62))
+    second = Row("with a chick, you know.", 0.5, 32, 20, box=(0.32, 0.64, 0.68, 0.76))
+    junk = Row("~", 0.1, 0, 10, box=(0.0, 0.0, 0.05, 0.05))  # filtered: no letters
+    assert s.box is None
+    for now in (0.0, 0.05):
+        s.update(Change.APPEARED if now == 0 else Change.SAME, 100, now)
+        s.on_read([junk, first, second], now)
+    assert s.current == ["When you're hooking up with a chick, you know."]
+    assert s.box == (0.3, 0.5, 0.7, 0.76)
+
+    reply = Row("Shut up.", 0.5, 54, 20, box=(0.45, 0.8, 0.55, 0.9))
+    for now in (0.6, 0.65):
+        s.on_read([first, second, reply], now)
+    assert len(s.current) == 2
+    assert s.box == (0.3, 0.5, 0.7, 0.9)
+    s.update(Change.CLEARED, 0, 1.0)
+    assert s.box is None
+
+
+def test_subtitle_box_leaves_out_labels_beside_the_subtitle() -> None:
+    """A watermark or HUD label read as a line of its own (off the subtitle's centre, or far
+    above it) must not pull the translation up to it."""
+    s = Stabilizer()
+    label = Row("ON SOLANA", 0.2, 0, 20, box=(0.1, 0.2, 0.3, 0.3))
+    high = Row("Get in Brian's truck.", 0.5, 0, 20, box=(0.35, 0.0, 0.65, 0.1))
+    line = Row("Stay right where you are.", 0.5, 80, 20, box=(0.35, 0.8, 0.65, 0.9))
+    for now in (0.0, 0.05):
+        s.update(Change.APPEARED if now == 0 else Change.SAME, 100, now)
+        s.on_read([high, label], now)
+    for now in (0.6, 0.65):
+        s.on_read([high, label, line], now)
+    assert len(s.current) == 3
+    assert s.box == (0.35, 0.8, 0.65, 0.9)

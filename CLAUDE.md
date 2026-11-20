@@ -518,6 +518,24 @@ font size, text color, outline/shadow, background opacity, max lines shown.
   translation until the new one's comes, as before); a late translation shows for the delay.
   `Overlay.show_lines` stacks them, each with its own original; when they exceed `max_lines`
   (default 2) or the height, the oldest leave first; a single line still shrinks to fit.
+- **On the English text** (`OverlayPlacement.ON_TEXT`, 2026-11-20, first in the placement
+  combo; user: GTA's lines come fast, the overlay hid them, and with the overlay inside the
+  region OCR read it — because **recording mode** was on): the stabilizer keeps each line's
+  box (`Row.box`, 0-1 of the region, unioned over a sentence's rows); `Stabilizer.box` = the
+  newest line plus the lines stacked with it (centred within `MAX_CENTER_SHIFT`, gap <= a line
+  height: a watermark or HUD label read as a line stays out). After each read the pipeline
+  sends `SubtitleBox(box, glyph_height)` (frame-normalised; the box shrunk to the letters mask
+  inside it; `preprocess.tall_glyph_height` = 90th percentile of component heights — the 75th
+  of `glyph_height` swings between x-height and cap height with the words: 45 vs 68 px for two
+  sentences in one font) when it moved > 0.4 % or the glyphs changed > 8 %. The UI places the
+  overlay `TEXT_GAP` 0.35 glyphs above it, centred, `TEXT_SIDE_ROOM` 4 glyphs wider on each
+  side; `Overlay.fit_to(glyph_px, width)` sizes the font so its rendered tall-glyph height
+  (`glyph_share`, measured the same way, cached per family) equals the game's, in Manrope
+  SemiBold (`FIT_WEIGHT`; regular under the 3 px outline looked thin and ragged), wrapping at
+  the English width x `TEXT_WRAP_SLACK` 1.15. Until the first box: like ABOVE. In this placement
+  the overlay is always hidden from capture, recording mode or not. Box reset on Start, region,
+  source and profile changes. Checked on the user's two clean GTA VI recordings (1080p60, kept
+  outside the repo): 6/6 lines read exactly, translation size and width matched by eye.
 - Styles (step 16): `OverlayStyle` CLASSIC / VICE / BOX are presets of the look fields
   (`overlay.STYLE_PRESETS`, `apply_style`; the "Hazır stil" combo on the Görünüm tab), each field
   still editable afterwards. CLASSIC = the defaults (white, black 3 px outline, shadow, box 55 %).

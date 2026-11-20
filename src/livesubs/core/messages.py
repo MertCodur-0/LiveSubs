@@ -131,6 +131,16 @@ class SubtitleLines:
 
 
 @dataclass(frozen=True, slots=True)
+class SubtitleBox:
+    """Where the subtitle lines on screen are, so the translation can sit right on them: their
+    box (x, y, width, height, each 0-1 of the source's frame) and the height of their glyphs
+    (0-1 of the frame's height; None when it could not be measured). Sent when it moves."""
+
+    box: tuple[float, float, float, float]
+    glyph_height: float | None
+
+
+@dataclass(frozen=True, slots=True)
 class SubtitleCleared:
     """No subtitle on screen any more."""
 
@@ -166,6 +176,7 @@ Event = (
     | SubtitleRead
     | SubtitleTranslated
     | SubtitleLines
+    | SubtitleBox
     | SubtitleCleared
     | FrameInfo
     | DebugFrame

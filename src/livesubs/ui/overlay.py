@@ -8,6 +8,12 @@ fill on top, so it stays readable on any background. Styles are presets of the l
 "vice" also draws a thin cyan halo around the translation's pink outline (the small original
 keeps a plain black outline: neon edges on small text hurt readability).
 
+Fitted to the subtitle (``fit_to``, the "on the English text" placement): the font is sized so
+its glyphs are as tall as the game's - measured the same way the engine measures the game's
+(``preprocess.tall_glyph_height`` on rendered text) - a little lighter (``FIT_WEIGHT``: games
+draw subtitles in a regular weight; regular under a 3 px outline was thin and ragged), and lines
+wrap at the English lines' width.
+
 In edit mode (calibration) it takes the mouse: drag to move, drag an edge or corner to resize;
 ``edited`` reports the new geometry when the mouse is released.
 """
@@ -16,13 +22,16 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from functools import cache
 
+import numpy as np
 from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (
     QColor,
     QFont,
     QFontMetricsF,
     QGuiApplication,
+    QImage,
     QMouseEvent,
     QPainter,
     QPainterPath,
@@ -32,6 +41,7 @@ from PySide6.QtWidgets import QWidget
 
 from livesubs.core.geometry import Rect
 from livesubs.core.profiles import OverlaySettings, OverlayStyle
+from livesubs.engine.vision.preprocess import tall_glyph_height
 from livesubs.i18n import t
 from livesubs.platform import win32
 from livesubs.ui.movable import MoveResize
@@ -46,6 +56,11 @@ ORIGINAL_MAX_LINES = 2
 _PADDING = 10
 VICE_HALO = "#00E5FF"
 VICE_HALO_PX = 1.5  # outside the outline
+# Rendered to measure a font's glyph height (as the engine measures the game's): mixed case and
+# ascenders/descenders like a subtitle line, Turkish letters included.
+GLYPH_SAMPLE = "Bunu gördün mü? Hayır, şimdi geliyorum dostum."
+_SAMPLE_PT = 60.0
+FIT_WEIGHT = QFont.Weight.DemiBold  # fitted to the subtitle (Manrope SemiBold is bundled)
 
 STYLE_PRESETS: dict[OverlayStyle, dict[str, object]] = {
     OverlayStyle.CLASSIC: {
@@ -99,6 +114,29 @@ def wrap(text: str, width_of: Callable[[str], float], max_width: float) -> list[
     return lines
 
 
+@cache
+def glyph_share(family: str, weight: QFont.Weight = QFont.Weight.Bold) -> float:
+    """``family``'s tall-glyph height (``preprocess.tall_glyph_height``) per point."""
+    font = QFont(family)
+    font.setWeight(weight)
+    font.setPointSizeF(_SAMPLE_PT)
+    metrics = QFontMetricsF(font)
+    width = int(metrics.horizontalAdvance(GLYPH_SAMPLE)) + 20
+    height = int(metrics.height()) + 20
+    image = QImage(width, height, QImage.Format.Format_Grayscale8)
+    image.fill(0)
+    painter = QPainter(image)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    path = QPainterPath()
+    path.addText(QPointF(10, 10 + metrics.ascent()), font, GLYPH_SAMPLE)
+    painter.fillPath(path, QColor(255, 255, 255))
+    painter.end()
+    pixels = np.frombuffer(image.constBits(), np.uint8).reshape(height, image.bytesPerLine())
+    measured = tall_glyph_height(((pixels[:, :width] >= 128) * 255).astype(np.uint8))
+    # Qt's points are 4/3 logical pixels; a font without glyphs falls back to cap-ish height.
+    return (measured or _SAMPLE_PT * 4 / 3 * 0.72) / _SAMPLE_PT
+
+
 def _block_height(
     metrics: QFontMetricsF, small: QFontMetricsF, lines: list[str], original: list[str]
 ) -> float:
@@ -124,6 +162,9 @@ class Overlay(QWidget):
         self.suppressed = False  # hidden by the user (hotkey): keep the text, stay invisible
         self.disabled = False  # the profile shows translations on the phone only
         self.capture_visible = False  # recording mode: let OBS and screenshots see it
+        # Fitted to the subtitle (``fit_to``): font size in points and the wrapping width.
+        self.fit_size_pt: float | None = None
+        self.fit_width: float | None = None
         self._mover = MoveResize(self, self.edited.emit, QPoint(160, 48))
 
     @staticmethod
@@ -188,13 +229,29 @@ class Overlay(QWidget):
         if disabled:
             self.hide()
 
+    def fit_to(self, glyph_px: float | None, width: float | None) -> None:
+        """Glyphs ``glyph_px`` tall (logical pixels) and lines no wider than ``width``, like the
+        subtitle under the overlay; ``None`` for the configured size and the full width."""
+        size = None
+        if glyph_px is not None:
+            share = glyph_share(self.settings.font_family, FIT_WEIGHT)
+            size = max(float(MIN_FONT_PT), glyph_px / share)
+        if (size, width) != (self.fit_size_pt, self.fit_width):
+            self.fit_size_pt, self.fit_width = size, width
+            self.update()
+
+    @property
+    def font_size_pt(self) -> float:
+        """The size the text is drawn at (before shrinking to fit)."""
+        return self.fit_size_pt if self.fit_size_pt is not None else self.settings.font_size_pt
+
     def preferred_height(self) -> float:
-        """Logical height for ``max_lines`` lines at the configured size (plus the original)."""
+        """Logical height for ``max_lines`` lines at the current size (plus the original)."""
         s = self.settings
-        main = QFontMetricsF(self._font(s.font_size_pt)).lineSpacing() * s.max_lines
+        main = QFontMetricsF(self._font(self.font_size_pt)).lineSpacing() * s.max_lines
         original = 0.0
         if s.show_original:
-            small = QFontMetricsF(self._original_font(s.font_size_pt)).lineSpacing()
+            small = QFontMetricsF(self._original_font(self.font_size_pt)).lineSpacing()
             original = small * ORIGINAL_MAX_LINES + 4
         return main + original + 2 * _PADDING + 4
 
@@ -212,6 +269,8 @@ class Overlay(QWidget):
         self._apply_capture_visibility()
 
     def set_capture_visible(self, visible: bool) -> None:
+        if visible == self.capture_visible:
+            return
         self.capture_visible = visible
         if self.isVisible():
             self._apply_capture_visibility()
@@ -229,7 +288,7 @@ class Overlay(QWidget):
 
     def _font(self, size: float) -> QFont:
         font = QFont(self.settings.font_family)
-        font.setBold(True)
+        font.setWeight(QFont.Weight.Bold if self.fit_size_pt is None else FIT_WEIGHT)
         font.setPointSizeF(size)
         return font
 
@@ -257,7 +316,10 @@ class Overlay(QWidget):
     def _paint_lines(self, painter: QPainter, items: list[ShownLine]) -> None:
         s = self.settings
         area = QRectF(self.rect()).adjusted(_PADDING, _PADDING, -_PADDING, -_PADDING)
-        small_font = self._original_font(s.font_size_pt)
+        if self.fit_width is not None and self.fit_width < area.width():
+            area.setLeft(area.center().x() - self.fit_width / 2)
+            area.setWidth(self.fit_width)
+        small_font = self._original_font(self.font_size_pt)
         small = QFontMetricsF(small_font)
         font, blocks = self._layout(items, area.width(), area.height())
         metrics = QFontMetricsF(font)
@@ -325,7 +387,7 @@ class Overlay(QWidget):
         configured size lose the oldest first; the last one left shrinks from the configured
         size down until it fits."""
         s = self.settings
-        small = QFontMetricsF(self._original_font(s.font_size_pt))
+        small = QFontMetricsF(self._original_font(self.font_size_pt))
 
         def wrapped(font: QFont, items: list[ShownLine]) -> list[tuple[list[str], list[str]]]:
             metrics = QFontMetricsF(font)
@@ -346,7 +408,7 @@ class Overlay(QWidget):
             total = sum(_block_height(metrics, small, lines, orig) for lines, orig in blocks)
             return count <= s.max_lines and total <= height
 
-        size = float(s.font_size_pt)
+        size = float(self.font_size_pt)
         font = self._font(size)
         while len(items) > 1 and not fits(font, wrapped(font, items)):
             items = items[1:]  # the oldest scrolls out, as in the game

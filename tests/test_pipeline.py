@@ -36,7 +36,7 @@ from livesubs.engine.capture.base import (
 )
 from livesubs.engine.capture.shared_frames import SharedFrameWriter
 from livesubs.engine.ocr.language import english_ocr_language
-from livesubs.engine.pipeline import Pipeline
+from livesubs.engine.pipeline import Pipeline, subtitle_box
 from livesubs.engine.translate.base import (
     BackendUnavailableError,
     CancelToken,
@@ -681,3 +681,20 @@ def test_an_unexpected_warm_up_failure_does_not_leave_the_state_at_warming_up() 
     assert [e.kind for e in recorder.of(EngineError)] == [ErrorKind.INTERNAL]
     assert [e.text for e in recorder.of(SubtitleRead)] == ["Still reading here."]
     assert Broken.closed  # its connections are released
+
+
+def test_subtitle_box_is_the_glyphs_on_the_frame() -> None:
+    """The OCR box (padded) shrinks to the glyphs inside it and is mapped from the region onto
+    the frame, with the glyphs' height."""
+    letters = np.zeros((100, 400), np.uint8)
+    for i in range(10):  # ten glyphs 20 px tall at x 100-290, y 40-60
+        letters[40:60, 100 + i * 20 : 112 + i * 20] = 255
+    letters[5:8, 5:8] = 255  # a speck outside the box
+    region = NormRect(x=0.25, y=0.5, width=0.5, height=0.25)
+    event = subtitle_box((0.2, 0.3, 0.8, 0.7), letters, region)
+    x, y, w, h = event.box
+    assert x == pytest.approx(0.25 + 100 / 400 * 0.5)
+    assert y == pytest.approx(0.5 + 40 / 100 * 0.25)
+    assert w == pytest.approx(292 / 400 * 0.5 - 100 / 400 * 0.5)
+    assert h == pytest.approx(20 / 100 * 0.25)
+    assert event.glyph_height == pytest.approx(20 / 100 * 0.25)

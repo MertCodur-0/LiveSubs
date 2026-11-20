@@ -41,6 +41,7 @@ from livesubs.core.messages import (
     FrameInfo,
     StartPipeline,
     StateChanged,
+    SubtitleBox,
     SubtitleCleared,
     SubtitleLines,
     SubtitleRead,
@@ -56,14 +57,15 @@ from livesubs.engine.text import filters
 from livesubs.engine.text.normalize import clean, key
 from livesubs.engine.text.quality import ReadScorer
 from livesubs.engine.text.stabilizer import (
-    Event as LineEvent,
-)
-from livesubs.engine.text.stabilizer import (
+    Box,
     LineConfirmed,
     LineUpgraded,
     Row,
     ScreenChanged,
     Stabilizer,
+)
+from livesubs.engine.text.stabilizer import (
+    Event as LineEvent,
 )
 from livesubs.engine.translate.base import (
     BackendUnavailableError,
@@ -80,7 +82,7 @@ from livesubs.engine.translate.orchestrator import (
     TranslationOrchestrator,
 )
 from livesubs.engine.vision.change import Change, ChangeDetector
-from livesubs.engine.vision.preprocess import Preprocessed, preprocess
+from livesubs.engine.vision.preprocess import Preprocessed, preprocess, tall_glyph_height
 from livesubs.platform.spellcheck import open_spell_checker
 
 log = logging.getLogger(__name__)
@@ -90,6 +92,10 @@ CAPTURE_MAX_FPS = 30.0
 # Room a translation needs after the prompt; a prompt closer to num_ctx than this gets a warning
 # (a cut prompt reports num_ctx - 1 tokens).
 CONTEXT_MARGIN_TOKENS = 128
+# A subtitle box that moved less than this (share of the frame) or whose glyphs changed less than
+# GLYPH_CHANGE (relative) is not sent again: the overlay would only jitter.
+BOX_MOVE = 0.004
+GLYPH_CHANGE = 0.08
 
 SourceOpener = Callable[[Source], FrameSource]
 BackendFactory = Callable[[StartPipeline], TranslationBackend]
@@ -155,6 +161,7 @@ class Pipeline:
         self._waiting: tuple[int, str] | None = None
         self._translated: set[int] = set()  # lines whose translation went out
         self._early: str | None = None  # the text whose translation was started early
+        self._box: SubtitleBox | None = None  # the last one sent
         self._context_warned = False
 
     def start(self) -> None:
@@ -326,6 +333,7 @@ class Pipeline:
                 last_timestamp = -1.0  # process the current frame again, with the new settings
                 detector.reset()  # a new region: whatever was read before is gone
                 backoff.reset()
+                self._box = None
                 for event in stabilizer.update(Change.CLEARED, 0, time.monotonic()).events:
                     self._on_line(event, 0.0)
                 self._start_early(stabilizer.expected)
@@ -362,6 +370,26 @@ class Pipeline:
             for event in stabilizer.on_read(rows, time.monotonic()):
                 self._on_line(event, ocr_ms)
             self._start_early(stabilizer.expected)  # after the submits: they claim early work
+            self._send_box(stabilizer.box, processed.mask)
+
+    def _send_box(self, box: Box | None, letters: np.ndarray) -> None:
+        """Tell the UI where the lines on screen are (it may put the translation right above
+        them, as large as they are). Nothing is sent when they are gone: the translation stays
+        where it was for its clear delay."""
+        if box is None:
+            return
+        event = subtitle_box(box, letters, self._region)
+        last = self._box
+        if last is not None:
+            moved = max(abs(a - b) for a, b in zip(event.box, last.box, strict=True))
+            g, h = event.glyph_height, last.glyph_height
+            resized = (g is None) != (h is None) or (
+                g is not None and h is not None and abs(g - h) > GLYPH_CHANGE * h
+            )
+            if moved < BOX_MOVE and not resized:
+                return
+        self._box = event
+        self._emit(event)
 
     def _start_early(self, expected: str | None) -> None:
         """Translate a new line from its first read on (``Stabilizer.expected``); the
@@ -515,13 +543,17 @@ def read_subtitle(
     if lines is not None and region is not None:
         read = lines.recognize(region, processed.mask)
         if read is not None:
-            return read.text, read.elapsed_ms, rows_of(read, processed.mask.shape[1])
+            return (
+                read.text,
+                read.elapsed_ms,
+                rows_of(read, processed.mask.shape[1], processed.mask.shape[0]),
+            )
     images = processed.ocr_inputs
     reads = [ocr.recognize(image) for image in images]
     best = max(range(len(reads)), key=lambda i: scorer.score(reads[i].text))  # first on a tie
     others = [line for i, read in enumerate(reads) if i != best for line in read.lines]
     lines = [_cleanest_row(line, others, scorer) for line in reads[best].lines]
-    rows = rows_of(OcrResult(tuple(lines), 0.0), images[best].shape[1])
+    rows = rows_of(OcrResult(tuple(lines), 0.0), images[best].shape[1], images[best].shape[0])
     return reads[best].text, sum(read.elapsed_ms for read in reads), rows
 
 
@@ -544,13 +576,50 @@ def _cleanest_row(line: OcrLine, others: list[OcrLine], scorer: ReadScorer) -> O
     return max([line, *filter(same, others)], key=lambda row: scorer.score(row.text))
 
 
-def rows_of(read: OcrResult, width: int) -> list[Row]:
-    """The read's rows, top to bottom, with their horizontal centres (0-1 of ``width``)."""
+def rows_of(read: OcrResult, width: int, height: int) -> list[Row]:
+    """The read's rows, top to bottom, with their horizontal centres (0-1 of ``width``) and
+    their boxes (0-1 of the read image, ``width`` x ``height``)."""
     lines = sorted(read.lines, key=lambda line: line.box.y)
     return [
-        Row(line.text, (line.box.x + line.box.width / 2) / width, line.box.y, line.box.height)
+        Row(
+            line.text,
+            (line.box.x + line.box.width / 2) / width,
+            line.box.y,
+            line.box.height,
+            box=(
+                max(0.0, line.box.x / width),
+                max(0.0, line.box.y / height),
+                min(1.0, line.box.right / width),
+                min(1.0, line.box.bottom / height),
+            ),
+        )
         for line in lines
     ]
+
+
+def subtitle_box(box: Box, letters: np.ndarray, region: NormRect) -> SubtitleBox:
+    """``box`` (on the region) on the frame, with the glyph height of the letters inside it.
+
+    The OCR boxes are padded around the glyphs, so the glyphs' own extent (the letters mask
+    inside the box) is used where it holds any."""
+    h, w = letters.shape
+    x0, y0 = round(box[0] * w), round(box[1] * h)
+    x1, y1 = max(x0 + 1, round(box[2] * w)), max(y0 + 1, round(box[3] * h))
+    inside = letters[y0:y1, x0:x1]
+    ys, xs = np.nonzero(inside)
+    if len(xs):
+        x0, x1 = x0 + int(xs.min()), x0 + int(xs.max()) + 1
+        y0, y1 = y0 + int(ys.min()), y0 + int(ys.max()) + 1
+    glyph = tall_glyph_height(inside) if len(xs) else None
+    return SubtitleBox(
+        box=(
+            region.x + x0 / w * region.width,
+            region.y + y0 / h * region.height,
+            (x1 - x0) / w * region.width,
+            (y1 - y0) / h * region.height,
+        ),
+        glyph_height=glyph / h * region.height if glyph is not None else None,
+    )
 
 
 def _close(backend: TranslationBackend | None) -> None:

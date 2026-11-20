@@ -119,6 +119,9 @@ class OverlayPlacement(StrEnum):
     OVER = "over"  # on the original subtitle (hidden from capture, so OCR still reads it)
     BELOW = "below"  # right below the subtitle region
     CUSTOM = "custom"  # where the user put it in calibration mode: ``rect`` on ``monitor_device``
+    # Right above the English lines the engine found, as wide as they are and with glyphs as tall
+    # (follows them as they move; always hidden from capture, since it sits inside the region).
+    ON_TEXT = "on_text"
 
 
 class OverlaySettings(SettingsModel):

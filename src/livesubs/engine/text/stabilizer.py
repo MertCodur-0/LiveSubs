@@ -109,15 +109,27 @@ def is_upgrade(new: str, current: str, min_kept: float = 0.85) -> bool:
     return kept >= min_kept * len(current_words)
 
 
+# A box on the region: left, top, right, bottom, each 0-1 of the region's width / height.
+Box = tuple[float, float, float, float]
+
+
+def union(a: Box | None, b: Box | None) -> Box | None:
+    if a is None or b is None:
+        return a or b
+    return (min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3]))
+
+
 @dataclass(frozen=True, slots=True)
 class Row:
     """One OCR row: its text, its horizontal centre (0-1 across the region) and its box's top and
-    height (pixels of the read; only compared within one read). None = unknown."""
+    height (pixels of the read; only compared within one read). None = unknown. ``box`` is where
+    it is on the region (``Box``), for placing the translation on the subtitle."""
 
     text: str
     center: float | None = None
     top: float | None = None
     height: float | None = None
+    box: Box | None = None
 
     def far_below(self, above: Row) -> bool:
         """More than ``MAX_ROW_GAP`` row heights of empty space between ``above`` and this row:
@@ -135,7 +147,12 @@ def group_rows(rows: Iterable[str | Row]) -> list[str]:
     keep all rows together, as one subtitle. Subtitle rows are centred under each other: a row
     whose centre is off by more than ``MAX_CENTER_SHIFT`` (a HUD label, a watermark at the side),
     or far below the row above (``Row.far_below``), never joins a sentence."""
-    lines: list[str] = []
+    return [text for text, _ in _grouped(rows)]
+
+
+def _grouped(rows: Iterable[str | Row]) -> list[tuple[str, Box | None]]:
+    """``group_rows`` with each line's box (the union of its rows' boxes)."""
+    lines: list[tuple[str, Box | None]] = []
     previous: Row | None = None
     for item in rows:
         row = item if isinstance(item, Row) else Row(item)
@@ -145,10 +162,15 @@ def group_rows(rows: Iterable[str | Row]) -> list[str]:
             or previous.center is None
             or abs(row.center - previous.center) <= MAX_CENTER_SHIFT
         ) and not (previous is not None and row.far_below(previous))
-        if lines and aligned and (sentences.is_open(lines[-1]) or sentences.starts_lower(row.text)):
-            lines[-1] = f"{lines[-1]} {row.text}"
+        if (
+            lines
+            and aligned
+            and (sentences.is_open(lines[-1][0]) or sentences.starts_lower(row.text))
+        ):
+            text, box = lines[-1]
+            lines[-1] = (f"{text} {row.text}", union(box, row.box))
         else:
-            lines.append(row.text)
+            lines.append((row.text, row.box))
         previous = row
     return lines
 
@@ -192,6 +214,7 @@ class _Line:
     seen: float = 0.0  # last read that showed it
     upgrade: _Candidate | None = None
     votes: dict[str, _Vote] = field(default_factory=dict)  # reads of ``text``, by key
+    box: Box | None = None  # where the last read that showed it found it
 
     @property
     def full(self) -> str:
@@ -219,11 +242,42 @@ class Stabilizer:
     _next_read_at: float = field(default=0.0, init=False)
     _last_read_pixels: int = field(default=0, init=False)
     _pixels: int = field(default=0, init=False)
+    _boxes: list[Box | None] = field(default_factory=list, init=False)  # of the current read
 
     @property
     def current(self) -> list[str]:
         """The texts of the lines on screen, top to bottom."""
         return [line.text for line in self._ordered()]
+
+    @property
+    def box(self) -> Box | None:
+        """Where the subtitle is on the region: the newest line on screen and the lines stacked
+        with it (centred within ``MAX_CENTER_SHIFT`` of it, no more than a line's height of
+        space between them). A HUD label or a watermark elsewhere in the region is no part of
+        it. None when no line is on screen or the reads carried no boxes."""
+        lines = [line for line in self._lines if line.box is not None]
+        if not lines:
+            return None
+        newest = max(lines, key=lambda line: line.line_id)
+        box = newest.box
+        assert box is not None
+        center = (box[0] + box[2]) / 2
+        aligned = sorted(
+            (
+                line.box
+                for line in lines
+                if line is not newest
+                and line.box is not None
+                and abs((line.box[0] + line.box[2]) / 2 - center) <= MAX_CENTER_SHIFT
+            ),
+            key=lambda b: abs((b[1] + b[3]) / 2 - (box[1] + box[3]) / 2),
+        )
+        for other in aligned:  # nearest first, so a stack is joined row by row
+            assert box is not None
+            gap = max(other[1] - box[3], box[1] - other[3])
+            if gap <= min(other[3] - other[1], box[3] - box[1]):
+                box = union(box, other)
+        return box
 
     @property
     def expected(self) -> str | None:
@@ -267,24 +321,26 @@ class Stabilizer:
         cleaned = (
             replace(r, text=clean(r.text)) if isinstance(r, Row) else Row(clean(r)) for r in rows
         )
-        events = self._judge(group_rows(r for r in cleaned if filters.check(r.text).ok), now)
+        events = self._judge(_grouped(r for r in cleaned if filters.check(r.text).ok), now)
         delay = self.fast_reread_s if self.awaiting_confirmation else self.upgrade_interval_s
         self._next_read_at = now + delay
         return events
 
     # --- one read --------------------------------------------------------------------------------
 
-    def _judge(self, texts: list[str], now: float) -> list[Event]:
+    def _judge(self, read: list[tuple[str, Box | None]], now: float) -> list[Event]:
         events: list[Event] = []
         matched: set[int] = set()
         unmatched: list[tuple[int, str]] = []
-        for row, text in enumerate(texts):
+        boxes = [box for _, box in read]
+        self._boxes = boxes
+        for row, (text, box) in enumerate(read):
             line = self._match(text, matched)
             if line is None:
                 unmatched.append((row, text))
                 continue
             matched.add(line.line_id)
-            line.row, line.misses, line.seen = row, 0, now
+            line.row, line.misses, line.seen, line.box = row, 0, now, box
             event = self._upgrade(line, text)
             if event is not None:
                 events.append(event)
@@ -432,6 +488,7 @@ class Stabilizer:
 
     def _show(self, line: _Line, row: int, now: float, matched: set[int]) -> None:
         line.row, line.misses, line.seen, line.upgrade = row, 0, now, None
+        line.box = self._boxes[row] if row < len(self._boxes) else None
         self._lines.append(line)
         matched.add(line.line_id)
 

@@ -9,6 +9,13 @@ from livesubs.core.profiles import OverlayPlacement
 from livesubs.platform.win32 import MonitorInfo
 
 GAP_PX = 6
+# ON_TEXT: room on each side of the English lines for a Turkish word longer than all
+# of them, and the gap above them - both in glyph heights.
+TEXT_SIDE_ROOM = 4.0
+TEXT_GAP = 0.35
+# The translation wraps at the English lines' width plus this share: a Turkish line a little
+# longer than the English one stays one line instead of leaving a word alone on a second.
+TEXT_WRAP_SLACK = 1.15
 
 
 def monitor_at(monitors: Sequence[MonitorInfo], x: float, y: float) -> MonitorInfo:
@@ -30,6 +37,8 @@ def overlay_geometry(placement: OverlayPlacement, region: Rect, screen: Rect, he
     when the region is), above / on / below it. Flips to the other side when there is no room on
     the monitor. CUSTOM is handled by ``custom_geometry``."""
     match placement:
+        case OverlayPlacement.ON_TEXT:  # the lines' place unknown yet: above the region
+            return overlay_geometry(OverlayPlacement.ABOVE, region, screen, height)
         case OverlayPlacement.BELOW:
             y = region.bottom + GAP_PX
             if y + height > screen.bottom:
@@ -46,3 +55,18 @@ def overlay_geometry(placement: OverlayPlacement, region: Rect, screen: Rect, he
 
 def custom_geometry(rect: NormRect, monitor: Rect) -> Rect:
     return rect.to_pixels(monitor.width, monitor.height).translated(monitor.x, monitor.y)
+
+
+def text_geometry(text: Rect, glyph: float, screen: Rect, height: int) -> Rect:
+    """The overlay right above the English lines at ``text`` (``glyph`` = their glyph height,
+    physical pixels): centred on them, ``TEXT_SIDE_ROOM`` glyphs wider on each side (the
+    translation wraps at the lines' own width; a long word may stick out), its bottom
+    ``TEXT_GAP`` glyphs above them. Below them when there is no room above."""
+    room = round(TEXT_SIDE_ROOM * glyph)
+    x = max(screen.x, text.x - room)
+    right = min(screen.right, text.right + room)
+    gap = round(TEXT_GAP * glyph)
+    y = text.y - gap - height
+    if y < screen.y:
+        y = text.bottom + gap
+    return Rect(x, y, right - x, height)

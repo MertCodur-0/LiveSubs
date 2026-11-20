@@ -2,8 +2,16 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from PySide6.QtCore import QObject, QPoint, Qt, Signal
-from PySide6.QtGui import QGuiApplication, QKeySequence
+from PySide6.QtCore import QObject, QPoint, QPointF, Qt, Signal
+from PySide6.QtGui import (
+    QColor,
+    QFontMetricsF,
+    QGuiApplication,
+    QImage,
+    QKeySequence,
+    QPainter,
+    QPainterPath,
+)
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QToolTip, QWidget
 from pytestqt.qtbot import QtBot
@@ -26,6 +34,7 @@ from livesubs.core.messages import (
     StartPipeline,
     StateChanged,
     StopPipeline,
+    SubtitleBox,
     SubtitleCleared,
     SubtitleLines,
     SubtitleRead,
@@ -55,6 +64,7 @@ from livesubs.device.messages import (
 )
 from livesubs.engine.capture.shared_frames import SharedFrameWriter
 from livesubs.engine.translate.cache import TranslationCache
+from livesubs.engine.vision.preprocess import tall_glyph_height
 from livesubs.i18n import t
 from livesubs.ollama.client import InstalledModel
 from livesubs.platform import hotkeys, win32
@@ -65,9 +75,16 @@ from livesubs.ui import wheel
 from livesubs.ui.frame_region import FrameRegionDialog
 from livesubs.ui.inspector import Inspector
 from livesubs.ui.main_window import DEFAULT_PROFILE_ID, MainWindow
-from livesubs.ui.overlay import Overlay, wrap
+from livesubs.ui.overlay import Overlay, glyph_share, wrap
 from livesubs.ui.pick import resolve, resolve_card
-from livesubs.ui.placement import GAP_PX, custom_geometry, monitor_at, overlay_geometry
+from livesubs.ui.placement import (
+    GAP_PX,
+    TEXT_GAP,
+    custom_geometry,
+    monitor_at,
+    overlay_geometry,
+    text_geometry,
+)
 from livesubs.ui.region_select import RegionPicker
 from livesubs.ui.screens import ScreenMap, current_screens, from_qrect, to_logical, to_physical
 from livesubs.ui.shown_lines import ShownLine
@@ -141,6 +158,56 @@ def test_wrap() -> None:
     assert wrap("Arabaya bin hemen", width, 120) == ["Arabaya bin", "hemen"]
     assert wrap("Supercalifragilistic word", width, 50) == ["Supercalifragilistic", "word"]
     assert wrap("", width, 100) == []
+
+
+def test_text_geometry_sits_right_above_the_english_lines() -> None:
+    text = Rect(700, 950, 520, 60)
+    above = text_geometry(text, 30, SCREEN, 100)
+    assert above.bottom == 950 - round(TEXT_GAP * 30)
+    assert above.x + above.width / 2 == pytest.approx(700 + 520 / 2)  # centred on the lines
+    assert above.width > text.width  # room for a Turkish word longer than the line
+    top = Rect(700, 20, 520, 30)
+    assert text_geometry(top, 15, SCREEN, 100).y == 50 + round(TEXT_GAP * 15)  # no room: below
+    # Without the lines' place yet, ON_TEXT goes above the region.
+    assert overlay_geometry(OverlayPlacement.ON_TEXT, SUBTITLE, SCREEN, 100) == overlay_geometry(
+        OverlayPlacement.ABOVE, SUBTITLE, SCREEN, 100
+    )
+
+
+@pytest.mark.parametrize("glyph", [18.0, 30.0, 52.0])
+def test_fitted_overlay_glyphs_are_as_tall_as_the_subtitle(qtbot: QtBot, glyph: float) -> None:
+    """Fitted to the subtitle, the translation's glyphs measure (the way the engine measures
+    the game's) as tall as the English ones."""
+    overlay = Overlay()
+    qtbot.addWidget(overlay)
+    overlay.fit_to(glyph, 600)
+    font = overlay._font(overlay.font_size_pt)
+    image = QImage(1400, 300, QImage.Format.Format_Grayscale8)
+    image.fill(0)
+    painter = QPainter(image)
+    path = QPainterPath()
+    path.addText(QPointF(10, 150), font, "Arabaya bin, aynasızlar geliyor! Çabuk ol dostum.")
+    painter.fillPath(path, QColor(255, 255, 255))
+    painter.end()
+    pixels = np.frombuffer(image.constBits(), np.uint8).reshape(300, image.bytesPerLine())
+    measured = tall_glyph_height(((pixels[:, :1400] >= 128) * 255).astype(np.uint8))
+    assert measured == pytest.approx(glyph, rel=0.12)
+    assert glyph_share("Manrope") > 0
+
+
+def test_fitted_overlay_wraps_at_the_english_width(qtbot: QtBot) -> None:
+    overlay = Overlay()
+    qtbot.addWidget(overlay)
+    overlay.place(Rect(0, 0, 1200, 200))
+    overlay.fit_to(24, 300)
+    overlay.show_text("Kıçını arabaya sok kanka, aynasızlar geliyor!")
+    font, blocks = overlay._layout(overlay.lines, 300, 180)
+    metrics = QFontMetricsF(font)
+    assert len(blocks[0][0]) == 2
+    assert all(metrics.horizontalAdvance(line) <= 300 for line in blocks[0][0])
+    assert not overlay.grab().isNull()
+    overlay.fit_to(None, None)
+    assert overlay.font_size_pt == overlay.settings.font_size_pt
 
 
 def test_overlay_paints_text(qtbot: QtBot) -> None:
@@ -541,7 +608,7 @@ def test_appearance_edits_apply_to_the_profile(window: MainWindow, qtbot: QtBot)
     tab = window.appearance
     settings = window._profile.overlay
     with qtbot.waitSignal(tab.changed):
-        tab.placement.setCurrentIndex(1)
+        tab.placement.setCurrentIndex(tab.placement.findData(OverlayPlacement.OVER))
     assert settings.placement is OverlayPlacement.OVER
     tab.background.setChecked(False)
     assert settings.background is False
@@ -999,6 +1066,34 @@ def test_recording_mode_warns_when_the_overlay_covers_the_subtitle(window: MainW
     window._profile.overlay.placement = OverlayPlacement.ABOVE
     window._place_overlay()
     assert not window._warned_overlap
+
+
+def test_on_text_placement_follows_the_english_lines(window: MainWindow) -> None:
+    """The translation sits right above where the engine found the English lines, its glyphs as
+    tall as theirs; it never shows to capture there (OCR would read it), recording mode or not."""
+    running_with_region(window)
+    window.settings.recording.setChecked(True)
+    window._profile.overlay.placement = OverlayPlacement.ON_TEXT
+    window._place_overlay()
+    assert not window._overlay.capture_visible
+    assert window._overlay.fit_size_pt is None  # the lines' place is not known yet
+    window.handle(SubtitleBox((0.35, 0.88, 0.3, 0.05), 0.02))
+    overlay = window._overlay
+    assert overlay.fit_size_pt is not None
+    screens = current_screens()
+    physical = to_physical(from_qrect(overlay.geometry()), screens)
+    text_top = round(0.88 * 1080)
+    assert physical.bottom <= text_top
+    assert text_top - physical.bottom < 30
+    assert physical.x + physical.width / 2 == pytest.approx(0.5 * 1920, abs=3)
+    assert "OCR çeviriyi de okuyabilir" not in window.statusBar().currentMessage()
+
+    window._profile.overlay.placement = OverlayPlacement.ABOVE
+    window._place_overlay()
+    assert window._overlay.capture_visible  # recording mode again
+    assert window._overlay.fit_size_pt is None
+    window.set_region(NormRect(x=0.1, y=0.7, width=0.8, height=0.25))
+    assert window._text_box is None  # found in the old region
 
 
 def test_exclusive_fullscreen_is_reported_once(

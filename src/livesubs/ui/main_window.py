@@ -58,6 +58,7 @@ from livesubs.core.messages import (
     StartPipeline,
     StateChanged,
     StopPipeline,
+    SubtitleBox,
     SubtitleCleared,
     SubtitleLines,
     SubtitleRead,
@@ -90,7 +91,13 @@ from livesubs.ui.icon import app_icon
 from livesubs.ui.inspector import Inspector
 from livesubs.ui.overlay import Overlay
 from livesubs.ui.pick import resolve, resolve_card
-from livesubs.ui.placement import custom_geometry, monitor_at, overlay_geometry
+from livesubs.ui.placement import (
+    TEXT_WRAP_SLACK,
+    custom_geometry,
+    monitor_at,
+    overlay_geometry,
+    text_geometry,
+)
 from livesubs.ui.region_frame import RegionFrame
 from livesubs.ui.region_select import RegionPicker
 from livesubs.ui.setup_check import SetupDialog
@@ -135,6 +142,7 @@ TEXT_ALIGN = {
     OverlayPlacement.OVER: Qt.AlignmentFlag.AlignVCenter,
     OverlayPlacement.BELOW: Qt.AlignmentFlag.AlignTop,
     OverlayPlacement.CUSTOM: Qt.AlignmentFlag.AlignBottom,
+    OverlayPlacement.ON_TEXT: Qt.AlignmentFlag.AlignBottom,
 }
 SETUP_ERRORS = (ErrorKind.OCR_UNAVAILABLE, ErrorKind.MODEL_NOT_FOUND)
 # Games mostly use white subtitles, some speakers yellow.
@@ -265,6 +273,7 @@ class MainWindow(QMainWindow):
         self._sources: list[SourceOption] = []
         self._state = EngineState.IDLE
         self._frame: FrameInfo | None = None
+        self._text_box: SubtitleBox | None = None  # where the English lines last were
         self._rows: dict[int, int] = {}
         # The overlay mirrors the game's lines on screen; a timer drops lines that left.
         self._shown = ShownLines()
@@ -919,6 +928,7 @@ class MainWindow(QMainWindow):
         was_active = self._state in ACTIVE_STATES
         self._profile_id, self._profile = profile_id, profile
         self._frame = None  # it showed where the previous profile's source was
+        self._text_box = None
         self._save()
         self._overlay.settings = profile.overlay
         self._overlay.clear()
@@ -1037,6 +1047,7 @@ class MainWindow(QMainWindow):
         """The profile's source changed: everything that depends on it follows."""
         self._profile.source = spec
         self._frame = None  # the last frame's screen place belongs to the previous source
+        self._text_box = None
         self._card.set_profile_card(self._profile_card_name())
         self._update_region_label()
         # "Where the game runs" is guessed from the source, and with it the VRAM reserve.
@@ -1111,6 +1122,7 @@ class MainWindow(QMainWindow):
 
     def set_region(self, region: NormRect, *, restart: bool = False) -> None:
         self._profile.region = region
+        self._text_box = None  # read in the old region
         self._update_region_label()
         self._save()
         if restart and self._card_waiting:  # waiting for a card it no longer reads
@@ -1280,6 +1292,7 @@ class MainWindow(QMainWindow):
         # Line ids start again: old rows stay in the feed but no new line may land in them.
         self._rows.clear()
         self._shown.reset()
+        self._text_box = None
         if self._web is not None:
             self._web.new_session()
         self._engine.send(
@@ -1336,9 +1349,13 @@ class MainWindow(QMainWindow):
                 if state in (EngineState.STARTING, EngineState.WARMING_UP):
                     self._replacing = False  # the new pipeline: its lines count from here
                 self._set_state(state, detail)
-            case SubtitleRead() | SubtitleTranslated() | SubtitleLines() | SubtitleCleared() if (
-                self._replacing
-            ):
+            case (
+                SubtitleRead()
+                | SubtitleTranslated()
+                | SubtitleLines()
+                | SubtitleCleared()
+                | SubtitleBox()
+            ) if self._replacing:
                 pass  # the replaced pipeline's last words
             case EngineError(kind=ErrorKind.SOURCE_LOST) if self._reading_card():
                 # The device host reopens the card; the pipeline follows (_on_card_opened).
@@ -1361,6 +1378,10 @@ class MainWindow(QMainWindow):
                 self._refresh_overlay()
             case SubtitleCleared():
                 self._schedule_clear()
+            case SubtitleBox():
+                self._text_box = event
+                if self._profile.overlay.placement == OverlayPlacement.ON_TEXT:
+                    self._place_overlay()
             case DebugFrame():
                 if self._inspector.isVisible():
                     self._inspector.show_frame(event)
@@ -1529,20 +1550,52 @@ class MainWindow(QMainWindow):
             else None
         )
         on_monitor = s.display == OverlayDisplay.MONITOR  # e.g. the PC screen beside the TV
+        on_text = s.placement == OverlayPlacement.ON_TEXT and not on_monitor
+        # On the English lines it sits inside the read region: OCR must never see it, so it
+        # stays hidden from capture even in recording mode.
+        self._overlay.set_capture_visible(self._config.recording_mode and not on_text)
+        text = self._text_on_screen(area) if on_text and subtitle is not None else None
         if on_monitor or s.placement == OverlayPlacement.CUSTOM or subtitle is None:
+            self._overlay.fit_to(None, None)
             monitor = next(
                 (m for m in monitors if m.device_name == s.monitor_device),
                 next(m for m in monitors if m.is_primary),
             )
             physical = custom_geometry(s.rect, monitor.rect)
+        elif text is not None:
+            rect, glyph = text
+            monitor = monitor_at(monitors, rect.x + rect.width / 2, rect.y + rect.height / 2)
+            self._overlay.fit_to(
+                glyph / monitor.scale if glyph else None,
+                rect.width * TEXT_WRAP_SLACK / monitor.scale,
+            )
+            height = round(self._overlay.preferred_height() * monitor.scale)
+            physical = text_geometry(rect, glyph or rect.height / 2, monitor.rect, height)
         else:
+            self._overlay.fit_to(None, None)
             center = (subtitle.x + subtitle.width / 2, subtitle.y + subtitle.height / 2)
             monitor = monitor_at(monitors, *center)
             height = round(self._overlay.preferred_height() * monitor.scale)
             physical = overlay_geometry(s.placement, subtitle, monitor.rect, height)
         self._overlay.align = TEXT_ALIGN[s.placement]
         self._overlay.place(screens.to_logical(physical, screens.current_screens()))
-        self._check_overlap(physical, subtitle)
+        if not on_text:
+            self._check_overlap(physical, subtitle)
+
+    def _text_on_screen(self, area: Rect | None) -> tuple[Rect, float | None] | None:
+        """Where the English lines last were (physical pixels) and their glyph height."""
+        box = self._text_box
+        if box is None or area is None:
+            return None
+        x, y, w, h = box.box
+        rect = Rect(
+            area.x + round(x * area.width),
+            area.y + round(y * area.height),
+            max(1, round(w * area.width)),
+            max(1, round(h * area.height)),
+        )
+        glyph = box.glyph_height * area.height if box.glyph_height else None
+        return rect, glyph
 
     def _on_appearance_changed(self) -> None:
         self._overlay.update()

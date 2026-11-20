@@ -27,6 +27,7 @@ from livesubs.ui.overlay import apply_style
 from livesubs.ui.rows import RowCard
 
 PLACEMENTS = (
+    OverlayPlacement.ON_TEXT,
     OverlayPlacement.ABOVE,
     OverlayPlacement.OVER,
     OverlayPlacement.BELOW,
