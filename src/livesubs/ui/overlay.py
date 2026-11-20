@@ -40,7 +40,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QWidget
 
 from livesubs.core.geometry import Rect
-from livesubs.core.profiles import OverlaySettings, OverlayStyle
+from livesubs.core.profiles import OverlaySettings, OverlayStyle, SpeakerStyle
 from livesubs.engine.vision.preprocess import tall_glyph_height
 from livesubs.i18n import t
 from livesubs.platform import win32
@@ -321,7 +321,7 @@ class Overlay(QWidget):
             area.setWidth(self.fit_width)
         small_font = self._original_font(self.font_size_pt)
         small = QFontMetricsF(small_font)
-        font, blocks = self._layout(items, area.width(), area.height())
+        font, blocks, items = self._layout(items, area.width(), area.height())
         metrics = QFontMetricsF(font)
         block_height = sum(_block_height(metrics, small, lines, orig) for lines, orig in blocks)
         if self.align == Qt.AlignmentFlag.AlignTop:
@@ -341,11 +341,26 @@ class Overlay(QWidget):
             painter.drawRoundedRect(box, 8, 8)
 
         path, small_path, y = QPainterPath(), QPainterPath(), top
-        for lines, original in blocks:
-            for line in lines:
+        colored: list[tuple[QPainterPath, QColor]] = []  # painted over ``path`` in their colour
+        for item, (lines, original) in zip(items, blocks, strict=True):
+            label, color = self._speaker(item)
+            whole = (
+                QPainterPath()
+                if color is not None and s.speaker_style == SpeakerStyle.LINE
+                else None
+            )
+            name = QPainterPath() if color is not None and whole is None else None
+            for i, line in enumerate(lines):
                 point = QPointF(self._x(area, metrics, line), y + metrics.ascent())
                 path.addText(point, font, line)
+                if whole is not None:
+                    whole.addText(point, font, line)
+                elif name is not None and i == 0 and line.startswith(label):
+                    name.addText(point, font, label)
                 y += metrics.lineSpacing()
+            for part in (whole, name):
+                if part is not None and color is not None:
+                    colored.append((part, color))
             if original:
                 y += 4  # the original starts 4 px below its translation
             for line in original:
@@ -372,9 +387,24 @@ class Overlay(QWidget):
                 pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
                 painter.strokePath(p, pen)
         painter.fillPath(path, QColor(s.text_color))
+        for part, color in colored:
+            painter.fillPath(part, color)
         faded = QColor(s.text_color)
         faded.setAlpha(215)
         painter.fillPath(small_path, faded)
+
+    def _speaker(self, item: ShownLine) -> tuple[str, QColor | None]:
+        """The name label in front of ``item``'s translation ("Lucia:") and its colour (None:
+        drawn like the text)."""
+        if not item.speaker or self.settings.speaker_style == SpeakerStyle.HIDDEN:
+            return "", None
+        color = QColor(item.speaker_color) if item.speaker_color else None
+        return f"{item.speaker}:", color if color is not None and color.isValid() else None
+
+    def _text(self, item: ShownLine) -> str:
+        """What is drawn for ``item``: its translation, after its speaker's name."""
+        label, _ = self._speaker(item)
+        return f"{label} {item.translation}" if label else item.translation
 
     @staticmethod
     def _x(area: QRectF, metrics: QFontMetricsF, line: str) -> float:
@@ -382,10 +412,10 @@ class Overlay(QWidget):
 
     def _layout(
         self, items: list[ShownLine], width: float, height: float
-    ) -> tuple[QFont, list[tuple[list[str], list[str]]]]:
-        """Wrapped (translation, original) lines per item. Several items that do not fit at the
-        configured size lose the oldest first; the last one left shrinks from the configured
-        size down until it fits."""
+    ) -> tuple[QFont, list[tuple[list[str], list[str]]], list[ShownLine]]:
+        """Wrapped (translation, original) lines per item, and the items they are of. Several
+        items that do not fit at the configured size lose the oldest first; the last one left
+        shrinks from the configured size down until it fits."""
         s = self.settings
         small = QFontMetricsF(self._original_font(self.font_size_pt))
 
@@ -396,7 +426,7 @@ class Overlay(QWidget):
                 original = item.original if s.show_original else ""
                 blocks.append(
                     (
-                        wrap(item.translation, metrics.horizontalAdvance, width),
+                        wrap(self._text(item), metrics.horizontalAdvance, width),
                         wrap(original, small.horizontalAdvance, width)[:ORIGINAL_MAX_LINES],
                     )
                 )
@@ -416,10 +446,10 @@ class Overlay(QWidget):
             font = self._font(size)
             blocks = wrapped(font, items)
             if fits(font, blocks):
-                return font, blocks
+                return font, blocks, items
             if size <= MIN_FONT_PT:  # too long even at the minimum
                 lines, original = blocks[-1]
-                return font, [(lines[: s.max_lines], original)]
+                return font, [(lines[: s.max_lines], original)], items[-1:]
             size -= 2
 
     # --- edit mode: move and resize --------------------------------------------------------------

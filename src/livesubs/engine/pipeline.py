@@ -14,6 +14,12 @@ other); the stabilizer tracks each one, so every line is translated once, on its
 one's sentence (``text.sentences``) comes as an upgrade of that line: the whole sentence is
 translated and replaces the first piece's translation.
 
+Lines that name their speaker ("Lucia: ...", ``text.speakers``) are the dialogue: while one is on
+screen, lines without a name (people in the background) are neither translated nor listed in
+``SubtitleLines``; they are translated once no named line is left beside them. Only the sentence
+goes to the model; the name and its colour (measured on the frames, ``vision.rows``) travel with
+the line to the UI.
+
 Without Ollama (or without the model) the pipeline keeps running and shows the English lines.
 """
 
@@ -22,7 +28,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 import cv2
@@ -53,7 +59,7 @@ from livesubs.engine.capture import open_source as default_open_source
 from livesubs.engine.ocr.language import english_ocr_language
 from livesubs.engine.ocr.ppocr import LineReader, open_line_reader
 from livesubs.engine.ocr.winrt_ocr import OcrLine, OcrResult, WinRtOcr
-from livesubs.engine.text import filters
+from livesubs.engine.text import filters, speakers
 from livesubs.engine.text.normalize import clean, key
 from livesubs.engine.text.quality import ReadScorer
 from livesubs.engine.text.stabilizer import (
@@ -83,6 +89,7 @@ from livesubs.engine.translate.orchestrator import (
 )
 from livesubs.engine.vision.change import Change, ChangeDetector
 from livesubs.engine.vision.preprocess import Preprocessed, preprocess, tall_glyph_height
+from livesubs.engine.vision.rows import annotate
 from livesubs.platform.spellcheck import open_spell_checker
 
 log = logging.getLogger(__name__)
@@ -96,6 +103,8 @@ CONTEXT_MARGIN_TOKENS = 128
 # GLYPH_CHANGE (relative) is not sent again: the overlay would only jitter.
 BOX_MOVE = 0.004
 GLYPH_CHANGE = 0.08
+# A speaker's colour is the median of this many latest measurements (the background shifts it).
+COLOR_SAMPLES = 5
 
 SourceOpener = Callable[[Source], FrameSource]
 BackendFactory = Callable[[StartPipeline], TranslationBackend]
@@ -162,6 +171,11 @@ class Pipeline:
         self._translated: set[int] = set()  # lines whose translation went out
         self._early: str | None = None  # the text whose translation was started early
         self._box: SubtitleBox | None = None  # the last one sent
+        self._speakers: dict[int, str] = {}  # line id -> its speaker ("" for none)
+        self._colors: dict[str, list[tuple[int, int, int]]] = {}  # speaker key -> measurements
+        self._screen: tuple[int, ...] = ()  # the lines on screen (last ScreenChanged)
+        # Lines without a speaker read while a named line was on screen: (text, ocr ms).
+        self._held: dict[int, tuple[str, float]] = {}
         self._context_warned = False
 
     def start(self) -> None:
@@ -334,8 +348,7 @@ class Pipeline:
                 detector.reset()  # a new region: whatever was read before is gone
                 backoff.reset()
                 self._box = None
-                for event in stabilizer.update(Change.CLEARED, 0, time.monotonic()).events:
-                    self._on_line(event, 0.0)
+                self._on_lines(stabilizer.update(Change.CLEARED, 0, time.monotonic()).events)
                 self._start_early(stabilizer.expected)
             if paused:
                 continue
@@ -356,8 +369,7 @@ class Pipeline:
                 self._emit(self._debug_frame(region, processed, change))
             pixels = cv2.countNonZero(processed.mask)
             decision = stabilizer.update(change, pixels, now)
-            for event in decision.events:
-                self._on_line(event, 0.0)
+            self._on_lines(decision.events)
             self._start_early(stabilizer.expected)
             idle = not stabilizer.current and not stabilizer.awaiting_confirmation
             if not decision.read or backoff.skip(pixels, now, idle=idle):
@@ -367,8 +379,8 @@ class Pipeline:
             self._last_read = clean(text)
             reason = filters.check(self._last_read).reason
             self._last_rejected = str(reason) if reason else ""
-            for event in stabilizer.on_read(rows, time.monotonic()):
-                self._on_line(event, ocr_ms)
+            self._learn_colors(rows)
+            self._on_lines(stabilizer.on_read(rows, time.monotonic()), ocr_ms)
             self._start_early(stabilizer.expected)  # after the submits: they claim early work
             self._send_box(stabilizer.box, processed.mask)
 
@@ -394,6 +406,10 @@ class Pipeline:
     def _start_early(self, expected: str | None) -> None:
         """Translate a new line from its first read on (``Stabilizer.expected``); the
         orchestrator shows the result only if the confirming read sends the same text."""
+        if expected is not None:
+            name, sentence = speakers.split(expected)
+            # A background voice beside a named line is not translated now: no early start.
+            expected = None if not name and self._named_on_screen(self._screen) else sentence
         if expected == self._early:
             return
         self._early = expected
@@ -416,29 +432,91 @@ class Pipeline:
             rejected=self._last_rejected,
         )
 
-    def _on_line(self, event: LineEvent, ocr_ms: float) -> None:
-        match event:
-            case ScreenChanged(line_ids=line_ids):
-                self._emit(SubtitleLines(line_ids))
-                if not line_ids:
-                    self._emit(SubtitleCleared())
-            case LineConfirmed(line_id=line_id, text=text, repeat=True):
-                self._emit(SubtitleRead(line_id, text, ocr_ms, repeat=True))
-                self._translate_again(line_id, text)
-            case LineConfirmed(line_id=line_id, text=text):
+    def _on_lines(self, events: Iterable[LineEvent], ocr_ms: float = 0.0) -> None:
+        """One batch of the stabilizer's events (one read or one frame)."""
+        events = list(events)
+        for event in events:
+            if isinstance(event, LineConfirmed | LineUpgraded):
+                self._speakers[event.line_id] = speakers.speaker(event.text)
+        screen = next(
+            (e.line_ids for e in reversed(events) if isinstance(e, ScreenChanged)), self._screen
+        )
+        named = self._named_on_screen(screen)
+        for event in events:
+            match event:
+                case LineConfirmed() | LineUpgraded() if named and not self._speakers.get(
+                    event.line_id
+                ):
+                    self._held[event.line_id] = (event.text, ocr_ms)  # a background voice
+                case LineConfirmed(line_id=line_id, text=text, repeat=True):
+                    self._emit(self._read(line_id, text, ocr_ms, repeat=True))
+                    self._translate_again(line_id, text)
+                case LineConfirmed(line_id=line_id, text=text):
+                    self._submit(line_id, text, ocr_ms, upgrade=False)
+                case LineUpgraded(line_id=line_id, text=text):
+                    self._submit(line_id, text, ocr_ms, upgrade=True)
+        if any(isinstance(e, ScreenChanged) for e in events):
+            self._screen = screen
+            if named:  # the dialogue first: background voices waiting for the model step back
+                with self._lock:
+                    orchestrator = self._orchestrator
+                if orchestrator is not None:
+                    orchestrator.withdraw([i for i in screen if not self._speakers.get(i)])
+            shown = tuple(i for i in screen if self._speakers.get(i)) if named else screen
+            self._emit(SubtitleLines(shown))
+            if not screen:
+                self._emit(SubtitleCleared())
+            self._release_held(screen, named)
+
+    def _named_on_screen(self, screen: Iterable[int]) -> bool:
+        return any(self._speakers.get(i) for i in screen)
+
+    def _release_held(self, screen: tuple[int, ...], named: bool) -> None:
+        """Background voices held back go out once no named line is beside them (or are
+        forgotten when they left meanwhile)."""
+        for line_id in list(self._held):
+            if line_id not in screen:
+                del self._held[line_id]
+            elif not named:
+                text, ocr_ms = self._held.pop(line_id)
                 self._submit(line_id, text, ocr_ms, upgrade=False)
-            case LineUpgraded(line_id=line_id, text=text):
-                self._submit(line_id, text, ocr_ms, upgrade=True)
+
+    def _learn_colors(self, rows: list[Row]) -> None:
+        for row in rows:
+            name = speakers.speaker(row.text)
+            if name and row.speaker_color:
+                value = row.speaker_color.lstrip("#")
+                rgb = (int(value[0:2], 16), int(value[2:4], 16), int(value[4:6], 16))
+                samples = self._colors.setdefault(name.casefold(), [])
+                samples.append(rgb)
+                del samples[:-COLOR_SAMPLES]
+
+    def _color(self, name: str) -> str:
+        samples = self._colors.get(name.casefold())
+        if not samples:
+            return ""
+        r, g, b = (sorted(channel)[len(channel) // 2] for channel in zip(*samples, strict=True))
+        return f"#{r:02x}{g:02x}{b:02x}"
+
+    def _read(
+        self, line_id: int, text: str, ocr_ms: float, *, repeat: bool = False, upgrade: bool = False
+    ) -> SubtitleRead:
+        name, sentence = speakers.split(text)
+        return SubtitleRead(
+            line_id, sentence, ocr_ms, repeat=repeat, upgrade=upgrade, speaker=name,
+            speaker_color=self._color(name) if name else "",
+        )  # fmt: skip
 
     def _submit(self, line_id: int, text: str, ocr_ms: float, *, upgrade: bool) -> None:
         self._ocr_ms[line_id] = ocr_ms
-        self._emit(SubtitleRead(line_id, text, ocr_ms, upgrade=upgrade))
+        self._emit(self._read(line_id, text, ocr_ms, upgrade=upgrade))
+        sentence = speakers.split(text)[1]
         with self._lock:
             orchestrator = self._orchestrator
             if orchestrator is None:
-                self._waiting = (line_id, text)  # the model is still warming up: newest wins
+                self._waiting = (line_id, sentence)  # the model is still warming up: newest wins
         if orchestrator is not None:
-            orchestrator.submit(line_id, text)
+            orchestrator.submit(line_id, sentence)
 
     def _translate_again(self, line_id: int, text: str) -> None:
         """A line that came back keeps its translation - when it has one. Its request may have
@@ -446,22 +524,26 @@ class Pipeline:
         it is sent now, instead of staying untranslated however long it is on screen."""
         if line_id in self._translated:
             return
+        sentence = speakers.split(text)[1]
         with self._lock:
             orchestrator = self._orchestrator
             if orchestrator is None:
-                self._waiting = (line_id, text)
+                self._waiting = (line_id, sentence)
         if orchestrator is not None and not orchestrator.pending(line_id):
-            orchestrator.submit(line_id, text)
+            orchestrator.submit(line_id, sentence)
 
     def _on_translation(self, event: TranslationEvent) -> None:
         match event:
             case LineTranslated(line_id=line_id, source=source, result=result):
                 self._translated.add(line_id)
                 self._check_context(result.prompt_tokens)
+                name = self._speakers.get(line_id, "")
                 self._emit(
                     SubtitleTranslated(
                         line_id=line_id,
                         source=source,
+                        speaker=name,
+                        speaker_color=self._color(name) if name else "",
                         translation=result.text,
                         model=result.model,
                         lane=str(result.lane),
@@ -543,17 +625,16 @@ def read_subtitle(
     if lines is not None and region is not None:
         read = lines.recognize(region, processed.mask)
         if read is not None:
-            return (
-                read.text,
-                read.elapsed_ms,
-                rows_of(read, processed.mask.shape[1], processed.mask.shape[0]),
-            )
+            rows = rows_of(read, processed.mask.shape[1], processed.mask.shape[0])
+            return read.text, read.elapsed_ms, annotate(rows, region, processed.mask)
     images = processed.ocr_inputs
     reads = [ocr.recognize(image) for image in images]
     best = max(range(len(reads)), key=lambda i: scorer.score(reads[i].text))  # first on a tie
     others = [line for i, read in enumerate(reads) if i != best for line in read.lines]
     lines = [_cleanest_row(line, others, scorer) for line in reads[best].lines]
     rows = rows_of(OcrResult(tuple(lines), 0.0), images[best].shape[1], images[best].shape[0])
+    if region is not None:
+        rows = annotate(rows, region, processed.mask)
     return reads[best].text, sum(read.elapsed_ms for read in reads), rows
 
 

@@ -114,6 +114,14 @@ class OverlayStyle(StrEnum):
     BOX = "box"
 
 
+class SpeakerStyle(StrEnum):
+    """How a translation shows the speaker the game names in front of the line ("Lucia: ...")."""
+
+    NAME = "name"  # the name in the speaker's colour, the text as usual (as the game draws it)
+    LINE = "line"  # the name and the whole translation in the speaker's colour
+    HIDDEN = "hidden"  # no name
+
+
 class OverlayPlacement(StrEnum):
     ABOVE = "above"  # right above the subtitle region
     OVER = "over"  # on the original subtitle (hidden from capture, so OCR still reads it)
@@ -143,6 +151,7 @@ class OverlaySettings(SettingsModel):
     background_opacity: float = Field(0.55, ge=0, le=1)
     max_lines: int = Field(2, ge=1, le=6)
     show_original: bool = False
+    speaker_style: SpeakerStyle = SpeakerStyle.NAME
     # How long a translation stays up after the subtitle disappears.
     # User feedback: 0.8 s vanished before it was read, 3.5 s lingered too long; 2 s it is.
     clear_delay_ms: int = Field(2000, ge=0, le=10_000)

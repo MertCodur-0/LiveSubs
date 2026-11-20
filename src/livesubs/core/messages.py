@@ -108,6 +108,8 @@ class SubtitleRead:
     ocr_ms: float
     repeat: bool = False  # same line as before: keep showing its translation
     upgrade: bool = False  # a more complete reading of line ``line_id``
+    speaker: str = ""  # the name in front of the line ("Lucia"); ``text`` is what follows it
+    speaker_color: str = ""  # "#rrggbb" the game draws the name in; "" unknown
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,6 +122,8 @@ class SubtitleTranslated:
     ocr_ms: float
     translate_ms: float
     cached: bool
+    speaker: str = ""  # as in ``SubtitleRead``; ``source`` is the sentence without the name
+    speaker_color: str = ""
 
 
 @dataclass(frozen=True, slots=True)

@@ -44,7 +44,7 @@ from difflib import SequenceMatcher
 
 from rapidfuzz import fuzz
 
-from livesubs.engine.text import filters, sentences
+from livesubs.engine.text import filters, sentences, speakers
 from livesubs.engine.text.normalize import clean, key
 from livesubs.engine.vision.change import Change
 
@@ -64,6 +64,9 @@ MIN_PART_WORDS = 3
 MAX_CENTER_SHIFT = 0.05
 # ... and stacked closely: an empty gap of more than this many row heights separates two things.
 MAX_ROW_GAP = 1.0
+# Rows whose glyphs differ more than this in brightness (``Row.tone``, 0-255) are drawn in
+# different colours: a grey background voice under a named line is not that speaker's text.
+MAX_TONE_GAP = 35.0
 # Each read of a line on screen is a vote for its text (by key); a text read more often than
 # another gains this much score per extra read, up to MAX_VOTES of them. Windows OCR misreads a
 # glyph on some frames only ("Coma on" once, "Come on" four times), and both may be words.
@@ -130,6 +133,8 @@ class Row:
     top: float | None = None
     height: float | None = None
     box: Box | None = None
+    tone: float | None = None  # brightness of its glyphs after any speaker name (0-255)
+    speaker_color: str | None = None  # "#rrggbb" of the speaker name in front of it, if any
 
     def far_below(self, above: Row) -> bool:
         """More than ``MAX_ROW_GAP`` row heights of empty space between ``above`` and this row:
@@ -139,14 +144,22 @@ class Row:
         gap = self.top - (above.top + above.height)
         return gap > MAX_ROW_GAP * max(self.height, above.height)
 
+    def same_tone(self, other: Row) -> bool:
+        if self.tone is None or other.tone is None:
+            return True
+        return abs(self.tone - other.tone) <= MAX_TONE_GAP
+
 
 def group_rows(rows: Iterable[str | Row]) -> list[str]:
     """Join the rows of one sentence. A row continues the one above it when that row has no
     sentence end, or when it starts in lower case (a word of the end was lost); a new sentence
     in capitals is a new line - usually another speaker. Games that never punctuate therefore
-    keep all rows together, as one subtitle. Subtitle rows are centred under each other: a row
-    whose centre is off by more than ``MAX_CENTER_SHIFT`` (a HUD label, a watermark at the side),
-    or far below the row above (``Row.far_below``), never joins a sentence."""
+    keep all rows together, as one subtitle. A row that names its speaker ("Lucia: ...")
+    always starts a line; the rows under it in the same tone are the rest of what that speaker
+    says, whatever the punctuation (a grey row under it is someone in the background).
+    Subtitle rows are centred under each other: a row whose centre is off by more than
+    ``MAX_CENTER_SHIFT`` (a HUD label, a watermark at the side), or far below the row above
+    (``Row.far_below``), never joins a sentence."""
     return [text for text, _ in _grouped(rows)]
 
 
@@ -162,17 +175,22 @@ def _grouped(rows: Iterable[str | Row]) -> list[tuple[str, Box | None]]:
             or previous.center is None
             or abs(row.center - previous.center) <= MAX_CENTER_SHIFT
         ) and not (previous is not None and row.far_below(previous))
-        if (
-            lines
-            and aligned
-            and (sentences.is_open(lines[-1][0]) or sentences.starts_lower(row.text))
-        ):
+        if lines and aligned and previous is not None and _continues(lines[-1][0], previous, row):
             text, box = lines[-1]
             lines[-1] = (f"{text} {row.text}", union(box, row.box))
         else:
             lines.append((row.text, row.box))
         previous = row
     return lines
+
+
+def _continues(line: str, above: Row, row: Row) -> bool:
+    """``row`` is the next row of ``line`` (whose last row is ``above``)."""
+    if speakers.speaker(row.text):
+        return False  # a new speaker
+    if speakers.speaker(line):
+        return row.same_tone(above)
+    return sentences.is_open(line) or sentences.starts_lower(row.text)
 
 
 @dataclass

@@ -259,6 +259,23 @@ UI process (PySide6)                                  Engine process (multiproce
   replaces its job, the feed row and the phone line update in place). Per profile
   `TranslationSettings.merge_split_sentences` (default on, checkbox in the Profiles tab; a pack
   import keeps it). All-caps or unpunctuated games never merge.
+- **Speaker names** (2026-11-20, user: GTA VI with speaker names on, "Lucia: ..."; a crowded
+  screen made the model translate the wrong line or none): `text/speakers.split(text) ->
+  (name, sentence)` (1-3 capitalised words, a colon **and a space** — not "10:30"; "In
+  Spanish:" and similar labels are no name). Grouping (`stabilizer._continues`): a row naming a
+  speaker always starts a line; rows under a named line join it whatever the punctuation when
+  their glyphs have the same brightness (`Row.tone` within `MAX_TONE_GAP` 35; GTA wraps "...
+  forced labor." / "I'm just saying." under the name — it used to split into two lines), a
+  grey row under it is a background voice. `vision/rows.annotate` measures per OCR row `tone`
+  (90th percentile grey of the letters mask after the name) and `speaker_color` (median of the
+  brighter half of `colored_glyphs` in the name's share of the box): measured Cal `#f4a6b0`,
+  Lucia `#84eef8`, sentence tone 239 on every frame. Pipeline (`_on_lines`, per batch of
+  stabilizer events): while a named line is on screen, unnamed lines are **held** (not
+  translated, no `SubtitleRead`, left out of `SubtitleLines`, no early start) and their waiting
+  jobs are `orchestrator.withdraw`n; once no named line is left they are submitted (if still on
+  screen). Only the sentence is translated (cache key, history); `SubtitleRead` /
+  `SubtitleTranslated` carry `speaker` + `speaker_color` (median of the last 5 measurements per
+  name). Games without names behave exactly as before.
 - Cache: in-memory LRU + SQLite, key = (model, profile + settings digest, normalized text);
   dialogue context not in key.
 - Latency budget (8B on GPU): capture+preprocess ~10 ms, OCR 30–80 ms, confirm ~50 ms,
@@ -536,6 +553,11 @@ font size, text color, outline/shadow, background opacity, max lines shown.
   the overlay is always hidden from capture, recording mode or not. Box reset on Start, region,
   source and profile changes. Checked on the user's two clean GTA VI recordings (1080p60, kept
   outside the repo): 6/6 lines read exactly, translation size and width matched by eye.
+- **Speaker name** (`OverlaySettings.speaker_style`, Görünüm tab "Konuşmacı adı"): NAME
+  (default, as the game draws it: "Lucia:" in her colour, then the translation), LINE (the
+  whole translation in the speaker's colour), HIDDEN. Painted as extra fills over the text path
+  (outline and shadow shared). The feed shows "Name: text"; the phone page gets `speaker` +
+  `color` per line and draws the name in a coloured span.
 - Styles (step 16): `OverlayStyle` CLASSIC / VICE / BOX are presets of the look fields
   (`overlay.STYLE_PRESETS`, `apply_style`; the "Hazır stil" combo on the Görünüm tab), each field
   still editable afterwards. CLASSIC = the defaults (white, black 3 px outline, shadow, box 55 %).
@@ -707,9 +729,9 @@ src/livesubs/
   device/      host.py (device host process), messages.py, preview.py, audio.py
   engine/      process.py, pipeline.py
     capture/   base.py, wgc.py, mss_fallback.py, factory.py, video_device.py, shared_frames.py
-    vision/    preprocess.py, change.py
+    vision/    preprocess.py, change.py, rows.py
     ocr/       ppocr.py, winrt_ocr.py, language.py
-    text/      normalize.py, filters.py, stabilizer.py, quality.py, sentences.py
+    text/      normalize.py, filters.py, stabilizer.py, quality.py, sentences.py, speakers.py
     translate/ base.py, ollama.py, orchestrator.py, prompt.py, cache.py
   ollama/      client.py, catalog.py, install.py, vram.py, compare.py
   platform/    win32.py, hotkeys.py, shortcuts.py, gpu.py, com.py, video_devices.py, spellcheck.py
@@ -1398,3 +1420,14 @@ First **finish the app** (each step committed and pushed; no new release unless 
   font) and the game's HUD/loot menu text ("GIRARDI ES9 PISTOL", "SUNGLASSES") and tilted phone
   messages inside the region are read as lines; an all-caps filter would hit shouted subtitles
   in other games.
+- 2026-11-20: **Speaker names and priority** (user, GTA VI with speaker names turned on: "on a
+  crowded screen the model translates the wrong line or nothing; translate the 'Jason:' /
+  'Lucia:' lines first, the grey background voices only when no named line is there, and show
+  the translation in the speaker's colour"). Details under Stabilizer -> Speaker names and
+  Overlay -> Speaker name. Checked on the user's two 15 s recordings (1080p60 webm, kept
+  outside the repo; no crowded scene in them): before, "Lucia: You know, ... labor." and "I'm
+  just saying." were two lines; now one line per speaker subtitle, names and colours read on
+  every frame. The background-voice rule is tested on rendered frames only (no footage of a
+  crowded scene yet). Choices made alone: the name is kept untranslated in front of the
+  translation in its colour (like the game), whole-line colouring and no name are options; a
+  held background line is not shown in the feed until it is translated.

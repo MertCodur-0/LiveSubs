@@ -37,7 +37,7 @@ import logging
 import threading
 import time
 from collections import deque
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 
 from livesubs.engine.translate import prompt
@@ -174,6 +174,15 @@ class TranslationOrchestrator:
             return (flying is not None and flying.line_id == line_id) or any(
                 job.line_id == line_id for job in self._pending
             )
+
+    def withdraw(self, line_ids: Iterable[int]) -> None:
+        """Drop the waiting (not the in-flight) translations of ``line_ids``: more important
+        lines came (named dialogue over background voices)."""
+        ids = set(line_ids)
+        if not ids:
+            return
+        with self._cond:
+            self._pending = deque(j for j in self._pending if j.line_id not in ids)
 
     def prepare(self, text: str | None) -> None:
         """Start translating ``text`` before its line is confirmed, if the lane is idle; a

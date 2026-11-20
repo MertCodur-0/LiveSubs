@@ -17,6 +17,8 @@ class WebLine:
     key: int  # unique for the page (line ids restart with every Start)
     line_id: int | None  # the engine's line id; None once a new session started
     text: str
+    speaker: str = ""
+    speaker_color: str = ""
 
 
 class WebFeed:
@@ -25,23 +27,25 @@ class WebFeed:
         self.current: WebLine | None = None
         self._next_key = 0
 
-    def show(self, line_id: int, text: str) -> None:
-        """A translation for engine line ``line_id``: a new line, an upgrade or a repeat."""
+    def show(self, line_id: int, text: str, speaker: str = "", speaker_color: str = "") -> None:
+        """A translation for engine line ``line_id``: a new line, an upgrade or a repeat.
+        ``speaker`` is the name the game put in front of it, drawn in ``speaker_color``."""
+        line = self._find(line_id)
+        if line is None:
+            if self.current is not None:
+                self.history.append(self.current)
+            line = self.current = WebLine(self._next_key, line_id, text)
+            self._next_key += 1
+        line.text, line.speaker, line.speaker_color = text, speaker, speaker_color
+
+    def _find(self, line_id: int) -> WebLine | None:
         if self.current is not None and self.current.line_id == line_id:
-            self.current.text = text  # upgrade: replaced in place
-            return
+            return self.current  # upgrade: replaced in place
         if self.current is None and self.history and self.history[-1].line_id == line_id:
             self.current = self.history.pop()  # reappeared after a short gap: back to the middle
-            self.current.text = text
-            return
-        for line in self.history:
-            if line.line_id == line_id:  # a late upgrade of a line already moved up
-                line.text = text
-                return
-        if self.current is not None:
-            self.history.append(self.current)
-        self.current = WebLine(self._next_key, line_id, text)
-        self._next_key += 1
+            return self.current
+        # A late upgrade of a line already moved up, or None.
+        return next((line for line in self.history if line.line_id == line_id), None)
 
     def clear(self) -> None:
         """The subtitle is gone: its translation moves up with the older ones."""
@@ -57,7 +61,12 @@ class WebFeed:
 
     def snapshot(self) -> dict[str, object]:
         def item(line: WebLine) -> dict[str, object]:
-            return {"key": line.key, "text": line.text}
+            return {
+                "key": line.key,
+                "text": line.text,
+                "speaker": line.speaker,
+                "color": line.speaker_color,
+            }
 
         return {
             "history": [item(line) for line in self.history],

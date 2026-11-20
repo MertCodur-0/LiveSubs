@@ -21,6 +21,8 @@ from dataclasses import dataclass
 class ShownLine:
     translation: str
     original: str
+    speaker: str = ""  # the name the game put in front of the line
+    speaker_color: str = ""  # "#rrggbb" the game draws it in; "" unknown
 
 
 class ShownLines:
@@ -51,8 +53,16 @@ class ShownLines:
             self._leaving.pop(line_id, None)  # back on screen
         self._on_screen = line_ids
 
-    def translated(self, line_id: int, translation: str, original: str, now: float) -> None:
-        self._translations[line_id] = ShownLine(translation, original)
+    def translated(
+        self,
+        line_id: int,
+        translation: str,
+        original: str,
+        now: float,
+        speaker: str = "",
+        speaker_color: str = "",
+    ) -> None:
+        self._translations[line_id] = ShownLine(translation, original, speaker, speaker_color)
         if line_id not in self._on_screen:
             self._leaving[line_id] = now + self.clear_delay_s  # late: show it for a moment
         # Older lines that already left make room for this one.

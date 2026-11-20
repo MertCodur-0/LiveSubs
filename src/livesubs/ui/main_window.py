@@ -1664,31 +1664,39 @@ class MainWindow(QMainWindow):
         if event.repeat:
             shown = self._shown.translation(event.line_id)
             if shown is not None and self._web is not None:
-                self._web.show(event.line_id, shown.translation)
+                self._web.show(event.line_id, shown.translation, shown.speaker, shown.speaker_color)
             return
         row = self._row_for(event.line_id)
         self._set_cells(
             row,
             {
                 0: time.strftime("%H:%M:%S"),
-                1: event.text,
+                1: _named(event.speaker, event.text),
                 2: t("feed.pending"),
                 4: f"{event.ocr_ms:.0f}",
             },
         )
 
     def _on_translated(self, event: SubtitleTranslated) -> None:
-        self._shown.translated(event.line_id, event.translation, event.source, time.monotonic())
+        self._shown.translated(
+            event.line_id,
+            event.translation,
+            event.source,
+            time.monotonic(),
+            event.speaker,
+            event.speaker_color,
+        )
         if not event.cached:
             self._translate_ms.append(event.translate_ms)
             self._show_state(self._state_text)
         row = self._row_for(event.line_id)
         timing = t("feed.cached") if event.cached else f"{event.translate_ms:.0f}"
-        self._set_cells(row, {2: event.translation, 3: event.model, 5: timing})
+        translation = _named(event.speaker, event.translation)
+        self._set_cells(row, {2: translation, 3: event.model, 5: timing})
         self.feed.resizeRowToContents(row)
         self._refresh_overlay()
         if self._web is not None:
-            self._web.show(event.line_id, event.translation)
+            self._web.show(event.line_id, event.translation, event.speaker, event.speaker_color)
 
     def _refresh_overlay(self) -> None:
         """Show the translations of the lines on screen, stacked as in the game."""
@@ -1743,3 +1751,8 @@ class MainWindow(QMainWindow):
         # Qt quits when the last *visible* window closes; this one may be hidden in the tray, or
         # the setup dialog may still be open.
         QCoreApplication.quit()
+
+
+def _named(speaker: str, text: str) -> str:
+    """A feed cell: ``text`` after the name of its speaker, as the game shows it."""
+    return f"{speaker}: {text}" if speaker else text

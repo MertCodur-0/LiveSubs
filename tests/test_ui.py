@@ -44,8 +44,10 @@ from livesubs.core.profiles import (
     MonitorSource,
     OverlayDisplay,
     OverlayPlacement,
+    OverlaySettings,
     Profile,
     ProfileStore,
+    SpeakerStyle,
     VideoDeviceSource,
     VisionSettings,
     WindowSource,
@@ -201,7 +203,7 @@ def test_fitted_overlay_wraps_at_the_english_width(qtbot: QtBot) -> None:
     overlay.place(Rect(0, 0, 1200, 200))
     overlay.fit_to(24, 300)
     overlay.show_text("Kıçını arabaya sok kanka, aynasızlar geliyor!")
-    font, blocks = overlay._layout(overlay.lines, 300, 180)
+    font, blocks, _ = overlay._layout(overlay.lines, 300, 180)
     metrics = QFontMetricsF(font)
     assert len(blocks[0][0]) == 2
     assert all(metrics.horizontalAdvance(line) <= 300 for line in blocks[0][0])
@@ -227,7 +229,7 @@ def test_long_text_shrinks_to_fit(qtbot: QtBot) -> None:
     qtbot.addWidget(overlay)
     overlay.place(Rect(0, 0, 400, 100))
     overlay.show_text("çok " * 60)
-    font, blocks = overlay._layout(overlay.lines, 380, 80)
+    font, blocks, _ = overlay._layout(overlay.lines, 380, 80)
     assert len(blocks) == 1 and len(blocks[0][0]) <= overlay.settings.max_lines
     assert font.pointSizeF() < overlay.settings.font_size_pt
 
@@ -241,11 +243,11 @@ def test_overlay_stacks_lines_and_drops_the_oldest_that_do_not_fit(qtbot: QtBot)
     overlay.place(Rect(0, 0, 900, 200))
     lines = [ShownLine("Polis! Dur!", ""), ShownLine("Araçtan in!", ""), ShownLine("Aptal!", "")]
     overlay.show_lines(lines[:2])
-    font, blocks = overlay._layout(overlay.lines, 880, 180)
+    font, blocks, _ = overlay._layout(overlay.lines, 880, 180)
     assert [b[0] for b in blocks] == [["Polis! Dur!"], ["Araçtan in!"]]
     assert font.pointSizeF() == overlay.settings.font_size_pt  # stacked, not shrunk
     overlay.show_lines(lines)
-    font, blocks = overlay._layout(overlay.lines, 880, 180)
+    font, blocks, _ = overlay._layout(overlay.lines, 880, 180)
     assert [b[0] for b in blocks] == [["Araçtan in!"], ["Aptal!"]]
     assert overlay.text == "Polis! Dur!\nAraçtan in!\nAptal!"
     assert not overlay.grab().isNull()  # paints without errors
@@ -1408,7 +1410,7 @@ class FakeWebServer:
     def stop(self) -> None:
         self.running = False
 
-    def show(self, line_id: int, text: str) -> None:
+    def show(self, line_id: int, text: str, speaker: str = "", speaker_color: str = "") -> None:
         self.calls.append(("show", line_id, text))
 
     def clear(self) -> None:
@@ -1955,3 +1957,46 @@ def test_the_overlay_follows_a_window_that_was_opened_again(
     window._follow()
     assert window.selected_source().window is new
     assert window._source_area() == moved
+
+
+def _colored_pixels(overlay: Overlay, rgb: tuple[int, int, int]) -> int:
+    image = overlay.grab().toImage()
+    count = 0
+    for y in range(0, image.height(), 2):
+        for x in range(0, image.width(), 2):
+            c = image.pixelColor(x, y)
+            if abs(c.red() - rgb[0]) + abs(c.green() - rgb[1]) + abs(c.blue() - rgb[2]) < 40:
+                count += 1
+    return count
+
+
+@pytest.mark.parametrize(
+    ("style", "label", "colored"),
+    [
+        (SpeakerStyle.NAME, "Lucia: Ah, her yerim ağrıyor.", "some"),
+        (SpeakerStyle.LINE, "Lucia: Ah, her yerim ağrıyor.", "most"),
+        (SpeakerStyle.HIDDEN, "Ah, her yerim ağrıyor.", "none"),
+    ],
+)
+def test_the_speaker_is_drawn_in_their_colour(
+    qtbot: QtBot, style: SpeakerStyle, label: str, colored: str
+) -> None:
+    """User (GTA VI): the translation shows the speaker's name in the colour the game gives
+    them, like the game's own subtitles."""
+    settings = OverlaySettings(background=False, shadow=False, speaker_style=style)
+    overlay = Overlay(settings)
+    qtbot.addWidget(overlay)
+    overlay.place(Rect(0, 0, 900, 120))
+    overlay.show_lines([ShownLine("Ah, her yerim ağrıyor.", "", "Lucia", "#84eef8")])
+    _, blocks, _ = overlay._layout(overlay.lines, 880, 110)
+    assert blocks[0][0] == [label]
+    cyan, white = (
+        _colored_pixels(overlay, (0x84, 0xEE, 0xF8)),
+        _colored_pixels(overlay, (255, 255, 255)),
+    )
+    if colored == "none":
+        assert cyan == 0
+    elif colored == "some":
+        assert 0 < cyan < white
+    else:
+        assert cyan > 0 and white < cyan / 10

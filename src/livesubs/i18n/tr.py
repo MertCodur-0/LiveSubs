@@ -80,6 +80,15 @@ STRINGS: dict[str, str] = {
     "appearance.pick_color": "Renk seçin",
     "appearance.max_lines": "En fazla satır",
     "appearance.show_original": "İngilizce aslını altında küçük göster",
+    "appearance.speaker_style": "Konuşmacı adı",
+    "appearance.speaker_style.name": "Adı kendi renginde",
+    "appearance.speaker_style.line": "Tüm satır konuşmacının renginde",
+    "appearance.speaker_style.hidden": "Gösterme",
+    "appearance.speaker_style_tip": (
+        'Oyun konuşanın adını yazıyorsa ("Lucia: ..."), çeviri de adla, oyunun o kişiye '
+        "verdiği renkte gösterilir. Adı olan satırlar varken adsız satırlar (arka plandaki "
+        "insanlar) çevrilmez."
+    ),
     "appearance.clear_delay": "Altyazı bitince ekranda kalma",
     "appearance.preview": "Önizle",
     "appearance.preview_row": "Örnek çeviriyi göster",

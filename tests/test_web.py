@@ -65,8 +65,20 @@ def test_snapshot_keys_are_unique() -> None:
     feed.show(2, "İki")
     state = feed.snapshot()
     assert state == {
-        "history": [{"key": 0, "text": "Bir"}],
-        "current": {"key": 1, "text": "İki"},
+        "history": [{"key": 0, "text": "Bir", "speaker": "", "color": ""}],
+        "current": {"key": 1, "text": "İki", "speaker": "", "color": ""},
+    }
+
+
+def test_lines_carry_their_speaker() -> None:
+    feed = WebFeed()
+    feed.show(1, "Ah, her yerim ağrıyor.", "Lucia", "#84eef8")
+    feed.show(1, "Ah. Her yerim ağrıyor.", "Lucia", "#84eef8")  # an upgrade keeps the name
+    assert feed.snapshot()["current"] == {
+        "key": 0,
+        "text": "Ah. Her yerim ağrıyor.",
+        "speaker": "Lucia",
+        "color": "#84eef8",
     }
 
 

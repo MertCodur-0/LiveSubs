@@ -698,3 +698,95 @@ def test_subtitle_box_is_the_glyphs_on_the_frame() -> None:
     assert w == pytest.approx(292 / 400 * 0.5 - 100 / 400 * 0.5)
     assert h == pytest.approx(20 / 100 * 0.25)
     assert event.glyph_height == pytest.approx(20 / 100 * 0.25)
+
+
+CAL = (176, 166, 244)  # BGR of Cal's name in GTA VI (measured on a recording: #f4a6b0)
+
+
+def _speaking(*rows: tuple[str, str, tuple[int, int, int]]) -> np.ndarray:
+    """A dark 720p frame with (name, sentence, sentence colour) rows stacked at the bottom; the
+    name ("" for none) is drawn pink, as GTA VI draws a speaker's name."""
+    frame = np.full((720, 1280, 3), 30, np.uint8)
+
+    def width(text: str) -> int:
+        return cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 1.1, 2)[0][0]
+
+    for i, (name, text, color) in enumerate(reversed(rows)):
+        label = f"{name}:" if name else ""
+        gap = 10 if name else 0  # a space
+        y = 690 - i * 60
+        x = (1280 - width(label) - gap - width(text)) // 2  # centred, as games do
+        if name:
+            cv2.putText(frame, label, (x, y), cv2.FONT_HERSHEY_SIMPLEX, 1.1, CAL, 2)
+            x += width(label) + gap
+        cv2.putText(frame, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, 1.1, color, 2)
+    return frame
+
+
+def test_named_dialogue_comes_before_background_voices() -> None:
+    """User (GTA VI with speaker names on): when the screen is crowded, translate the lines
+    with a speaker name; the grey lines without one are people in the background, translated
+    only when no named line is beside them. Only the sentence goes to the model; the name and
+    its colour travel with the line."""
+    white, grey = (240, 240, 240), (170, 170, 170)
+    named = ("Cal", "Three beers, right now!", white)
+    background = ("", "Nice weather today.", grey)
+    source = ScriptedSource(
+        [
+            (_speaking(named, background), 1.2),
+            (_speaking(background), 1.2),
+            (_speaking(), 1.0),
+        ]
+    )
+    recorder = Recorder()
+    pipeline = Pipeline(
+        start_command_for(STACK_REGION),
+        recorder,
+        open_source=lambda spec: (source.open(), source)[1],
+        backend_factory=lambda start: UpperCaseBackend(),
+    )
+    run(pipeline, source)
+
+    reads = [(e.line_id, e.speaker, e.text) for e in recorder.of(SubtitleRead)]
+    assert reads == [(1, "Cal", "Three beers, right now!"), (2, "", "Nice weather today.")]
+    translated = recorder.of(SubtitleTranslated)
+    assert [(e.line_id, e.source) for e in translated] == [
+        (1, "Three beers, right now!"),
+        (2, "Nice weather today."),
+    ]
+    color = translated[0].speaker_color
+    r, g, b = (int(color[i : i + 2], 16) for i in (1, 3, 5))
+    assert abs(r - CAL[2]) < 25 and abs(g - CAL[1]) < 25 and abs(b - CAL[0]) < 25
+    first = recorder.events.index(translated[0])
+    second = recorder.events.index(recorder.of(SubtitleRead)[1])
+    screens = [e.line_ids for e in recorder.of(SubtitleLines)]
+    assert screens[0] == (1,)  # the background voice is not shown beside the dialogue
+    assert (2,) in screens
+    assert first < second  # held back until Cal's line left
+
+
+def test_a_speakers_wrapped_rows_are_one_line() -> None:
+    white = (240, 240, 240)
+    source = ScriptedSource(
+        [
+            (
+                _speaking(
+                    ("Cal", "You know, I was meant for more.", white),
+                    ("", "I'm just saying.", white),
+                ),
+                1.2,
+            ),
+            (_speaking(), 1.0),
+        ]
+    )
+    recorder = Recorder()
+    pipeline = Pipeline(
+        start_command_for(STACK_REGION),
+        recorder,
+        open_source=lambda spec: (source.open(), source)[1],
+        backend_factory=lambda start: UpperCaseBackend(),
+    )
+    run(pipeline, source)
+
+    reads = [(e.speaker, e.text) for e in recorder.of(SubtitleRead)]
+    assert reads == [("Cal", "You know, I was meant for more. I'm just saying.")]

@@ -105,9 +105,9 @@ class WebServer:
 
     # --- content (UI thread) ---------------------------------------------------------------------
 
-    def show(self, line_id: int, text: str) -> None:
+    def show(self, line_id: int, text: str, speaker: str = "", speaker_color: str = "") -> None:
         with self._lock:
-            self._feed.show(line_id, text)
+            self._feed.show(line_id, text, speaker, speaker_color)
             self._publish()
 
     def clear(self) -> None:

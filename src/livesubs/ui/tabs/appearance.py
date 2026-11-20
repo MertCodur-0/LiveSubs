@@ -21,7 +21,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from livesubs.core.profiles import OverlayDisplay, OverlayPlacement, OverlaySettings, OverlayStyle
+from livesubs.core.profiles import (
+    OverlayDisplay,
+    OverlayPlacement,
+    OverlaySettings,
+    OverlayStyle,
+    SpeakerStyle,
+)
 from livesubs.i18n import t
 from livesubs.ui.overlay import apply_style
 from livesubs.ui.rows import RowCard
@@ -136,6 +142,19 @@ class AppearanceTab(QWidget):
         self.show_original.toggled.connect(lambda v: self._set("show_original", v))
         text.add_row(t("appearance.show_original"), self.show_original, expand=False)
 
+        self.speaker_style = QComboBox()
+        for style in SpeakerStyle:
+            self.speaker_style.addItem(t(f"appearance.speaker_style.{style}"), style)
+        self.speaker_style.currentIndexChanged.connect(
+            lambda i: self._set("speaker_style", self.speaker_style.itemData(i))
+        )
+        text.add_row(
+            t("appearance.speaker_style"),
+            self.speaker_style,
+            tip=t("appearance.speaker_style_tip"),
+            expand=False,
+        )
+
         timing = RowCard(t("appearance.card.timing"))
         self.clear_delay = QDoubleSpinBox(suffix=" sn", decimals=1, singleStep=0.5)
         self.clear_delay.setRange(0, 10)
@@ -178,6 +197,7 @@ class AppearanceTab(QWidget):
             self.shadow,
             self.max_lines,
             self.show_original,
+            self.speaker_style,
             self.clear_delay,
         )
         for widget in widgets:
@@ -200,6 +220,7 @@ class AppearanceTab(QWidget):
         self.shadow.setChecked(s.shadow)
         self.max_lines.setValue(s.max_lines)
         self.show_original.setChecked(s.show_original)
+        self.speaker_style.setCurrentIndex(self.speaker_style.findData(s.speaker_style))
         self.clear_delay.setValue(s.clear_delay_ms / 1000)
         for widget in widgets:
             widget.blockSignals(False)

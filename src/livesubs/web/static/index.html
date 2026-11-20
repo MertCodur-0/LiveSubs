@@ -121,7 +121,19 @@ function render(next) {
     }
     lines.delete(line.key);
     lines.set(line.key, el);  // keep the map in screen order
-    if (el.textContent !== line.text) el.textContent = line.text;
+    const shown = (line.speaker || "") + "\u0000" + (line.color || "") + "\u0000" + line.text;
+    if (el.dataset.shown !== shown) {
+      el.dataset.shown = shown;
+      el.textContent = "";
+      if (line.speaker) {
+        const name = document.createElement("span");
+        name.className = "speaker";
+        name.textContent = line.speaker + ": ";
+        if (line.color) name.style.color = line.color;
+        el.appendChild(name);
+      }
+      el.appendChild(document.createTextNode(line.text));
+    }
     stack.appendChild(el);
     for (let i = 1; i <= DIM_STEPS; i++) el.classList.toggle(`p${i}`, line.age === i);
     if (line.age > DIM_STEPS) el.classList.add(`p${DIM_STEPS}`);
